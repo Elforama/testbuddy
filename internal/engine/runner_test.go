@@ -14,19 +14,17 @@ import (
 	"github.com/elforama/testbuddy/internal/js"
 )
 
-// New fills in the default budgets and a reporter that drops events.
 func TestNewDefaults(t *testing.T) {
 	r := New(&fakeDriver{}, Options{})
 	if r.opts.LookupTimeout != 17*time.Second || r.opts.OptionalTimeout != 7*time.Second || r.opts.Reporter == nil {
 		t.Errorf("options %+v", r.opts)
 	}
-	r.opts.Reporter.Event(Event{}) // must not panic
+	r.opts.Reporter.Event(Event{})
 	if r.LastScreen() != nil {
 		t.Error("a screen before any read")
 	}
 }
 
-// The error types: FlowError and NotFound are test failures, others are not.
 func TestErrorKinds(t *testing.T) {
 	fe := failf("x %d", 1)
 	if fe.Error() != "x 1" || !isFlowError(fe) {
@@ -44,7 +42,6 @@ func TestErrorKinds(t *testing.T) {
 	}
 }
 
-// The lookup budget shrinks by the time since the last interaction, never below zero.
 func TestAdjustedTimeout(t *testing.T) {
 	r := New(&fakeDriver{}, Options{LookupTimeout: time.Second, OptionalTimeout: 500 * time.Millisecond})
 	r.lastInteraction = time.Now().Add(-700 * time.Millisecond)
@@ -62,16 +59,14 @@ func TestAdjustedTimeout(t *testing.T) {
 	}
 }
 
-// Time spent in commands that do not touch the app counts against the next lookup's budget;
-// an interaction gives it the whole budget again.
 func TestLookupBudgetAfterInteraction(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		between  string
 		min, max time.Duration
 	}{
-		{"", 450 * time.Millisecond, 700 * time.Millisecond},                  // 300 waited + 200 left
-		{"- inputText: x\n", 750 * time.Millisecond, 1200 * time.Millisecond}, // 300 waited + a full 500
+		{"", 450 * time.Millisecond, 700 * time.Millisecond},
+		{"- inputText: x\n", 750 * time.Millisecond, 1200 * time.Millisecond},
 	} {
 		sig := NewSignals()
 		go func() {
@@ -87,8 +82,6 @@ func TestLookupBudgetAfterInteraction(t *testing.T) {
 	}
 }
 
-// Every command is reported when it starts and when it ends, with its depth, status, error
-// and the device's role.
 func TestReporterEvents(t *testing.T) {
 	t.Parallel()
 	rec := &recorder{}
@@ -142,7 +135,6 @@ func TestReporterEvents(t *testing.T) {
 	}
 }
 
-// Begin sets up a flow without running it: -e values, then the flow's env, then the role's.
 func TestBeginAndRunList(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	o := quick
@@ -184,7 +176,6 @@ func TestBeginAndRunList(t *testing.T) {
 	}
 }
 
-// Begin fails on a script error at any stage.
 func TestBeginErrors(t *testing.T) {
 	bad := []flow.KV{{Key: "X", Value: "${(}"}}
 	fl, _ := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\n---\n- back"))
@@ -202,7 +193,6 @@ func TestBeginErrors(t *testing.T) {
 	}
 }
 
-// SetEnv works before anything else ran, and evaluates its values.
 func TestSetEnvFirst(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	r := New(f, quick)
@@ -221,8 +211,6 @@ func TestSetEnvFirst(t *testing.T) {
 	}
 }
 
-// RunCommands runs loose commands with the -e env and the given appId, reporting each step,
-// and stops at the first failure.
 func TestRunCommands(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 0))}
@@ -252,7 +240,6 @@ func TestRunCommands(t *testing.T) {
 	if !reflect.DeepEqual(f.typed, []string{"env"}) {
 		t.Errorf("typed %q", f.typed)
 	}
-	// No onStep: fine too; the env set up before is kept.
 	cmds, _ = flow.ParseCommands(t.TempDir(), []byte("- inputText: ${E}2"))
 	if err := r.RunCommands(context.Background(), cmds, "com.agent", nil); err != nil {
 		t.Fatal(err)
@@ -262,7 +249,6 @@ func TestRunCommands(t *testing.T) {
 	}
 }
 
-// End stops a recording left running, and only then.
 func TestEnd(t *testing.T) {
 	o := quick
 	o.ArtifactsDir = t.TempDir()
@@ -283,7 +269,6 @@ func TestEnd(t *testing.T) {
 	}
 }
 
-// Runners that share a JS engine share `output` (multi-device flows).
 func TestSharedJSEngine(t *testing.T) {
 	e := js.New("android")
 	a := New(&fakeDriver{screen: static()}, Options{JS: e, LookupTimeout: time.Second})
@@ -301,7 +286,6 @@ func TestSharedJSEngine(t *testing.T) {
 	}
 }
 
-// signal and waitForSignal let devices wait for each other.
 func TestSignalCommands(t *testing.T) {
 	t.Parallel()
 	sig := NewSignals()
@@ -326,7 +310,6 @@ func TestSignalCommands(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, o, "- waitForSignal: {name: x, timeout: '${(}'}"), "JavaScript error")
 }
 
-// Signals: raised once for all waiters, raising twice is harmless, waits end on the context.
 func TestSignals(t *testing.T) {
 	s := NewSignals()
 	s.Send("a")
@@ -356,11 +339,10 @@ func TestSignals(t *testing.T) {
 	}
 }
 
-// assertScreenshot compares the screen to a reference next to the flow, within a threshold.
 func TestAssertScreenshot(t *testing.T) {
 	dir := t.TempDir()
 	ref := pngOf(t, 40, 80, colorWhite, imageRect(0, 0, 0, 0), colorRed)
-	half := pngOf(t, 40, 80, colorWhite, imageRect(0, 0, 40, 40), colorBlue) // half differs
+	half := pngOf(t, 40, 80, colorWhite, imageRect(0, 0, 40, 40), colorBlue)
 	writeFile(t, dir, "ref.png", string(ref))
 	writeFile(t, dir, "shots/ref2.png", string(ref))
 	writeFile(t, dir, "broken.png", "not an image")
@@ -382,21 +364,16 @@ func TestAssertScreenshot(t *testing.T) {
 	mustFail(t, run(ref, quick, "assertScreenshot: {path: ref, thresholdPercentage: most}"), `invalid thresholdPercentage "most"`)
 	mustFail(t, run(ref, quick, "assertScreenshot: {path: ref, thresholdPercentage: '${(}'}"), "JavaScript error")
 
-	// Not next to the flow: the artifacts folder's screenshots (takeScreenshot's output).
 	o := quick
 	o.ArtifactsDir = t.TempDir()
 	writeFile(t, o.ArtifactsDir, "takeScreenshot/saved.png", string(ref))
 	mustPass(t, run(ref, o, "assertScreenshot: saved"))
 
-	// A device that cannot take one.
 	f := &fakeDriver{screen: static()}
 	f.fail("Screenshot", errors.New("secure window"))
 	mustFail(t, runSrc(t, f, quick, dir, "appId: app\n---\n- assertScreenshot: ref"), "secure window")
 }
 
-// A reference in another image format (Maestro's e2e assertScreenshotCroppedHEIC.yaml) keeps
-// its name, as Maestro's runner does, so tb finds it rather than look for "ref.heic.png"; it
-// says which formats it reads.
 func TestAssertScreenshotOtherFormats(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "ref.heic", "heic bytes")
@@ -408,11 +385,8 @@ func TestAssertScreenshotOtherFormats(t *testing.T) {
 	}
 }
 
-// assertScreenshot with cropOn compares only the element's part of the screen.
 func TestAssertScreenshotCropOn(t *testing.T) {
 	dir := t.TempDir()
-	// The screen is 400x800 points; the image is 1:1. The logo (top 50 rows) is red; the
-	// rest differs from run to run.
 	logo := pngOf(t, 400, 50, colorRed, imageRect(0, 0, 0, 0), colorRed)
 	writeFile(t, dir, "logo.png", string(logo))
 	shot := pngOf(t, 400, 800, colorBlue, imageRect(0, 0, 400, 50), colorRed)
@@ -421,7 +395,6 @@ func TestAssertScreenshotCropOn(t *testing.T) {
 	mustFail(t, runSrc(t, f, quick, dir, "appId: app\n---\n- assertScreenshot: logo"), "differs from the reference")
 }
 
-// artifactPath: under the command's folder of the artifacts folder, or as given without one.
 func TestArtifactPath(t *testing.T) {
 	dir := t.TempDir()
 	r := New(&fakeDriver{}, Options{ArtifactsDir: dir})
@@ -436,7 +409,6 @@ func TestArtifactPath(t *testing.T) {
 	if p, err := r.artifactPath("takeScreenshot", abs, ".png"); err != nil || p != abs+".png" {
 		t.Errorf("absolute: %q %v", p, err)
 	}
-	// Without an artifacts folder the path is used as given (relative to the working folder).
 	wd := t.TempDir()
 	t.Chdir(wd)
 	r2 := New(&fakeDriver{}, Options{})
@@ -446,7 +418,6 @@ func TestArtifactPath(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wd, "rec")); err != nil {
 		t.Errorf("relative folder not made: %v", err)
 	}
-	// A folder that cannot be made.
 	blocker := writeFile(t, dir, "file", "x")
 	if _, err := r.artifactPath("takeScreenshot", filepath.Join(blocker, "sub", "x"), ".png"); err == nil {
 		t.Error("made a folder inside a file")

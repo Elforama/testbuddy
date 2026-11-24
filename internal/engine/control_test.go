@@ -14,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// runner runs a whole flow on a new runner and returns both, so tests can look inside.
 func runner(t *testing.T, d *fakeDriver, o Options, dir, src string) (*Runner, FlowResult) {
 	t.Helper()
 	fl, err := flow.ParseBytes(dir+"/flow.yaml", []byte(src))
@@ -25,10 +24,8 @@ func runner(t *testing.T, d *fakeDriver, o Options, dir, src string) (*Runner, F
 	return r, r.RunFlow(context.Background(), fl)
 }
 
-// output reads a value the flow's scripts left in `output`.
 func output(r *Runner, k string) string { return fmt.Sprint(r.jsEngine().Output()[k]) }
 
-// onFlowStart runs before the commands and onFlowComplete after; only commands are steps.
 func TestOnFlowStartAndComplete(t *testing.T) {
 	hooks := "appId: app\nonFlowStart:\n  - inputText: start\nonFlowComplete:\n  - inputText: end\n---\n"
 	f := &fakeDriver{screen: static()}
@@ -41,7 +38,6 @@ func TestOnFlowStartAndComplete(t *testing.T) {
 		t.Errorf("result %+v", res)
 	}
 
-	// A failing command: onFlowComplete still runs; the command's error is the flow's.
 	f = &fakeDriver{screen: static()}
 	res = runSrc(t, f, quick, t.TempDir(), hooks+"- assertTrue: \"false\"\n- inputText: skipped")
 	mustFail(t, res, "Assertion is false")
@@ -49,7 +45,6 @@ func TestOnFlowStartAndComplete(t *testing.T) {
 		t.Errorf("typed %q, want %q", f.typed, want)
 	}
 
-	// A failing onFlowStart: no commands, onFlowComplete runs.
 	f = &fakeDriver{screen: static()}
 	res = runSrc(t, f, quick, t.TempDir(), "appId: app\nonFlowStart:\n  - assertTrue: \"false\"\nonFlowComplete:\n  - inputText: end\n---\n- inputText: main")
 	mustFail(t, res, "Assertion is false")
@@ -60,7 +55,6 @@ func TestOnFlowStartAndComplete(t *testing.T) {
 		t.Errorf("steps %+v", res.Steps)
 	}
 
-	// A failing onFlowComplete fails a flow that passed.
 	f = &fakeDriver{screen: static()}
 	res = runSrc(t, f, quick, t.TempDir(), "appId: app\nonFlowComplete:\n  - assertTrue: \"${1 > 2}\"\n---\n- inputText: main")
 	mustFail(t, res, "Assertion is false")
@@ -69,7 +63,6 @@ func TestOnFlowStartAndComplete(t *testing.T) {
 	}
 }
 
-// A cancelled run runs nothing, not even onFlowComplete.
 func TestRunFlowCancelled(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\nonFlowStart:\n  - inputText: start\nonFlowComplete:\n  - inputText: end\n---\n- inputText: main"))
@@ -84,8 +77,6 @@ func TestRunFlowCancelled(t *testing.T) {
 	}
 }
 
-// -e values come first and the flow's env after: the flow's own values win, and
-// ${X || 'default'} keeps a value passed in.
 func TestEnvPrecedence(t *testing.T) {
 	src := "appId: app\nenv:\n  X: ${X || 'dx'}\n  Y: flow\n  Z: ${Z || 'dz'}\n---\n- inputText: ${X}/${Y}/${Z}"
 	f := &fakeDriver{screen: static()}
@@ -102,14 +93,12 @@ func TestEnvPrecedence(t *testing.T) {
 	}
 }
 
-// One env block's values are all evaluated before any is set: siblings don't see each other.
 func TestEnvSiblings(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runSrc(t, f, quick, t.TempDir(), "appId: app\nenv:\n  A: one\n  B: ${A}\n---\n- inputText: ${A}-${B}"))
 	if want := []string{"one-undefined"}; !reflect.DeepEqual(f.typed, want) {
 		t.Errorf("typed %q, want %q", f.typed, want)
 	}
-	// -e values are evaluated too, and the flow's env sees them.
 	f = &fakeDriver{screen: static()}
 	o := quick
 	o.Env = []flow.KV{{Key: "N", Value: "${2*3}"}}
@@ -119,7 +108,6 @@ func TestEnvSiblings(t *testing.T) {
 	}
 }
 
-// A script error in -e values, the flow's env or its appId fails the flow before any command.
 func TestEnvErrors(t *testing.T) {
 	o := quick
 	o.Env = []flow.KV{{Key: "X", Value: "${(}"}}
@@ -137,7 +125,6 @@ func TestEnvErrors(t *testing.T) {
 	}
 }
 
-// The appId is evaluated and is the default for app commands.
 func TestAppIDEvaluated(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	o := quick
@@ -148,7 +135,6 @@ func TestAppIDEvaluated(t *testing.T) {
 	}
 }
 
-// runFlow commands: a nested scope for env; the parent's values come back after.
 func TestRunFlowCommandsEnv(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runSrc(t, f, quick, t.TempDir(), `appId: app
@@ -168,8 +154,6 @@ env:
 	}
 }
 
-// runFlow of a file: the command's env, then the sub-flow's own env (which wins), its
-// onFlowStart and onFlowComplete; nothing leaks back.
 func TestRunFlowFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "sub.yaml", `appId: app
@@ -195,7 +179,6 @@ onFlowComplete:
 	}
 }
 
-// A sub-flow's failure fails runFlow; its onFlowComplete still runs.
 func TestRunFlowFileFails(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "sub.yaml", "appId: app\nonFlowComplete:\n  - inputText: cleanup\n---\n- assertTrue: \"false\"\n- inputText: never")
@@ -221,7 +204,6 @@ func TestRunFlowFileFails(t *testing.T) {
 	mustFail(t, runSrc(t, &fakeDriver{screen: static()}, quick, dir, "appId: app\n---\n- runFlow: {file: sub.yaml, env: {X: '${(}'}}"), "JavaScript error")
 }
 
-// runFlow's when: visible, notVisible, true and platform, alone or together; a false one skips.
 func TestRunFlowWhen(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -261,7 +243,6 @@ func TestRunFlowWhen(t *testing.T) {
 	}
 }
 
-// A when condition that cannot be evaluated fails runFlow.
 func TestRunFlowWhenErrors(t *testing.T) {
 	for _, tc := range []struct{ when, want string }{
 		{"{true: \"${(}\"}", "JavaScript error"},
@@ -279,7 +260,6 @@ func TestRunFlowWhenErrors(t *testing.T) {
 	}
 }
 
-// A runFlow skipped by its condition does not count as an interaction for lookup budgets.
 func TestSkippedRunFlowIsNoInteraction(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -296,7 +276,6 @@ func TestSkippedRunFlowIsNoInteraction(t *testing.T) {
 	}
 }
 
-// repeat runs its commands a number of times (evaluated); zero times is a skip.
 func TestRepeatTimes(t *testing.T) {
 	for _, tc := range []struct {
 		times string
@@ -316,8 +295,6 @@ func TestRepeatTimes(t *testing.T) {
 	}
 }
 
-// issue #41: a times that only becomes known at run time and is not a whole number of 0 or
-// more fails the repeat at once, before its commands run, instead of looping without end.
 func TestRepeatBadTimesFails(t *testing.T) {
 	for _, tc := range []struct{ times, want string }{
 		{`"${'abc'}"`, `invalid times "abc" (from "${'abc'}")`},
@@ -329,7 +306,6 @@ func TestRepeatBadTimesFails(t *testing.T) {
 	} {
 		t.Run(tc.times, func(t *testing.T) {
 			f := &fakeDriver{screen: static()}
-			// The loop must end on its own: a short deadline turns a hang into a clear failure.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			fl, err := flow.ParseBytes(t.TempDir()+"/flow.yaml", []byte("appId: app\n---\n- repeat:\n    times: "+tc.times+"\n    commands:\n      - inputText: x"))
@@ -348,7 +324,6 @@ func TestRepeatBadTimesFails(t *testing.T) {
 	}
 }
 
-// repeat while: the condition is checked before each round; times caps the rounds.
 func TestRepeatWhile(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	r, res := runner(t, f, quick, t.TempDir(), "appId: app\n---\n- repeat:\n    while: {true: \"${(output.n || 0) < 3}\"}\n    commands:\n      - evalScript: ${output.n = (output.n || 0) + 1}")
@@ -356,13 +331,11 @@ func TestRepeatWhile(t *testing.T) {
 	if got := output(r, "n"); got != "3" {
 		t.Errorf("output.n = %s, want 3", got)
 	}
-	// Both: whichever ends first.
 	f = &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- repeat:\n    times: 2\n    while: {true: 'yes'}\n    commands:\n      - inputText: x"))
 	if len(f.typed) != 2 {
 		t.Errorf("times 2 while true: %d runs", len(f.typed))
 	}
-	// False from the start: skipped.
 	f = &fakeDriver{screen: static()}
 	res = runWith(t, f, quick, "- repeat:\n    while: {true: 'false'}\n    commands:\n      - inputText: x")
 	if res.Steps[0].Status != Skipped || len(f.typed) != 0 {
@@ -370,7 +343,6 @@ func TestRepeatWhile(t *testing.T) {
 	}
 }
 
-// repeat while visible: taps until the element goes.
 func TestRepeatWhileVisible(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -389,7 +361,6 @@ func TestRepeatWhileVisible(t *testing.T) {
 	}
 }
 
-// A failure inside repeat stops it and fails it; bad times or while values fail it.
 func TestRepeatErrors(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	r, res := runner(t, f, quick, t.TempDir(), "appId: app\n---\n- repeat:\n    times: 5\n    commands:\n      - evalScript: ${output.n = (output.n || 0) + 1}\n      - assertTrue: ${output.n < 2}")
@@ -401,7 +372,6 @@ func TestRepeatErrors(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- repeat:\n    while: {true: '${(}'}\n    commands:\n      - inputText: x"), "JavaScript error")
 }
 
-// Each repeat round gets a fresh env scope.
 func TestRepeatEnvScope(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- repeat:\n    times: 2\n    commands:\n      - runFlow:\n          env: {X: set}\n          commands:\n            - inputText: ${X}\n      - inputText: ${X}"))
@@ -410,11 +380,10 @@ func TestRepeatEnvScope(t *testing.T) {
 	}
 }
 
-// retry runs its commands again after a test failure, up to maxRetries more times (at most 3).
 func TestRetry(t *testing.T) {
 	for _, tc := range []struct {
 		max      string
-		passOn   int // the attempt that passes (0: never)
+		passOn   int
 		attempts string
 		pass     bool
 	}{
@@ -423,7 +392,7 @@ func TestRetry(t *testing.T) {
 		{"maxRetries: 2", 3, "3", true},
 		{"maxRetries: 10", 0, "4", false},
 		{"maxRetries: \"${0}\"", 0, "1", false},
-		{"maxRetries: \"${0.9}\"", 0, "1", false}, // a fraction is cut, as in repeat
+		{"maxRetries: \"${0.9}\"", 0, "1", false},
 	} {
 		t.Run(tc.max, func(t *testing.T) {
 			f := &fakeDriver{screen: static()}
@@ -445,9 +414,6 @@ func TestRetry(t *testing.T) {
 	}
 }
 
-// issue #42: a maxRetries that only becomes known at run time and is not a whole number of
-// 0 or more fails the retry at once, before its commands run. A negative one passed without
-// running them at all.
 func TestRetryBadMaxRetriesFails(t *testing.T) {
 	for _, tc := range []struct{ max, want string }{
 		{`"${-1}"`, `invalid maxRetries "-1" (from "${-1}")`},
@@ -468,10 +434,6 @@ func TestRetryBadMaxRetriesFails(t *testing.T) {
 	}
 }
 
-// issue #38: retry runs its commands again after a JavaScript error too, as Maestro's retry
-// does after any failing command: a runScript that throws until a backend is ready is the
-// way to poll it. `output` carries across the attempts. The issue's repro: maxRetries 4 (cut
-// to 3), the script throws on attempts 1 and 2.
 func TestRetryScriptError(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "s.js", "var n = (output.n || 0) + 1;\noutput.n = n;\nconsole.log('attempt ' + n);\nif (n < 3) throw 'not yet ' + n;\n")
@@ -489,8 +451,6 @@ func TestRetryScriptError(t *testing.T) {
 		}
 	})
 
-	// Every way a script error reaches the retry is retried, up to maxRetries more times,
-	// and the last attempt's error fails it.
 	writeFile(t, dir, "boom.js", "throw new Error('script broke')")
 	writeFile(t, dir, "nested.yaml", "appId: app\n---\n- evalScript: ${output.n = (output.n || 0) + 1}\n- evalScript: ${nope()}")
 	count := "- evalScript: ${output.n = (output.n || 0) + 1}\n      "
@@ -498,7 +458,7 @@ func TestRetryScriptError(t *testing.T) {
 		"runScript":  count + "- runScript: boom.js",
 		"evalScript": count + "- evalScript: ${nope()}",
 		"throw":      count + "- evalScript: ${(function(){ throw new Error('boom') })()}",
-		"JSON.parse": count + "- evalScript: ${JSON.parse('<html>')}", // a SyntaxError thrown at run time
+		"JSON.parse": count + "- evalScript: ${JSON.parse('<html>')}",
 		"assertTrue": count + "- assertTrue: ${nope()}",
 		"runFlow":    "- runFlow: nested.yaml",
 		"inline":     "- runFlow:\n          commands:\n            - evalScript: ${output.n = (output.n || 0) + 1}\n            - evalScript: ${nope()}",
@@ -513,8 +473,6 @@ func TestRetryScriptError(t *testing.T) {
 	}
 }
 
-// A script that cannot run at all fails a retry at once: a syntax error in it, or a script
-// error in the retry's own maxRetries or env, can never pass on another attempt (issue #38).
 func TestRetrySyntaxErrorNotRetried(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "bad.js", "var n = ;")
@@ -540,7 +498,6 @@ func TestRetrySyntaxErrorNotRetried(t *testing.T) {
 	}
 }
 
-// retry of a file runs the sub-flow's hooks each attempt, with the retry's env.
 func TestRetryFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "flaky.yaml", "appId: app\nenv:\n  S: ${S || 'sd'}\nonFlowStart:\n  - inputText: start-${S}\nonFlowComplete:\n  - inputText: end\n---\n- evalScript: ${output.n = (output.n || 0) + 1}\n- assertTrue: ${output.n >= 2}")
@@ -569,7 +526,6 @@ func TestRetryFile(t *testing.T) {
 	}
 }
 
-// evalScript runs JavaScript for its effects; a script error fails it.
 func TestEvalScript(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	r, res := runner(t, f, quick, t.TempDir(), "appId: app\n---\n- evalScript: ${output.x = 'y'}\n- evalScript: {script: \"${output.z = output.x + '!'}\"}\n- inputText: ${output.z}")
@@ -580,7 +536,6 @@ func TestEvalScript(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- evalScript: ${throw new Error('boom')}"), "boom")
 }
 
-// runScript runs a script file with the env, its own env, and console.log reported.
 func TestRunScript(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "s.js", "output.greeting = GREETING + ' ' + NAME; console.log('ran for', NAME, {a: 1});")
@@ -603,7 +558,6 @@ func TestRunScript(t *testing.T) {
 	if res.Steps[0].Desc != "Run s.js" {
 		t.Errorf("desc %q", res.Steps[0].Desc)
 	}
-	// when: skipped on another platform.
 	r, res = runner(t, &fakeDriver{screen: static()}, quick, dir, "appId: app\n---\n- runScript: {file: s.js, when: {platform: iOS}}")
 	mustPass(t, res)
 	if res.Steps[0].Status != Skipped || len(r.jsEngine().Output()) != 0 {
@@ -614,7 +568,6 @@ func TestRunScript(t *testing.T) {
 	mustFail(t, runSrc(t, &fakeDriver{screen: static()}, quick, dir, "appId: app\n---\n- runScript: {file: s.js, when: {true: '${(}'}}"), "JavaScript error")
 }
 
-// Script errors are fatal: an optional command with a broken ${...} fails, it does not warn.
 func TestJSErrorsAreFatal(t *testing.T) {
 	for _, cmd := range []string{
 		`- tapOn: {text: "${nope(}", optional: true}`,
@@ -638,7 +591,6 @@ func TestJSErrorsAreFatal(t *testing.T) {
 	}
 }
 
-// Selector-level optional makes the command optional too.
 func TestSelectorOptional(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -647,13 +599,11 @@ func TestSelectorOptional(t *testing.T) {
 	if got := stepStatuses(res); !reflect.DeepEqual(got, []Status{Warned, Warned, Warned}) {
 		t.Errorf("statuses %v", got)
 	}
-	// A non-test failure (the device erred) is not downgraded.
 	f2 := &fakeDriver{screen: static(btn("Go", "go", 0))}
 	f2.fail("Tap", errors.New("agent crashed"))
 	mustFail(t, runWith(t, f2, quick, "- tapOn: {id: go, optional: true}"), "agent crashed")
 }
 
-// selOptional looks at the selector and at swipe's from.
 func TestSelOptional(t *testing.T) {
 	for _, tc := range []struct {
 		c    *flow.Command
@@ -671,7 +621,6 @@ func TestSelOptional(t *testing.T) {
 	}
 }
 
-// dirOf is a script's folder, "." for a bare name.
 func TestDirOf(t *testing.T) {
 	for in, want := range map[string]string{"/a/b/c.js": "/a/b", "c.js": ".", "a/c.js": "a"} {
 		if got := dirOf(in); got != want {

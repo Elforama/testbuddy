@@ -19,10 +19,6 @@ type screenSnapshot struct {
 	context string
 }
 
-// historyContext deliberately errs toward forgetting. Window changes, headers changing,
-// dialogs and keyboard transitions separate histories. Content inside a scroll container
-// may move; labels outside it identify the surrounding screen. Identical-looking routes
-// cannot be distinguished without app-provided navigation identity.
 func historyContext(s *ui.Screen) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s:%dx%d:%t|", s.Platform, s.Width, s.Height, s.Keyboard)
@@ -32,7 +28,6 @@ func historyContext(s *ui.Screen) string {
 	return b.String() + appContext(s)
 }
 
-// appLabels: appContext's entries, as a set.
 func appLabels(s *ui.Screen) map[string]bool {
 	out := map[string]bool{}
 	for _, e := range appEntries(s) {
@@ -41,8 +36,6 @@ func appLabels(s *ui.Screen) map[string]bool {
 	return out
 }
 
-// appContext: the labels outside scroll containers in app windows, historyContext's part
-// that names the screen.
 func appContext(s *ui.Screen) string {
 	var b strings.Builder
 	for _, e := range appEntries(s) {
@@ -52,8 +45,6 @@ func appContext(s *ui.Screen) string {
 	return b.String()
 }
 
-// appEntries: each app-window node outside scroll containers with an id or a label, as
-// kind, id and label, in tree order.
 func appEntries(s *ui.Screen) []string {
 	var out []string
 	for _, n := range s.Nodes {
@@ -71,7 +62,6 @@ func appEntries(s *ui.Screen) []string {
 	return out
 }
 
-// Own the snapshot: drivers and subsequent Link calls must not mutate our history.
 func copyScreen(s *ui.Screen) *ui.Screen {
 	out := *s
 	out.Nodes = nil
@@ -100,7 +90,6 @@ func copyScreen(s *ui.Screen) *ui.Screen {
 	return &out
 }
 
-// Called under Runner.mu, only for actual device reads (not cache hits).
 func (r *Runner) rememberScreen(s *ui.Screen) {
 	now := time.Now()
 	r.noteContext(s)
@@ -129,9 +118,6 @@ func (r *Runner) rememberScreen(s *ui.Screen) {
 
 func (r *Runner) forgetHistory() { r.mu.Lock(); r.history = nil; r.mu.Unlock() }
 
-// History only suggests a search direction, never an input coordinate. Require a unique
-// ID-selected target and a single surviving scroll container; don't reinterpret CSS or
-// positional selectors against old trees, and don't guess between multiple lists.
 func (r *Runner) previouslySeen(sel *match.Selector, now *ui.Screen) (*ui.Node, *ui.Screen, string) {
 	if now == nil || sel.ID == "" || sel.Index != "" {
 		return nil, nil, ""
@@ -180,8 +166,6 @@ func (r *Runner) previouslySeen(sel *match.Selector, now *ui.Screen) (*ui.Node, 
 	return nil, nil, ""
 }
 
-// Bounds may have been clipped before the scroll. Match identity and container instead
-// of size, and never accept the same ID with a different label/action.
 func sameRecoveredTarget(was *ui.Node, before *ui.Screen, n *ui.Node, now *ui.Screen) bool {
 	if was == nil || n == nil || was.ID != n.ID || was.Class != n.Class || was.Label() != n.Label() {
 		return false

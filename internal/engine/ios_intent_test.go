@@ -69,11 +69,6 @@ func (d *guardedButtonDriver) Tap(ctx context.Context, x, y int, o driver.Action
 	return out, nil
 }
 
-// A proven non-delivery may be re-aimed once. An ambiguous completed gesture
-// cannot take the implicit swallowed-tap retry, and a confirmed action cannot
-// take even the flow's no-change retry. A touch withheld because its point was off the target
-// is re-aimed in and out of CI mode alike (only one withheld for a target that moved after the
-// agent read it is a CI allowance: TestIOSTapOnATargetThatNeverStopsMoving).
 func TestGuardedIOSTapReplay(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -122,11 +117,9 @@ func testGuardedIOSTapReplay(t *testing.T) {
 	}
 }
 
-// tickerDriver: a button that never stops moving. The probe withholds every touch that must find
-// it where the agent read it (issue #103), and takes one that only needs the point on it.
 type tickerDriver struct {
 	*fakeDriver
-	moving []bool // Target.Moving of each tap
+	moving []bool
 }
 
 func (d *tickerDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -140,10 +133,6 @@ func (d *tickerDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (
 	return driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}, nil
 }
 
-// Issue #103: the first touch must find the target still. In CI mode, after one withheld for
-// that, the target is found again (once at rest, or after restWait), and that touch only needs
-// the point on it, so a ticker stays tappable. Outside CI there is no second touch: the step
-// fails and says the target was moving, never passing on a touch that did not reach the app.
 func TestIOSTapOnATargetThatNeverStopsMoving(t *testing.T) {
 	run := func(t *testing.T) (*tickerDriver, error) {
 		d := &tickerDriver{fakeDriver: &fakeDriver{plat: "ios"}}
@@ -201,8 +190,6 @@ func (d *observedButtonDriver) Tap(ctx context.Context, x, y int, o driver.Actio
 	return result, nil
 }
 
-// A witnessed touch can use a still-visible second button without waiting for
-// unrelated events. A touch without a receipt can still be presenting a cover.
 func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
 	for _, tc := range []struct {
 		name                                string
@@ -247,9 +234,6 @@ func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
 	}
 }
 
-// cancellingDriver: a dialog whose "Discard" button acts only on a touch that ends normally. The
-// first `cancels` touches on it reach the app on the button and end cancelled (the probe's
-// receipt says so): the press shows (the screen changes), and the button does not act.
 type cancellingDriver struct {
 	*fakeDriver
 	cancels   int
@@ -271,17 +255,13 @@ func (d *cancellingDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpt
 	return driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}, nil
 }
 
-// Issue #131: a touch on a dialog's button ended cancelled, so the button did not act, yet the
-// tap counted as done because the screen changed (the press showed). A cancelled touch is no
-// tap: in CI mode the target is found again and tapped again, a bounded number of times; outside
-// CI the step fails at the first cancelled touch and says so.
 func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		ci      bool
 		cancels int
 		touches int
-		fail    string // "" passes
+		fail    string
 	}{
 		{"not cancelled", true, 0, 1, ""},
 		{"cancelled once", true, 1, 2, ""},
@@ -316,9 +296,6 @@ func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
 	}
 }
 
-// preflightDriver: the agent's own check before the touch withholds every tap on the button
-// (issue #39: a button inside another button, which its search never reached), while the
-// button stays where the host read it.
 type preflightDriver struct {
 	*fakeDriver
 	why   string
@@ -334,8 +311,6 @@ func (d *preflightDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts
 	return driver.ActionResult{Withheld: "preflight", WithheldWhy: d.why, LiveFrame: d.live, Guarded: true, Probed: true}, nil
 }
 
-// Issue #39: a tap by id withheld twice by the agent's check before the touch, on a screen where
-// nothing moved, failed saying "target still moving". It must say what the check found instead.
 func TestIOSTapWithheldBeforeTheTouchSaysWhy(t *testing.T) {
 	bounds := ui.Rect{L: 32, T: 330, R: 152, B: 364}
 	for _, tc := range []struct {

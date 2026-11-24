@@ -12,13 +12,8 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// bouncingEnd makes f's list (scroller, at its end) behave as an iOS list does when dragged
-// past its end: the drag pulls the content along (rubber band), it springs back to where it
-// was, and settles there or a point off it (rounding of the spring's last frame), alternately.
-// The list's offset never changes. sprung is how long after the drag the spring back ends; settle, when nonzero, how long after the drag the final point shows (else it
-// shows on the next WaitSettled, as the settled screen).
 func bouncingEnd(f *fakeDriver, sprung, settle time.Duration) {
-	var pull, last atomic.Int64 // the rubber band's pull, and the settled point's offset
+	var pull, last atomic.Int64
 	var mu sync.Mutex
 	var pending func()
 	rows := f.screen
@@ -34,10 +29,9 @@ func bouncingEnd(f *fakeDriver, sprung, settle time.Duration) {
 	move := f.onSwipe
 	drags := 0
 	f.onSwipe = func(x1, y1, x2, y2 int) {
-		move(x1, y1, x2, y2) // at its end: the offset stays
+		move(x1, y1, x2, y2)
 		drags++
 		final := int64(drags % 2)
-		// Springs back frame by frame (never still until it is back), over sprung.
 		pull.Store(40)
 		f.change(true)
 		for i := 1; i <= 8; i++ {
@@ -68,30 +62,22 @@ func bouncingEnd(f *fakeDriver, sprung, settle time.Duration) {
 	}
 }
 
-// Issue #377: on iOS a centering drag on a list at its end springs back to where it was, or a
-// point off it, and its touches are often reported unconfirmed. Once the scroll has decided
-// that the element is fully visible and its list cannot move farther, it ends: no more drags
-// (before, the settled screen a point off undid the stop, and up to 4 more drags went, 2-4 s).
-// A point off is not a move either: the stop comes after the first centering drag.
 func TestScrollCenterStopEndsScroll(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	for _, tc := range []struct {
 		name           string
 		sprung, settle time.Duration
 	}{
-		// The spring back shows before the 500 ms look; the last point once the screen settles.
-		// Both well before it (review of #377: timers racing the look flake under load).
 		{"point off once settled", 150 * time.Millisecond, 0},
-		// The last point shows before the 500 ms look.
 		{"point off before the look", 80 * time.Millisecond, 150 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeDriver{plat: "ios"}
-			f.scroller(30, false, 800) // at its end: Item 27 at 650-700, whole, off-center
+			f.scroller(30, false, 800)
 			bouncingEnd(f, tc.sprung, tc.settle)
 			l := &swipeLog{
 				fakeDriver:  f,
-				slow:        func(int) time.Duration { return 500 * time.Millisecond }, // an iOS drag's send
+				slow:        func(int) time.Duration { return 500 * time.Millisecond },
 				unconfirmed: func(int) bool { return true },
 			}
 			res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 27, centerElement: true, timeout: 15000}")
@@ -109,10 +95,6 @@ func TestScrollCenterStopEndsScroll(t *testing.T) {
 	}
 }
 
-// Issue #377, CI mode: a centering drag the app provably did not get (#111) is sent again at
-// the stop, but at most once per stop: the drag sent again that moves nothing either ends the
-// scroll. A centering drag that moves the element starts a new stop, with its own resend: a
-// centering of several drags, two of them undelivered, is not stopped short (review of #377).
 func TestScrollCenterStopResendsOnce(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	t.Run("at its end", func(t *testing.T) {
@@ -138,13 +120,13 @@ func TestScrollCenterStopResendsOnce(t *testing.T) {
 	})
 	t.Run("two stops", func(t *testing.T) {
 		f := &fakeDriver{plat: "ios"}
-		off, _ := f.scroller(60, false, 0) // Item 13 at 750-800: whole, far below the middle
+		off, _ := f.scroller(60, false, 0)
 		move := f.onSwipe
-		f.onSwipe = func(x1, y1, x2, y2 int) { move(x1, y1, x2, y1+(y2-y1)/2) } // the list follows half the drag
+		f.onSwipe = func(x1, y1, x2, y2 int) { move(x1, y1, x2, y1+(y2-y1)/2) }
 		odd := func(n int) bool { return n%2 == 1 }
 		l := &swipeLog{
 			fakeDriver:  f,
-			dropped:     odd, // drags 1 and 3 never reach the app; their resends do
+			dropped:     odd,
 			unconfirmed: odd,
 			verdict: func(n int) string {
 				if odd(n) {
@@ -164,14 +146,10 @@ func TestScrollCenterStopResendsOnce(t *testing.T) {
 	})
 }
 
-// Review of #377: a stop judged on a look the app had not caught up with (its touches queued,
-// slow to show the drag) does not hold once the element moves: centering goes on and ends with
-// the element centered. Here the drag shows only once the screen settles, and moves the list a
-// fifth of the way.
 func TestScrollCenterStopUndoneByLateMove(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	f := &fakeDriver{plat: "ios"}
-	off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
+	off, _ := f.scroller(60, false, 300)
 	move := f.onSwipe
 	var mu sync.Mutex
 	var pending func()
@@ -182,7 +160,7 @@ func TestScrollCenterStopUndoneByLateMove(t *testing.T) {
 			move(x1, y1, x2, y2)
 			return
 		}
-		move(x1, y1, x1, y1+1) // the touch-down nudges the list a point: within the slack
+		move(x1, y1, x1, y1+1)
 		mu.Lock()
 		pending = func() { move(x1, y1, x2, y1+(y2-y1)/5) }
 		mu.Unlock()

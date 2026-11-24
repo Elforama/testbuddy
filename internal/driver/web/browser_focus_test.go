@@ -12,10 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #311: taps whose only effect is focus. A field that already has the focus, a focusable
-// element tapped again, and a field focused from another in the same shadow root (focusin
-// does not leave a shadow root when focus moves within it) change nothing page.js reports,
-// and waited out the 500 ms no-change window.
 const focusPage311 = `<!doctype html><html><body style="margin:0">
 <input id="first" style="position:absolute;left:10px;top:10px;width:200px;height:30px">
 <div id="host" style="position:absolute;left:10px;top:60px;width:300px;height:30px"></div>
@@ -87,20 +83,17 @@ func TestFocusOnlyTapsInChrome(t *testing.T) {
 
 	tap(110, 25)
 	fast("a field that already has the focus", tap(110, 25), "first")
-	tap(25, 75) // the switch in the shadow root
+	tap(25, 75)
 	fast("a field focused from another in its shadow root", tap(160, 75), "sf")
 	fast("the shadow root's field tapped again", tap(160, 75), "sf")
 	tap(110, 125)
 	fast("a focusable element tapped again", tap(110, 125), "fd")
 
-	// A tap that changes nothing, focus included, is silent: it still waits out the window.
 	tap(110, 175)
 	if r := tap(110, 175); r.Settle != driver.NoChange || r.SettleMs < 450 {
 		t.Errorf("a silent tap: %s after %d ms; want no change after the window", r.Settle, r.SettleMs)
 	}
 
-	// Reliability: the focused combo box's tap ends at once, and its list, which closes 200 ms
-	// later, is waited for before the next step reads the page.
 	tap(110, 225)
 	d.WaitSettled(ctx, 3*time.Second)
 	var open bool
@@ -113,8 +106,6 @@ func TestFocusOnlyTapsInChrome(t *testing.T) {
 		t.Error("the next step would read the page before the combo box's list closed")
 	}
 
-	// A focused button tapped again is tapped for its action, not for focus: its late
-	// reaction is still waited for, as before.
 	tap(350, 25)
 	var sent string
 	for deadline := time.Now().Add(3 * time.Second); sent != "1" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
@@ -129,7 +120,6 @@ func TestFocusOnlyTapsInChrome(t *testing.T) {
 	}
 }
 
-// openFocusPage serves html and opens it in a headless Chrome of the test's own.
 func openFocusPage(t *testing.T, html string) (*Driver, context.Context) {
 	t.Helper()
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
@@ -160,9 +150,6 @@ type lateCase struct {
 	x, y int
 }
 
-// checkLateEffects taps each case's element (to focus it), waits for its effect, then taps it
-// again and reads the page as the next step would (after the tap's settle: assertNotVisible,
-// copyTextFrom): the second tap's effect must be there.
 func checkLateEffects(t *testing.T, d *Driver, ctx context.Context, cases []lateCase) {
 	t.Helper()
 	out := func() string {
@@ -173,7 +160,7 @@ func checkLateEffects(t *testing.T, d *Driver, ctx context.Context, cases []late
 	for _, c := range cases {
 		for _, react := range []bool{true, false} {
 			d.Tap(ctx, c.x, c.y, driver.ActionOpts{})
-			time.Sleep(700 * time.Millisecond) // the first tap's own effect
+			time.Sleep(700 * time.Millisecond)
 			d.WaitSettled(ctx, 3*time.Second)
 			before := out()
 			r, err := d.Tap(ctx, c.x, c.y, driver.ActionOpts{React: react})
@@ -188,10 +175,6 @@ func checkLateEffects(t *testing.T, d *Driver, ctx context.Context, cases []late
 	}
 }
 
-// Issue #311, review: a focused field tapped again whose click handler changes the page about
-// 120 ms later through something page.js does not track (requestAnimationFrame, a worker's
-// reply, a MessageChannel chain). Before #311 the 500 ms no-change window covered it; the
-// focus reaction's quiet floor must still cover it.
 const lateUntrackedPage = `<!doctype html><html><body style="margin:0">
 <input id="raf" style="position:absolute;left:10px;top:10px;width:200px;height:30px">
 <input id="wk" style="position:absolute;left:10px;top:60px;width:200px;height:30px">
@@ -221,9 +204,6 @@ func TestFocusTapLateUntrackedInChrome(t *testing.T) {
 	checkLateEffects(t, d, ctx, []lateCase{{"requestAnimationFrame", 110, 25}, {"worker", 110, 75}, {"MessageChannel", 110, 125}})
 }
 
-// Issue #311, review: a button in a custom element's closed shadow root has the focus as its
-// host (document.activeElement), which looks like a focusable element that is no control. It
-// is tapped for its action, which comes 300 ms later (a worker's reply): still waited for.
 const closedShadowPage = `<!doctype html><html><body style="margin:0">
 <x-send style="position:absolute;left:10px;top:10px;width:200px;height:30px;display:block"></x-send>
 <div id="out" style="position:absolute;left:300px;top:10px">0</div>

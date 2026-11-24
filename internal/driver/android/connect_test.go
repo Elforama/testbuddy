@@ -1,9 +1,5 @@
 package android
 
-// Agent start-up and reconnection, against the fake agent and a stub adb (see fakes_test.go):
-// the port forwards, pushing and starting the agent, clearing a leftover driver, and the
-// reconnect after the adb link drops.
-
 import (
 	"bytes"
 	"context"
@@ -28,7 +24,6 @@ func forwardLine(port int) string {
 	return fmt.Sprintf("other-serial tcp:1 localabstract:testbuddy-agent\n%s tcp:%d localabstract:testbuddy-agent\n%s tcp:2 tcp:8080\n", testSerial, port, testSerial)
 }
 
-// An agent of this build behind an existing forward is reused at once: no forward, push or start.
 func TestConnectReusesExistingForward(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -46,7 +41,6 @@ func TestConnectReusesExistingForward(t *testing.T) {
 	}
 }
 
-// Open connects through a new forward when none exists, and the driver is ready to use.
 func TestOpenWithNewForward(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -69,7 +63,6 @@ func TestOpenWithNewForward(t *testing.T) {
 	}
 }
 
-// An agent of another build is replaced: the APK is pushed under its hash and started with app_process.
 func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -106,7 +99,7 @@ func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 	}
 	prep := shells[0][3]
 	for _, want := range []string{"ls " + remoteAPK() + " 2>/dev/null", killAgent, "kill -9 $left",
-		"remove-test-provider $p; done; rm -f /data/local/tmp/tb-location-providers", // issue #72
+		"remove-test-provider $p; done; rm -f /data/local/tmp/tb-location-providers",
 		`for f in /data/local/tmp/tb-agent-*.apk; do [ "$f" != "` + remoteAPK() + `" ] && rm -f "$f"; done; true`} {
 		if !strings.Contains(prep, want) {
 			t.Errorf("prepare command lacks %q:\n%s", want, prep)
@@ -130,7 +123,6 @@ func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 	}
 }
 
-// With this build already on the device nothing is pushed; NoopService is installed and enabled before the start.
 func TestConnectStartWithoutPushAndWithNoopService(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "")
 	a := newFakeAgent(t)
@@ -173,7 +165,6 @@ func TestConnectStartWithoutPushAndWithNoopService(t *testing.T) {
 	}
 }
 
-// When the agent does not come up, the error names the device and quotes the agent's log.
 func TestConnectFailureQuotesLog(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -200,7 +191,6 @@ func TestConnectFailureQuotesLog(t *testing.T) {
 	}
 }
 
-// Without a forward the start-up fails with adb's error.
 func TestConnectForwardFails(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	s := stubADB(t, []stubRule{{match: "forward tcp:0", out: "error: device offline", code: 1}})
@@ -214,7 +204,6 @@ func TestConnectForwardFails(t *testing.T) {
 	}
 }
 
-// A forward that prints no port is an error too.
 func TestForwardWithoutPort(t *testing.T) {
 	s := stubADB(t, []stubRule{{match: "forward tcp:0", out: "garbage"}, {match: " push ", out: "fail", code: 1}})
 	d := s.driver()
@@ -223,8 +212,6 @@ func TestForwardWithoutPort(t *testing.T) {
 	}
 }
 
-// "already registered" in the log means another UiAutomation client (Maestro's driver) holds the
-// slot: it is stopped and the connection retried once.
 func TestConnectStopsLeftoverDriverAndRetries(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -259,7 +246,6 @@ func TestConnectStopsLeftoverDriverAndRetries(t *testing.T) {
 	}
 }
 
-// The retry after a cleanup happens once: a second failure is reported.
 func TestConnectRetriesOnlyOnce(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -285,7 +271,6 @@ func TestConnectRetriesOnlyOnce(t *testing.T) {
 	}
 }
 
-// stopLeftoverDriver leaves Maestro's driver alone while Maestro runs here, and does nothing when none runs on the device.
 func TestStopLeftoverDriver(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -321,8 +306,6 @@ func TestStopLeftoverDriver(t *testing.T) {
 	}
 }
 
-// When the adb link drops, the pump reconnects through the forward to the still-running agent; the
-// counter carries on past the old one and no "disconnected" reaches subscribers.
 func TestReconnectAfterDrop(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -363,8 +346,6 @@ func TestReconnectAfterDrop(t *testing.T) {
 	}
 }
 
-// A reconnect (adopt, on the pump goroutine) rewrites the port and size while other
-// goroutines read them (Size): they are locked. Run with -race to check.
 func TestReconnectSizeIsSynchronized(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -384,7 +365,6 @@ func TestReconnectSizeIsSynchronized(t *testing.T) {
 	d.Size()
 }
 
-// A request whose connection already dropped reconnects and is sent once more on the new one.
 func TestCallRetriesAfterDrop(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -395,12 +375,11 @@ func TestCallRetriesAfterDrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.connP.Store(c1) // no pump: only the request notices the drop
+	d.connP.Store(c1)
 	defer d.Close()
 	a1.dropConns()
 	<-c1.Done()
 	r, err := d.Tap(ctxT(t), 3, 4, driver.ActionOpts{})
-	// 3: the reconnect moves the count past everything seen (base 1), then the agent's 2.
 	if err != nil || r.Settle != driver.NoChange || r.Seq != 3 {
 		t.Fatalf("Tap = %+v, %v", r, err)
 	}
@@ -409,7 +388,6 @@ func TestCallRetriesAfterDrop(t *testing.T) {
 	}
 }
 
-// A request in flight when the link drops is retried on the new connection.
 func TestCallRetriesWhenDroppedInFlight(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	for i := 0; i < 3; i++ {
@@ -425,24 +403,19 @@ func TestCallRetriesWhenDroppedInFlight(t *testing.T) {
 		d.connP.Store(c1)
 		r, err := d.Tap(ctxT(t), 3, 4, driver.ActionOpts{})
 		d.Close()
-		// 10: the reconnect moves the count past everything seen (base 1), then the agent's 9.
 		if err != nil || r.Seq != 10 {
 			t.Fatalf("run %d: Tap = %+v, %v", i, r, err)
 		}
 	}
 }
 
-// The new connection drops while adopt enables the accessibility service (issue #67): adopt
-// used to send that command through d.call, which on a drop called reconnect again on the same
-// goroutine and blocked on connMu forever, past the tap's own deadline. The drop must fail only
-// that attempt; the next one reconnects and the tap goes through.
 func TestReconnectSurvivesDropDuringAdopt(t *testing.T) {
-	t.Setenv("TB_NO_A11Y_SERVICE", "") // the accessibility-service step on, as by default
+	t.Setenv("TB_NO_A11Y_SERVICE", "")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
 	var shs atomic.Int32
 	a2.on("sh", func(map[string]any) map[string]any {
 		if shs.Add(1) == 1 {
-			a2.dropConns() // the link flaps again, during adopt's command
+			a2.dropConns()
 			return noReply
 		}
 		return map[string]any{"code": 0, "out": ""}
@@ -454,7 +427,7 @@ func TestReconnectSurvivesDropDuringAdopt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.connP.Store(c1) // no pump: only the tap notices the drop
+	d.connP.Store(c1)
 	defer d.Close()
 	a1.dropConns()
 	<-c1.Done()
@@ -486,7 +459,6 @@ func TestReconnectSurvivesDropDuringAdopt(t *testing.T) {
 	}
 }
 
-// A failed reconnect is reported with the request's error.
 func TestCallReportsFailedReconnect(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1 := newFakeAgent(t)
@@ -515,8 +487,6 @@ func TestCallReportsFailedReconnect(t *testing.T) {
 	}
 }
 
-// Once reconnecting gives up ("disconnected"), Lost says so, so a run that keeps drivers
-// between flows opens the device again instead of reusing this one (issue #54).
 func TestLostAfterReconnectGivesUp(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
@@ -545,7 +515,6 @@ func TestLostAfterReconnectGivesUp(t *testing.T) {
 	}
 }
 
-// SetLocation on an emulator sends a geo fix (longitude first).
 func TestSetLocationEmulator(t *testing.T) {
 	s := stubADB(t, nil)
 	d := s.driver()
@@ -561,7 +530,6 @@ func TestSetLocationEmulator(t *testing.T) {
 	}
 }
 
-// stubbedDriver connects to the fake agent with the stub adb behind the driver.
 func stubbedDriver(t *testing.T, s *adbStub, a *fakeAgent) *Driver {
 	t.Helper()
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
@@ -575,7 +543,6 @@ func stubbedDriver(t *testing.T, s *adbStub, a *fakeAgent) *Driver {
 	return d
 }
 
-// AddMedia pushes each file to /sdcard/Pictures and asks the media scanner to index it.
 func TestAddMedia(t *testing.T) {
 	a := newFakeAgent(t)
 	s := stubADB(t, nil)
@@ -600,7 +567,6 @@ func TestAddMedia(t *testing.T) {
 	}
 }
 
-// InstallApp installs with -r (replace) and -g (grant runtime permissions).
 func TestInstallApp(t *testing.T) {
 	s := stubADB(t, nil)
 	d := s.driver()
@@ -616,8 +582,6 @@ func TestInstallApp(t *testing.T) {
 	}
 }
 
-// recordingAgent answers the recording's shell commands: whether screenrecord can record
-// without its cap, and which part files the device holds.
 func recordingAgent(t *testing.T, unlimited bool, files string) *fakeAgent {
 	a := newFakeAgent(t)
 	a.on("sh", func(r map[string]any) map[string]any {
@@ -635,9 +599,6 @@ func recordingAgent(t *testing.T, unlimited bool, files string) *fakeAgent {
 	return a
 }
 
-// Recording runs screenrecord with no time limit where it allows one, returns once it
-// encodes, stops it with SIGINT on the device (after the stop file), pulls the file and
-// removes it.
 func TestRecording(t *testing.T) {
 	a := recordingAgent(t, true, "/sdcard/tb-recording-1.mp4\n")
 	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Configuring recorder\nContent area is 1080x2400 at offset x=0 y=0"}})
@@ -673,8 +634,6 @@ func TestRecording(t *testing.T) {
 	}
 }
 
-// Where screenrecord stops at 3 minutes, parts follow one another until the stop file, and
-// each is pulled, in order, next to the first.
 func TestRecordingInParts(t *testing.T) {
 	a := recordingAgent(t, false, "/sdcard/tb-recording-10.mp4 /sdcard/tb-recording-2.mp4\n/sdcard/tb-recording-1.mp4\n")
 	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Content area is 1080x2400 at offset x=0 y=0"}})
@@ -703,8 +662,6 @@ func TestRecordingInParts(t *testing.T) {
 	}
 }
 
-// A screenrecord that ends before it encodes fails the start with what it said; one that
-// saved nothing fails the stop; a failed pull is reported. The recording is over each time.
 func TestRecordingFailures(t *testing.T) {
 	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "ERROR: unable to get output buffers", code: 1}})
 	d := stubbedDriver(t, s, recordingAgent(t, true, ""))
@@ -738,7 +695,6 @@ func TestRecordingFailures(t *testing.T) {
 	}
 }
 
-// Open reports a device whose agent cannot be started.
 func TestOpenFails(t *testing.T) {
 	stubADB(t, []stubRule{{match: "forward tcp:0", out: "error: no devices", code: 1}, {match: " push ", out: "error: no devices", code: 1}})
 	d, err := Open(ctxT(t), device.Info{Platform: device.Android, Serial: testSerial})
@@ -747,7 +703,6 @@ func TestOpenFails(t *testing.T) {
 	}
 }
 
-// startAgent fails cleanly when the APK cannot be written to a temporary file.
 func TestStartAgentWithoutTempDir(t *testing.T) {
 	s := stubADB(t, nil)
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
@@ -759,7 +714,6 @@ func TestStartAgentWithoutTempDir(t *testing.T) {
 	}
 }
 
-// A failing start command is reported.
 func TestStartAgentStartFails(t *testing.T) {
 	s := stubADB(t, []stubRule{{match: "app_process", out: "error: closed", code: 1}})
 	if err := s.driver().startAgent(ctxT(t)); err == nil || !strings.Contains(err.Error(), "error: closed") {
@@ -767,7 +721,6 @@ func TestStartAgentStartFails(t *testing.T) {
 	}
 }
 
-// An agent that greets the moment it accepts must still be seen by wire.Dial.
 func TestDialSeesImmediateHello(t *testing.T) {
 	a := newFakeAgent(t)
 	for i := 0; i < 3000; i++ {
@@ -779,7 +732,6 @@ func TestDialSeesImmediateHello(t *testing.T) {
 	}
 }
 
-// Dark mode is the system's night mode.
 func TestDarkMode(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("sh", func(req map[string]any) map[string]any {
@@ -803,8 +755,6 @@ func TestDarkMode(t *testing.T) {
 	}
 }
 
-// A device-changing request carries a token, the same one when it is sent again after a drop
-// (the agent answers a repeat from the first run: a tap is not tapped twice). Reads carry none.
 func TestRequestTokens(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -842,8 +792,6 @@ func TestRequestTokens(t *testing.T) {
 	}
 }
 
-// A device that is gone for a few seconds (an emulator offline under load) is waited for:
-// reconnecting keeps trying, past the old three quick attempts.
 func TestReconnectWaitsForTheDevice(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -862,7 +810,7 @@ func TestReconnectWaitsForTheDevice(t *testing.T) {
 	a1.dropConns()
 	<-c1.Done()
 	go func() {
-		time.Sleep(3500 * time.Millisecond) // longer than the old 3 attempts took
+		time.Sleep(3500 * time.Millisecond)
 		s.rules([]stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -872,8 +820,6 @@ func TestReconnectWaitsForTheDevice(t *testing.T) {
 	}
 }
 
-// Release asks the agent to exit, then makes sure: no tb-agent left, and its accessibility
-// service taken out of the enabled list.
 func TestReleaseStopsTheAgent(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -909,12 +855,6 @@ func TestReleaseStopsTheAgent(t *testing.T) {
 	}
 }
 
-// Issue #101: a device gone for good (its emulator killed mid-flow) kept one step for over
-// 2 minutes, though its timeout was 10 s: the pump's reconnect gave up, then the step's
-// request, which had waited for it, tried again for the full reconnectFor, and so did the
-// step's next read. Once reconnecting has given up on a drop, a request that finds the same
-// drop tries once more, not for reconnectFor again: whether it waited for that attempt or came
-// after it. (A device that is back by then is still reached: one attempt does that.)
 func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
@@ -937,7 +877,6 @@ func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 	t0 := time.Now()
 	a1.dropConns()
 	<-c1.Done()
-	// a request made as the connection drops: it waits for the pump's reconnect, or makes it
 	if _, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err == nil {
 		t.Fatal("Tap succeeded on a device that is gone")
 	}
@@ -946,7 +885,6 @@ func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 			el.Round(100*time.Millisecond), reconnectWindow())
 	}
 	waitEvent(t, events, "disconnected")
-	// the step's next request, after reconnecting gave up
 	t1 := time.Now()
 	if _, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err == nil {
 		t.Fatal("Tap succeeded on a device that is gone")
@@ -957,8 +895,6 @@ func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 	}
 }
 
-// Issue #101 (review): after reconnecting gave up on a drop, the one attempt a later request
-// makes still reaches an agent that is back by then.
 func TestReconnectAfterGivingUpReachesAnAgentThatIsBack(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
@@ -981,7 +917,7 @@ func TestReconnectAfterGivingUpReachesAnAgentThatIsBack(t *testing.T) {
 	defer cancel()
 	a1.dropConns()
 	waitEvent(t, events, "disconnected")
-	s.rules([]stubRule{{match: "forward --list", out: forwardLine(a2.port())}}) // the device is back
+	s.rules([]stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
 	if r, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err != nil || r.Seq == 0 {
 		t.Fatalf("issue #101: Tap after the agent came back = %+v, %v, want it to reach the agent in one attempt", r, err)
 	}
@@ -990,11 +926,6 @@ func TestReconnectAfterGivingUpReachesAnAgentThatIsBack(t *testing.T) {
 	}
 }
 
-// Issue #101 (review): a lost device now fails its step in about reconnectFor, where before
-// the pump's 30 s and the waiting request's 45 s let a step ride out about 75 s offline. A CI
-// emulator offline about a minute under load must still be waited for: in CI mode the
-// reconnect window is twice reconnectFor (like iOS's reconnectBudget, issue #53); outside CI
-// it stays reconnectFor.
 func TestReconnectWindowInCI(t *testing.T) {
 	for _, tc := range []struct {
 		ci       string
@@ -1042,9 +973,6 @@ func TestReconnectWindowInCI(t *testing.T) {
 	}
 }
 
-// Issue #101: a connection the driver mended mid-flow (the agent killed and started again)
-// left no trace: the flow's log must say it happened, so a step that fails after it (the
-// app gone with the device) is not put down to a slow device.
 func TestReconnectIsNoted(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -1065,15 +993,9 @@ func TestReconnectIsNoted(t *testing.T) {
 	}
 }
 
-// Issue #335: a Close while the pump's reconnect was under way ended nothing: the reconnect
-// kept trying for its whole window (90 s in CI mode), running adb and starting the agent for a
-// driver nobody used any more. In the tests, an agent closed before its driver (cleanups run
-// last first) set that off, and the closed driver's `adb forward --list` and forward to
-// testbuddy-agent landed in a later test's stub log (TestAugmentWebViewSplicesThePage). Close
-// ends the reconnect: it stops trying, lets go of connMu and runs no adb after it.
 func TestCloseEndsAReconnectUnderWay(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
-	t.Setenv("TB_CI", "1") // the 90 s window CI had
+	t.Setenv("TB_CI", "1")
 	a1 := newFakeAgent(t)
 	s := stubADB(t, []stubRule{
 		{match: "forward tcp:0", out: "error: device offline", code: 1},
@@ -1087,10 +1009,8 @@ func TestCloseEndsAReconnectUnderWay(t *testing.T) {
 	d.adopt(c1, a1.port(), h)
 	defer d.Close()
 	a1.dropConns()
-	// The pump's reconnect is under way once it has asked adb for the forwards.
 	eventually(t, "the reconnect's first attempt", func() bool { return containsAny(s.joined(), "forward --list") })
 	d.Close()
-	// Close ends it: a reconnect holds connMu while it runs.
 	eventually(t, "the reconnect to end after Close", func() bool {
 		if d.connMu.TryLock() {
 			d.connMu.Unlock()
@@ -1099,7 +1019,7 @@ func TestCloseEndsAReconnectUnderWay(t *testing.T) {
 		return false
 	})
 	n := len(s.calls())
-	time.Sleep(700 * time.Millisecond) // past the reconnect's first wait between attempts (500 ms)
+	time.Sleep(700 * time.Millisecond)
 	if calls := s.joined(); len(calls) != n {
 		t.Errorf("issue #335: a closed driver still ran adb: %q", calls[n:])
 	}

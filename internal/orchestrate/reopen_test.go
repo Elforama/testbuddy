@@ -16,10 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// Issue #101: a device opened again after its connection was lost runs a new agent, and may
-// be a device that restarted: the once-per-device setup (Prepare: animations off) must run
-// again on it, on the new driver, before its next flow. It ran once per serial, so the flows
-// after a reopen ran without it.
 func TestScheduleReopenedDeviceIsPreparedAgain(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -51,9 +47,6 @@ func TestScheduleReopenedDeviceIsPreparedAgain(t *testing.T) {
 	}
 }
 
-// Issue #101: a lost browser no longer serves the run, so it must not count toward the cap of
-// 8 browsers: a run that lost one can still start an eighth live one (under a serial of its
-// own, not the lost one's).
 func TestAddWebDoesNotCountLostBrowsers(t *testing.T) {
 	var devs []device.Info
 	for i := 1; i <= 8; i++ {
@@ -75,17 +68,11 @@ func TestAddWebDoesNotCountLostBrowsers(t *testing.T) {
 			t.Errorf("the new browser reuses the serial %q of a browser already in the pool", d.Serial)
 		}
 	}
-	// the cap still holds: 8 live browsers, no ninth
 	if again := p.tryAlloc([]Need{{Platform: string(device.Web)}}); again != nil {
 		t.Errorf("a ninth live browser was started: %v", again)
 	}
 }
 
-// Issue #101: a reopen is bounded, but must leave the device as long as opening it takes:
-// a simulator whose runner starts cold (xcodebuild) gets ios.RunnerStartTimeout from the iOS
-// driver, which the 3-minute reopen bound cut short; in CI mode, opening an Android emulator
-// may restart it (android.RestartBoot) before connecting again. Outside CI mode an Android
-// reopen keeps its 3 minutes.
 func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -93,12 +80,11 @@ func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 		emulator bool
 		ci       string
 		atLeast  time.Duration
-		atMost   time.Duration // 0: no upper check
+		atMost   time.Duration
 	}{
 		{"ios", device.IOS, true, "0", ios.RunnerStartTimeout + 30*time.Second, 0},
 		{"android emulator in CI mode", device.Android, true, "1", 3*time.Minute + android.RestartBoot, 0},
 		{"android emulator", device.Android, true, "0", 0, 3*time.Minute + time.Second},
-		// only an emulator is restarted (android open, issue #217): a phone's reopen keeps 3 min
 		{"android phone in CI mode", device.Android, false, "1", 0, 3*time.Minute + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,7 +111,6 @@ func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 			if left == 0 {
 				t.Fatal("the device was not opened again with a deadline")
 			}
-			// (left is read a moment after the deadline was set: 5 s of slack for that)
 			if left+5*time.Second < tc.atLeast {
 				t.Errorf("issue #101: the reopen had %s, want at least %s", left.Round(time.Second), tc.atLeast)
 			}
@@ -136,9 +121,6 @@ func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 	}
 }
 
-// Issue #101: Failure reads a failed attempt's devices while the attempt still holds them,
-// through the driver opened again when the attempt lost its connection, not the dead one; the
-// next flow on that device starts only after it.
 func TestScheduleFailureReadsTheReopenedDevice(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -173,9 +155,6 @@ func TestScheduleFailureReadsTheReopenedDevice(t *testing.T) {
 	}
 }
 
-// Issue #101 (review): a failed attempt's screen is read through the driver it had: a device
-// it never opened (its open failed, or the Started hook crashed before) is not opened just
-// for that, with no bound.
 func TestFailureDoesNotOpenADeviceTheAttemptNeverHad(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -206,9 +185,6 @@ func TestFailureDoesNotOpenADeviceTheAttemptNeverHad(t *testing.T) {
 	}
 }
 
-// Issue #101 (review): reopening a lost device only to read a failure's screen is bounded
-// short (failureReopenWithin, not the minutes reopenWithin allows), and one that fails there
-// does not lose the device for the run: the next flow opens it again with its full bound.
 func TestFailureReopenIsShortAndLeavesTheDeviceToTheNextFlow(t *testing.T) {
 	var mu sync.Mutex
 	var lefts []time.Duration
@@ -254,7 +230,6 @@ func TestFailureReopenIsShortAndLeavesTheDeviceToTheNextFlow(t *testing.T) {
 	}
 }
 
-// Issue #101 (review): a cancelled run reads no failed attempt's devices.
 func TestFailureNotReadOnceTheRunIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := newFake("emu", "Pixel", "android")

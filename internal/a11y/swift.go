@@ -27,7 +27,6 @@ func checkSwift(f *file, _ *project) {
 		if inLiteral(f.src, m[0]) {
 			continue
 		}
-		// Fine when the same view gets its own label or identifier.
 		if swiftIdentifierNear.MatchString(modifierChain(f.src, m[1])) {
 			continue
 		}
@@ -35,8 +34,6 @@ func checkSwift(f *file, _ *project) {
 	}
 }
 
-// modifierChain is the rest of a SwiftUI modifier chain from off: the rest of the line,
-// and each following line that starts with ".".
 func modifierChain(src string, off int) string {
 	end := off
 	for {

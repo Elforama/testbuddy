@@ -10,9 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Android may send TYPE_VIEW_CLICKED after the action reply but before recovery
-// starts. Once that event is known, rereading and settling the tree cannot justify
-// another tap. Everyday's Compose buttons used to pay for those reads after each click.
 func TestLateAndroidClickSkipsRecoveryReads(t *testing.T) {
 	f := &fakeDriver{plat: "android", screen: static(btn("Target", "target", 100))}
 	f.clicks.Store(1)
@@ -71,8 +68,6 @@ func TestAndroidTapStateConfirmsDeliveryWithoutMotionRecovery(t *testing.T) {
 	}
 }
 
-// A newly disabled control displaced off the injected point is still ambiguous:
-// a layout shift may have caused the original touch to miss it.
 func TestDisabledDisplacedTargetStillTakesRecoveryChecks(t *testing.T) {
 	was := btn("Target", "target", 100)
 	now := btn("Target", "target", 300)
@@ -99,8 +94,6 @@ func TestDisabledDisplacedTargetStillTakesRecoveryChecks(t *testing.T) {
 	}
 }
 
-// A navigation action removes its own button. Recovery should inspect the settled
-// result once, without spending a lookup timeout searching the screen it left.
 func TestAndroidRecoveryDoesNotWaitForRemovedNavigationButton(t *testing.T) {
 	was := btn("Menu", "menu", 100)
 	f := &fakeDriver{plat: "android", screen: static(was)}
@@ -131,9 +124,6 @@ func TestAndroidRecoveryDoesNotWaitForRemovedNavigationButton(t *testing.T) {
 	}
 }
 
-// Different routes can expose an identically shaped anonymous ScrollView. Once
-// a tap removes its target and changes the screen context, it must not scroll
-// the new route trying to recover a control from the old one.
 func TestAndroidRecoveryDoesNotScrollANewAnonymousList(t *testing.T) {
 	was := &ui.Node{Depth: 1, Class: "Button", ID: "scene-still", Text: "Still", Clickable: true,
 		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
@@ -162,8 +152,6 @@ func TestAndroidRecoveryDoesNotScrollANewAnonymousList(t *testing.T) {
 	}
 }
 
-// Navigation can commit after the first post-tap read. The context boundary
-// must also apply to the later read that reports the old target missing.
 func TestAndroidRecoveryDoesNotScrollAfterDelayedRouteChange(t *testing.T) {
 	was := &ui.Node{Depth: 1, Class: "Button", ID: "key-4", Text: "4", Clickable: true,
 		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
@@ -200,8 +188,6 @@ func TestAndroidRecoveryDoesNotScrollAfterDelayedRouteChange(t *testing.T) {
 	}
 }
 
-// AND-001: the keypad can disappear only after stabilization has already
-// observed it. Keeping the last-seen node must not hide the new route.
 func TestRecoveryStopsWhenRouteChangesDuringStabilization(t *testing.T) {
 	was := &ui.Node{Depth: 1, Class: "Button", ID: "key-4", Text: "4", Clickable: true,
 		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
@@ -238,8 +224,6 @@ func TestRecoveryStopsWhenRouteChangesDuringStabilization(t *testing.T) {
 	}
 }
 
-// Focus retained from before a tap cannot prove that the tap reached a field
-// with a custom click handler. Keep the ordinary motion checks in that case.
 func TestAlreadyFocusedFieldStillTakesRecoveryChecks(t *testing.T) {
 	was := btn("Target", "target", 100)
 	was.Editable, was.Focused = true, true

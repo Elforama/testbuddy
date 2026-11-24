@@ -1,14 +1,3 @@
-// Package devlock gives one tb process at a time a device: an Android device or emulator, or
-// an iOS simulator. Two runners on one device replace each other's on-device agent and drive
-// the same screen: both fail in confusing ways. So every tb process that drives a device
-// (`tb test` for the devices its run uses, the daemon for a `tb open` / `tb do` session) holds
-// the device's lock, and a second one is told who has it instead of going ahead.
-//
-// A lock is an flock(2) (LockFileEx on Windows) on a file per device in a machine-wide folder (~/.testbuddy/locks, or
-// TB_LOCK_DIR): the system drops it when the holding process exits, however it exits, so a
-// crashed or killed run never leaves a device locked. The file also holds who locked it (the
-// command, pid, folder, start time), shown to whoever finds the device taken. Browsers need no
-// lock: each run starts its own.
 package devlock
 
 import (
@@ -24,13 +13,12 @@ import (
 	"time"
 )
 
-// Owner says who holds a device.
 type Owner struct {
 	PID     int       `json:"pid"`
-	What    string    `json:"what"` // e.g. "tb test flows/login.yaml", "tb session alice"
+	What    string    `json:"what"`
 	Dir     string    `json:"dir,omitempty"`
 	Since   time.Time `json:"since"`
-	Command string    `json:"command,omitempty"` // the holder's full command line
+	Command string    `json:"command,omitempty"`
 }
 
 func (o Owner) String() string {
@@ -48,7 +36,6 @@ func (o Owner) String() string {
 	return s + ")"
 }
 
-// Busy is the error for a device another process holds.
 type Busy struct {
 	Serial string
 	Owner  Owner
@@ -58,21 +45,18 @@ func (e *Busy) Error() string {
 	return fmt.Sprintf("device %s is in use by %s", e.Serial, e.Owner)
 }
 
-// IsBusy reports whether err is (or wraps) a Busy.
 func IsBusy(err error) (*Busy, bool) {
 	var b *Busy
 	ok := errors.As(err, &b)
 	return b, ok
 }
 
-// Lock is a held device lock.
 type Lock struct {
 	Serial string
 	f      *os.File
 	once   sync.Once
 }
 
-// Release frees the device (also done by the system when the process exits).
 func (l *Lock) Release() {
 	if l == nil {
 		return
@@ -83,7 +67,6 @@ func (l *Lock) Release() {
 	})
 }
 
-// Dir is where the lock files are.
 func Dir() string {
 	if d := os.Getenv("TB_LOCK_DIR"); d != "" {
 		return d
@@ -101,10 +84,8 @@ func path(serial string) string {
 	return filepath.Join(Dir(), unsafeChars.ReplaceAllString(serial, "_")+".lock")
 }
 
-// Disabled: TB_NO_DEVICE_LOCK=1 turns locking off (every lock is granted, holding nothing).
 func Disabled() bool { return os.Getenv("TB_NO_DEVICE_LOCK") == "1" }
 
-// TryAcquire takes the device's lock at once, or returns a *Busy naming who holds it.
 func TryAcquire(serial, what string) (*Lock, error) {
 	if Disabled() {
 		return nil, nil
@@ -134,10 +115,6 @@ func TryAcquire(serial, what string) (*Lock, error) {
 	return &Lock{Serial: serial, f: f}, nil
 }
 
-// Acquire takes the device's lock, waiting up to wait for its holder to let go (0: not at all).
-// It checks again every poll: a lock held by another process sends no event when it goes.
-// A cancelled ctx ends the wait at once with ctx's error, holding no lock (issue #115).
-// tb itself does not call it: `tb test --wait-for-device` waits in orchestrate's Pool.
 func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Lock, error) {
 	const poll = 500 * time.Millisecond
 	deadline := time.Now().Add(wait)
@@ -159,8 +136,6 @@ func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Loc
 	}
 }
 
-// Holder reads who holds (or last held) a device's lock. Only meaningful when TryAcquire
-// just failed: a released lock's file keeps its last owner.
 func Holder(serial string) Owner {
 	b, err := os.ReadFile(path(serial))
 	if err != nil {

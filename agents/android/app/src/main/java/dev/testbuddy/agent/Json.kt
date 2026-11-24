@@ -1,6 +1,5 @@
 package dev.testbuddy.agent
 
-/** A small, allocation-light JSON writer: the tree is written on every read. */
 class Json(capacity: Int = 4096) {
     val sb = StringBuilder(capacity)
     private var needComma = false

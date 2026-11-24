@@ -1,9 +1,3 @@
-// XCTest's private API, reached through the Objective-C runtime. Every entry point is checked
-// before use: a missing one is an AgentError naming it, never a crash, so a new Xcode that
-// renames something degrades into a clear message instead of a dead runner.
-//
-// Signatures were read from this Xcode's binaries (XCUIAutomation, XCTAutomationSupport) and
-// cross-checked with public XCTest class dumps.
 import XCTest
 import ObjectiveC
 
@@ -15,7 +9,6 @@ enum RT {
         return c
     }
 
-    /// target.sel with no argument, returning an object.
     static func get(_ target: AnyObject, _ sel: String) -> AnyObject? {
         let s = NSSelectorFromString(sel)
         guard target.responds(to: s) else { return nil }
@@ -35,7 +28,6 @@ enum RT {
         return unsafeBitCast(p, to: T.self)
     }
 
-    /// Selectors of a class (and its metaclass, "+"), for finding what an Xcode offers.
     static func methods(of className: String) -> [String] {
         guard let c = NSClassFromString(className) else { return ["(no class \(className))"] }
         var out: [String] = []
@@ -75,23 +67,17 @@ enum RT {
 }
 
 enum Private {
-    // MARK: sessions and clients
-
-    /// testmanagerd's session for this runner.
     static func session() throws -> NSObject {
         let c = try RT.cls("XCTRunnerDaemonSession")
         guard let s = RT.get(c, "sharedSession") as? NSObject else { throw AgentError("XCTRunnerDaemonSession.sharedSession is missing") }
         return s
     }
 
-    /// testmanagerd's proxy (XCTestManager_ManagerInterface): its calls skip XCTest's
-    /// before/after idle waits.
     static func proxy() throws -> NSObject {
         guard let p = RT.get(try session(), "daemonProxy") as? NSObject else { throw AgentError("XCTRunnerDaemonSession.daemonProxy is missing") }
         return p
     }
 
-    /// XCUIDevice's accessibility client (XCAXClient_iOS). Main thread or not: it is only a getter.
     static func axClient() throws -> NSObject {
         guard let c = RT.get(XCUIDevice.shared, "accessibilityInterface") as? NSObject else {
             throw AgentError("XCUIDevice.accessibilityInterface is missing")
@@ -99,8 +85,6 @@ enum Private {
         return c
     }
 
-    /// How long a snapshot may wait for the app (XCTest's default ~15 s; a read stuck in a
-    /// transition should give way and be tried again).
     @discardableResult
     static func setAXTimeout(_ seconds: Double) -> Bool {
         guard let client = try? axClient() else { return false }
@@ -115,23 +99,18 @@ enum Private {
         return false
     }
 
-    // MARK: apps
-
     struct ActiveApp { let pid: Int32; let element: NSObject }
 
-    /// The apps the accessibility client lists as active, front-most first as it orders them.
     static func activeApps() -> [ActiveApp] {
         guard let client = try? axClient(), let list = RT.get(client, "activeApplications") as? [NSObject] else { return [] }
         return list.compactMap { e in pid(of: e).map { ActiveApp(pid: $0, element: e) } }
     }
 
-    /// SpringBoard's pid: the accessibility client's system application.
     static func systemApplicationPid() -> Int32? {
         guard let client = try? axClient(), let e = RT.get(client, "systemApplication") as? NSObject else { return nil }
         return pid(of: e)
     }
 
-    /// The process id of an accessibility element (XCAccessibilityElement.processIdentifier).
     static func pid(of element: NSObject) -> Int32? {
         guard let (f, s) = try? RT.imp(element, "processIdentifier", as: (@convention(c) (NSObject, Selector) -> Int32).self) else { return nil }
         return f(element, s)
@@ -139,7 +118,6 @@ enum Private {
 
     private static let bundleIDs = PerPid<String>()
 
-    /// pid → bundle id, asked of testmanagerd once per process.
     static func bundleID(pid: Int32) -> String? {
         if let id = bundleIDs[pid] { return id }
         guard let proxy = try? proxy(),
@@ -155,8 +133,6 @@ enum Private {
         return id
     }
 
-    /// The XCUIApplicationProcess behind an XCUIApplication (its accessor moved between Xcode
-    /// versions; KVC on a missing key would raise and kill the runner, so each step is checked).
     static func process(of app: XCUIApplication) -> NSObject? {
         for path in [["applicationImpl", "currentProcess"], ["currentProcess"], ["applicationProcess"], ["applicationImpl", "applicationProcess"]] {
             var o: AnyObject? = app
@@ -169,12 +145,10 @@ enum Private {
         return nil
     }
 
-    /// The accessibility element of an app process (XCUIApplicationProcess.accessibilityElement).
     static func accessibilityElement(ofProcess p: NSObject) -> NSObject? {
         RT.get(p, "accessibilityElement") as? NSObject
     }
 
-    /// An accessibility element for a process id (XCAccessibilityElement elementWithProcessIdentifier:).
     static func element(pid: Int32) -> NSObject? {
         guard let c = NSClassFromString("XCAccessibilityElement") as? NSObject.Type,
               let (f, s) = try? RT.imp(c, "elementWithProcessIdentifier:", as: (@convention(c) (AnyObject, Selector, Int32) -> Unmanaged<NSObject>?).self)
@@ -182,16 +156,11 @@ enum Private {
         return f(c, s, pid)?.takeUnretainedValue()
     }
 
-    // MARK: idle (pushed by the app: XCTAutomationSupport's run loop observer and its UIView
-    // animation counters, over the automation session; testmanagerd's AX client otherwise)
-
-    /// Calls done once the app's main run loop is idle. Asynchronous: nothing waits here.
     static func notifyWhenRunLoopIdle(_ process: NSObject, _ done: @escaping (Error?) -> Void) throws {
         let (f, s) = try RT.imp(process, "_notifyWhenMainRunLoopIsIdle:", as: (@convention(c) (NSObject, Selector, @escaping (NSError?) -> Void) -> Void).self)
         f(process, s) { done($0) }
     }
 
-    /// Calls done once the app has no UIView animation running.
     static func notifyWhenAnimationsIdle(_ process: NSObject, _ done: @escaping (Error?) -> Void) throws {
         let (f, s) = try RT.imp(process, "_notifyWhenAnimationsAreIdle:", as: (@convention(c) (NSObject, Selector, @escaping (NSError?) -> Void) -> Void).self)
         f(process, s) { done($0) }
@@ -202,9 +171,6 @@ enum Private {
         return f(process, s)
     }
 
-    // MARK: event synthesis
-
-    /// A touch path starting at a point (screen points, portrait hardware space).
     static func touchPath(at p: CGPoint, offset: TimeInterval = 0) throws -> NSObject {
         let c = try RT.cls("XCPointerEventPath")
         let alloc = c.perform(NSSelectorFromString("alloc")).takeUnretainedValue() as! NSObject
@@ -222,11 +188,6 @@ enum Private {
         f(path, s, p, offset)
     }
 
-    /// A touch down at points[0], moved through the rest by explicit move events (each from the
-    /// point before, starting at its offset, lasting its duration), lifted at the last point at
-    /// liftAt. moveToPoint:atOffset: leaves the move's timing to testmanagerd, which has not
-    /// timed it the same way in every Xcode; these carry their own. nil when this Xcode lacks
-    /// the API (the caller falls back to moveToPoint).
     static func explicitDrag(_ points: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)], liftAt: TimeInterval) throws -> NSObject? {
         guard let first = points.first, let last = points.last, let event = NSClassFromString("XCPointerEvent") else { return nil }
         let makeSel = NSSelectorFromString("moveEventWithStartPoint:destination:offset:duration:")
@@ -241,8 +202,6 @@ enum Private {
         for (a, b) in zip(points, points.dropFirst()) {
             add(path, addSel, move(event, makeSel, a.p, b.p, b.offset, b.duration))
         }
-        // liftUpAtOffset: lifts where the path's moveToPoints left the touch: at its start here.
-        // The lift event comes from a path made at the end point instead.
         let at = try touchPath(at: last.p)
         try lift(at, at: liftAt)
         guard let events = RT.get(at, "pointerEvents") as? [NSObject], let up = events.last else { return nil }
@@ -278,24 +237,17 @@ enum Private {
         return rec
     }
 
-    /// Plays an event record through testmanagerd. done runs once the app has received every
-    /// event (testmanagerd's confirmation, ~200 ms after the last one), on a background queue.
     static func synthesize(_ record: NSObject, _ done: @escaping (Error?) -> Void) throws {
         let proxy = try proxy()
         let (f, s) = try RT.imp(proxy, "_XCT_synthesizeEvent:completion:", as: (@convention(c) (NSObject, Selector, NSObject, @escaping (NSError?) -> Void) -> Void).self)
         f(proxy, s, record) { done($0) }
     }
 
-    // MARK: quiescence (blocking fallback; main thread)
-
     typealias SetTimeout = @convention(c) (Double) -> Void
     typealias GetTimeout = @convention(c) () -> Double
     static let setStateTimeout = RT.cFunction("_XCTSetApplicationStateTimeout", as: SetTimeout.self)
     static let stateTimeout = RT.cFunction("_XCTApplicationStateTimeout", as: GetTimeout.self)
 
-    // MARK: snapshots
-
-    /// Accessibility attribute names for snapshot key paths (what a trimmed snapshot asks for).
     static func axAttributes(forKeyPaths keyPaths: [String]) -> [AnyObject]? {
         guard let c = NSClassFromString("XCElementSnapshot") as? NSObject.Type,
               let (f, s) = try? RT.imp(c, "axAttributesForElementSnapshotKeyPaths:isMacOS:", as: (@convention(c) (AnyObject, Selector, NSSet, Bool) -> Unmanaged<AnyObject>?).self)
@@ -311,8 +263,6 @@ enum Private {
         return d
     }
 
-    /// Some of an element's attributes, by XCTest's names (XC_kAXXCAttribute...), in one request
-    /// to its app (XCAXClient_iOS attributesForElement:attributes:error:). Main thread.
     static func attributes(of element: NSObject, _ names: [String]) throws -> [String: Any] {
         let client = try axClient()
         let (f, s) = try RT.imp(client, "attributesForElement:attributes:error:", as: (@convention(c) (NSObject, Selector, NSObject, NSArray, UnsafeMutablePointer<NSError?>?) -> Unmanaged<NSDictionary>?).self)
@@ -323,8 +273,6 @@ enum Private {
         return d
     }
 
-    /// A snapshot of an element's subtree with only the attributes asked for
-    /// (XCAXClient_iOS requestSnapshotForElement:attributes:parameters:error:). Main thread.
     static func requestSnapshot(_ element: NSObject, attributes: [AnyObject], parameters: [String: Any]) throws -> NSObject {
         let client = try axClient()
         let (f, s) = try RT.imp(client, "requestSnapshotForElement:attributes:parameters:error:", as: (@convention(c) (NSObject, Selector, NSObject, NSArray, NSDictionary, UnsafeMutablePointer<NSError?>?) -> Unmanaged<NSObject>?).self)
@@ -332,12 +280,9 @@ enum Private {
         guard let r = f(client, s, element, attributes as NSArray, parameters as NSDictionary, &err)?.takeUnretainedValue() else {
             throw AgentError("snapshot failed: \(err?.localizedDescription ?? "no result")")
         }
-        // Newer Xcodes wrap the snapshot in a request result.
         if let inner = RT.get(r, "elementSnapshot") as? NSObject { return inner }
         return r
     }
-
-    // MARK: device
 
     static func pressLock() throws {
         let s = NSSelectorFromString("pressLockButton")
@@ -345,7 +290,6 @@ enum Private {
         XCUIDevice.shared.perform(s)
     }
 
-    /// XCUIDevice's private button press (volume buttons on a simulator), by XCUIDeviceButton raw value.
     static func pressButton(_ raw: Int) throws {
         let (f, s) = try RT.imp(XCUIDevice.shared, "pressButton:", as: (@convention(c) (NSObject, Selector, Int) -> Void).self)
         f(XCUIDevice.shared, s, raw)

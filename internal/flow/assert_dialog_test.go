@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// assertDialog (issue #91): the dialog's text, or a map with text, type, label and optional;
-// bare (or {}) for any dialog. The text stays raw (the engine interpolates it).
 func TestAssertDialog(t *testing.T) {
 	for _, c := range []struct {
 		src  string

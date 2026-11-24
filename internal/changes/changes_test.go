@@ -11,7 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// fakeSource is a device whose change counter and events the test controls.
 type fakeSource struct {
 	mu  sync.Mutex
 	seq int64
@@ -25,7 +24,6 @@ func (f *fakeSource) Events() (<-chan driver.Event, func()) {
 	return f.ch, func() {}
 }
 
-// change moves the counter on and reports it with an event of kind.
 func (f *fakeSource) change(kind string) {
 	f.mu.Lock()
 	f.seq++
@@ -34,11 +32,8 @@ func (f *fakeSource) change(kind string) {
 	f.ch <- driver.Event{Kind: kind, Seq: seq}
 }
 
-// stale sends an event for the change already read: no news.
 func (f *fakeSource) stale(kind string) { f.ch <- driver.Event{Kind: kind, Seq: f.Seq()} }
 
-// Each case is one Wait, for the read at seq 5, on a net of gap (0: none), with what the device
-// does meanwhile; it must return silent and err, after between min and max.
 func TestWait(t *testing.T) {
 	const gap = 100 * time.Millisecond
 	const deadline = 2 * time.Second
@@ -47,7 +42,7 @@ func TestWait(t *testing.T) {
 		name     string
 		gap      time.Duration
 		early    bool
-		before   func(*fakeSource) // before the wait starts
+		before   func(*fakeSource)
 		during   func(*fakeSource, context.CancelFunc)
 		silent   time.Duration
 		err      func(context.CancelFunc) error
@@ -105,7 +100,7 @@ func TestWait(t *testing.T) {
 			defer cancel()
 			var want error
 			if c.err != nil && c.during == nil {
-				want = c.err(cancel) // cancels before the wait
+				want = c.err(cancel)
 			}
 			w := Subscribe(f, c.gap, true)
 			defer w.Stop()
@@ -131,14 +126,12 @@ func TestWait(t *testing.T) {
 	}
 }
 
-// The gap between silence re-reads: with back-off it doubles once and stays at twice the first
-// (issue #96); without, it stays. News starts the next silence afresh.
 func TestWaitGaps(t *testing.T) {
 	const gap = 40 * time.Millisecond
 	for _, c := range []struct {
 		name    string
 		backoff bool
-		want    []time.Duration // silent from each Wait; 0: the device reported a change first
+		want    []time.Duration
 	}{
 		{"back-off, then the cap", true, []time.Duration{gap, 2 * gap, 2 * gap, 2 * gap, 0, gap, 2 * gap}},
 		{"no back-off", false, []time.Duration{gap, gap, gap, 0, gap}},
@@ -162,7 +155,6 @@ func TestWaitGaps(t *testing.T) {
 	}
 }
 
-// TB_SILENT_MS is read once; unset, the net's first gap is 1.5 s.
 func TestSilentAfter(t *testing.T) {
 	if SilentAfter() != SilentAfter() {
 		t.Fatal("not stable")

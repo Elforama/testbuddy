@@ -13,7 +13,6 @@ import (
 	"testing"
 )
 
-// seen is what the test server received for one request.
 type seen struct {
 	Method      string
 	Path        string
@@ -21,10 +20,9 @@ type seen struct {
 	Header      http.Header
 	ContentType string
 	Fields      map[string]string
-	Files       map[string]string // field -> "filename:content"
+	Files       map[string]string
 }
 
-// echoServer records each request and answers according to the path.
 func echoServer(t *testing.T) (*httptest.Server, func() seen) {
 	t.Helper()
 	var mu sync.Mutex
@@ -95,7 +93,6 @@ func evalHTTP(t *testing.T, e *Engine, src string, srv *httptest.Server) string 
 	return got
 }
 
-// Each http method helper sends its HTTP method.
 func TestHTTPMethods(t *testing.T) {
 	srv, last := echoServer(t)
 	e := New("android")
@@ -113,7 +110,6 @@ func TestHTTPMethods(t *testing.T) {
 	}
 }
 
-// http.request defaults to GET and takes the method from params (case-insensitive).
 func TestHTTPRequestMethod(t *testing.T) {
 	srv, last := echoServer(t)
 	e := New("android")
@@ -126,17 +122,14 @@ func TestHTTPRequestMethod(t *testing.T) {
 	if last().Body != "p" {
 		t.Errorf("patch body = %q", last().Body)
 	}
-	// A method in params overrides the helper's own method too.
 	if got := evalHTTP(t, e, "${http.get(BASE + '/r', {method: 'Delete'}).body}", srv); got != "method=DELETE" {
 		t.Errorf("get with method override = %q", got)
 	}
-	// An empty method is ignored.
 	if got := evalHTTP(t, e, "${http.post(BASE + '/r', {method: ''}).body}", srv); got != "method=POST" {
 		t.Errorf("post with empty method = %q", got)
 	}
 }
 
-// Request bodies and headers reach the server; non-string values are stringified.
 func TestHTTPBodyAndHeaders(t *testing.T) {
 	srv, last := echoServer(t)
 	e := New("android")
@@ -173,7 +166,6 @@ func TestHTTPBodyAndHeaders(t *testing.T) {
 	}
 }
 
-// The response object has ok, status, body and lower-cased headers (repeated ones joined).
 func TestHTTPResponseShape(t *testing.T) {
 	srv, _ := echoServer(t)
 	e := New("android")
@@ -210,7 +202,6 @@ func TestHTTPResponseShape(t *testing.T) {
 	}
 }
 
-// Responses can be stored in output from a runScript and read back later.
 func TestHTTPFromRunScript(t *testing.T) {
 	srv, _ := echoServer(t)
 	e := New("android")
@@ -227,7 +218,6 @@ output.status = r.status;
 	}
 }
 
-// multipartForm sends fields and files; relative file paths resolve against the script's dir.
 func TestHTTPMultipartForm(t *testing.T) {
 	srv, last := echoServer(t)
 	dir := t.TempDir()
@@ -266,7 +256,6 @@ func TestHTTPMultipartForm(t *testing.T) {
 	}
 }
 
-// A missing multipart file is a JavaScript error (and catchable inside the script).
 func TestHTTPMultipartMissingFile(t *testing.T) {
 	srv, _ := echoServer(t)
 	e := New("android")
@@ -282,7 +271,6 @@ func TestHTTPMultipartMissingFile(t *testing.T) {
 	}
 }
 
-// Network failures and bad URLs surface as JavaScript errors that scripts can catch.
 func TestHTTPErrors(t *testing.T) {
 	closed := httptest.NewServer(http.NotFoundHandler())
 	url := closed.URL
@@ -308,7 +296,6 @@ func TestHTTPErrors(t *testing.T) {
 	}
 }
 
-// The http object exposes exactly the documented helpers.
 func TestHTTPObjectKeys(t *testing.T) {
 	e := New("android")
 	if got, _ := e.Interpolate("${Object.keys(http).sort().join(',')}", nil); got != "delete,get,post,put,request" {

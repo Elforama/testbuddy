@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// TestMain: run as a helper that holds a lock until killed, when asked to.
 func TestMain(m *testing.M) {
 	if serial := os.Getenv("DEVLOCK_HOLD"); serial != "" {
 		if _, err := TryAcquire(serial, "tb test helper"); err != nil {
@@ -25,7 +24,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// A second lock on a held device fails with who holds it; releasing frees it.
 func TestTryAcquireSameProcess(t *testing.T) {
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
 	a, err := TryAcquire("emulator-5554", "tb test flows/")
@@ -40,25 +38,22 @@ func TestTryAcquireSameProcess(t *testing.T) {
 	if !strings.Contains(err.Error(), "device emulator-5554 is in use by tb test flows/ (pid ") {
 		t.Errorf("message %q", err)
 	}
-	// Another device is free.
 	c, err := TryAcquire("6C34A72F-2B11-4374-B939-B152D38B32E0", "tb test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Release()
 	a.Release()
-	a.Release() // twice is fine
+	a.Release()
 	d, err := TryAcquire("emulator-5554", "tb session alice")
 	if err != nil {
 		t.Fatalf("after release: %v", err)
 	}
 	d.Release()
 	var none *Lock
-	none.Release() // a nil lock is fine
+	none.Release()
 }
 
-// A lock held by another process is refused, with that process's pid; when the process dies
-// (killed, no clean-up) the device is free again.
 func TestLockAcrossProcesses(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TB_LOCK_DIR", dir)
@@ -81,7 +76,6 @@ func TestLockAcrossProcesses(t *testing.T) {
 	if !busy || b.Owner.PID != cmd.Process.Pid || b.Owner.What != "tb test helper" {
 		t.Fatalf("held by the helper: %v (helper pid %d)", err, cmd.Process.Pid)
 	}
-	// Waiting: the helper is killed meanwhile.
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		cmd.Process.Kill()
@@ -98,7 +92,6 @@ func TestLockAcrossProcesses(t *testing.T) {
 	cmd.Wait()
 }
 
-// Acquire with no wait, or a wait that runs out, returns Busy.
 func TestAcquireTimesOut(t *testing.T) {
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
 	a, err := TryAcquire("x", "first")
@@ -120,9 +113,6 @@ func TestAcquireTimesOut(t *testing.T) {
 	}
 }
 
-// issue #115: a wait for a held device stops when its context is cancelled (Ctrl-C while tb
-// waits for a device another run holds), at once, with the context's error and no lock held.
-// It used to sleep through the whole wait.
 func TestAcquireCancelled(t *testing.T) {
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
 	a, err := TryAcquire("x", "first")
@@ -139,34 +129,31 @@ func TestAcquireCancelled(t *testing.T) {
 		l, err := Acquire(ctx, "x", "second", 30*time.Second)
 		done <- got{l, err}
 	}()
-	time.Sleep(200 * time.Millisecond) // waiting
+	time.Sleep(200 * time.Millisecond)
 	cancel()
 	var g got
 	select {
 	case g = <-done:
 	case <-time.After(5 * time.Second):
-		a.Release() // let the waiter go
+		a.Release()
 		t.Fatal("issue #115: Acquire did not return within 5s of its context being cancelled")
 	}
 	if !errors.Is(g.err, context.Canceled) || g.l != nil {
 		t.Errorf("issue #115: Acquire after cancel = %v, %v; want no lock and context.Canceled", g.l, g.err)
 		g.l.Release()
 	}
-	// No lock left held: the device is free once the first holder lets go.
 	a.Release()
 	l, err := TryAcquire("x", "third")
 	if err != nil {
 		t.Fatalf("after the cancelled wait: %v", err)
 	}
 	l.Release()
-	// Cancelled before it starts: no lock taken, even of a free device.
 	if l, err := Acquire(ctx, "x", "fourth", time.Second); !errors.Is(err, context.Canceled) || l != nil {
 		t.Errorf("issue #115: Acquire on a cancelled context = %v, %v; want context.Canceled", l, err)
 		l.Release()
 	}
 }
 
-// Serials with odd characters make safe file names; the folder follows TB_LOCK_DIR.
 func TestPathAndDir(t *testing.T) {
 	t.Setenv("TB_LOCK_DIR", "/tmp/locks-x")
 	if got := path("192.168.1.5:5555"); got != filepath.FromSlash("/tmp/locks-x/192.168.1.5_5555.lock") {

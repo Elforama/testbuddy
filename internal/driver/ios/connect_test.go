@@ -1,9 +1,5 @@
 package ios
 
-// Finding, reusing and replacing the runner on the simulator's preferred port. The fake runner
-// listens on a free port in the runner range, and the simulator's UDID is chosen so that port is
-// its preferred one: connect probes only ports the test controls.
-
 import (
 	"fmt"
 	"math/rand/v2"
@@ -18,23 +14,10 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// guardOffset: freePorts reserves runner-range port p by listening on p+guardOffset for the
-// rest of the test (issue #259). The runner port itself must stay free (the test, or a runner
-// xcodebuild "starts", listens there later), so the guard is what another freePorts caller, in
-// this go test process or another one running at once, finds taken. The OS releases it when the
-// process dies, so a killed run leaves nothing behind.
 const guardOffset = 20000
 
-// pickStart picks the first of starts candidate positions freePorts tries: at random, so
-// concurrent runs rarely even try the same ports. The reservation tests pin it so that only the
-// guards keep callers apart.
 var pickStart = func(starts int) int { return rand.IntN(starts) }
 
-// freePorts finds n consecutive free ports in the runner range (none of them a real runner's)
-// and keeps them this test's until it ends (issue #259): two go test runs of this package at
-// once used to pick the same ports, from the top of the range, and fight over them. It reserves
-// the whole window connect and ReleaseDevice probe from the first port, so another test's fake
-// runner is never asked for its info, told to exit, or adopted.
 func freePorts(t *testing.T, n int) int {
 	t.Helper()
 	window := max(n, portTries)
@@ -51,13 +34,10 @@ func freePorts(t *testing.T, n int) int {
 			return p
 		}
 	}
-	// Not a skip: a broken or leaked reservation must not pass as green.
 	t.Fatalf("no %d free ports (window %d) in the runner range: all %d starts taken", n, window, starts)
 	return 0
 }
 
-// reservePorts takes the guards of ports p to p+window-1 and checks that p to p+n-1 are free;
-// nil (with nothing held) if a guard is another caller's or a port is in use.
 func reservePorts(p, n, window int) []net.Listener {
 	var guards []net.Listener
 	release := func() []net.Listener {
@@ -73,9 +53,6 @@ func reservePorts(p, n, window int) []net.Listener {
 		}
 		guards = append(guards, g)
 	}
-	// Only the first n ports are checked free: the rest of the window is guarded but may be in
-	// use. A real runner at p+n..p+window-1 serves another simulator, which connect passes over
-	// and ReleaseDevice leaves alone, so that is harmless.
 	for i := 0; i < n; i++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p+i))
 		if err != nil {
@@ -86,7 +63,6 @@ func reservePorts(p, n, window int) []net.Listener {
 	return guards
 }
 
-// udidFor returns a simulator UDID whose preferred port is port.
 func udidFor(t *testing.T, port int) string {
 	t.Helper()
 	for i := 0; i < 1_000_000; i++ {
@@ -99,7 +75,6 @@ func udidFor(t *testing.T, port int) string {
 	return ""
 }
 
-// Open refuses a device that is not an iOS simulator.
 func TestOpenRejectsOtherPlatforms(t *testing.T) {
 	if _, err := Open(ctxT(t), device.Info{Platform: device.Android, Serial: "emulator-5554"}); err == nil ||
 		!strings.Contains(err.Error(), "emulator-5554 is not an iOS simulator") {
@@ -107,7 +82,6 @@ func TestOpenRejectsOtherPlatforms(t *testing.T) {
 	}
 }
 
-// A runner of this build serving this simulator is reused: no xcodebuild, nothing stopped.
 func TestOpenReusesRunner(t *testing.T) {
 	for _, probe := range []string{"", "0"} {
 		t.Run("TB_IOS_PROBE="+probe, func(t *testing.T) {
@@ -141,13 +115,9 @@ func TestOpenReusesRunner(t *testing.T) {
 	}
 }
 
-// startsRunnerAt makes the stub xcodebuild bring up a fresh fake runner on port, as a real one
-// would; configure, if not nil, adjusts it before it accepts connections' requests.
 func startsRunnerAt(t *testing.T, ts *tools, port int, udid string, configure func(*fakeRunner)) chan *fakeRunner {
 	marker := filepath.Join(t.TempDir(), "xcodebuild-ran")
 	ready := marker + "-ready"
-	// Like a real xcodebuild, the stub keeps running while its runner serves (an xcodebuild
-	// that exits ends the dial): it waits, with builtins only, until the fake runner listens.
 	ts.set("xcrun", []stubRule{{match: "xcodebuild", sh: ": > " + sq(marker) + "; i=0; while [ ! -e " + sq(ready) + " ] && [ $i -lt 3000000 ]; do i=$((i+1)); done;"}})
 	started := make(chan *fakeRunner, 1)
 	go func() {
@@ -173,8 +143,6 @@ func startsRunnerAt(t *testing.T, ts *tools, port int, udid string, configure fu
 	return started
 }
 
-// A runner of another build (or one that does not say whose it is) on this simulator's port is
-// told to exit, and a runner of this build is started there.
 func TestConnectReplacesStaleRunner(t *testing.T) {
 	for _, staleUDID := range []string{"self", ""} {
 		t.Run("udid="+staleUDID, func(t *testing.T) {
@@ -185,7 +153,7 @@ func TestConnectReplacesStaleRunner(t *testing.T) {
 				staleUDID = udid
 			}
 			old := newFakeRunnerAt(t, fmt.Sprintf("127.0.0.1:%d", port), staleUDID, "0123456789ab")
-			lingers := staleUDID == "" // this one keeps answering for a moment after exit
+			lingers := staleUDID == ""
 			old.on("exit", func(map[string]any) map[string]any {
 				go func() {
 					if lingers {
@@ -223,7 +191,6 @@ func TestConnectReplacesStaleRunner(t *testing.T) {
 	}
 }
 
-// Another simulator's runner on the preferred port (a hash collision) is left alone; the next port is used.
 func TestConnectSkipsAnotherSimulatorsRunner(t *testing.T) {
 	ts := stubTools(t)
 	port := freePorts(t, 2)
@@ -244,7 +211,6 @@ func TestConnectSkipsAnotherSimulatorsRunner(t *testing.T) {
 	}
 }
 
-// When xcodebuild cannot be started, Open says so.
 func TestConnectRunnerCannotStart(t *testing.T) {
 	ts := stubTools(t)
 	port := freePorts(t, 1)
@@ -255,7 +221,6 @@ func TestConnectRunnerCannotStart(t *testing.T) {
 	}
 }
 
-// A runner that starts but fails its first info is reported.
 func TestConnectRunnerInfoFails(t *testing.T) {
 	ts := stubTools(t)
 	port := freePorts(t, 1)

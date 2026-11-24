@@ -1,4 +1,3 @@
-// Scenario 2, "Slow and janky" (bench/SCENARIOS.md): late, slow and UI-blocking things.
 (() => {
   const { h } = Bench;
   const timers = (() => {
@@ -22,7 +21,6 @@
       h('button', {
         id: 'slow_open',
         onclick: () => {
-          // 1200 ms of nothing visible changing, then a 1500 ms slide.
           const at = Bench.current();
           setTimeout(() => { if (Bench.current() === at) Bench.go('/slow/detail'); }, 1200);
         },
@@ -31,7 +29,7 @@
         id: 'jank_button',
         onclick: () => {
           const end = performance.now() + 700;
-          while (performance.now() < end) { /* block the main thread */ }
+          while (performance.now() < end) { }
           janks++;
           jankText.textContent = 'Unblocked ' + janks;
         },
@@ -41,7 +39,7 @@
     );
     return {
       enter(params, info) {
-        if (info.how === 'pop') return; // back from Slow detail / Slow list: keep going
+        if (info.how === 'pop') return;
         timers.clear();
         lateTaps = 0; janks = 0;
         lateCount.textContent = 'Late taps: 0';

@@ -1,4 +1,3 @@
-// Timers run after this code, in due order, before the step ends. A cleared timeout never runs.
 output.order = [];
 output.ticks = 0;
 setTimeout(function () { output.order.push('late'); }, 60);

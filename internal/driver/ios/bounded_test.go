@@ -12,10 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// Issue #130: a screen read tells the agent how long the host waits for it (replyMs), so an
-// agent whose app does not answer accessibility answers first, saying what it waited for,
-// instead of the host timing out blind. The agent answers 2 s before replyMs: the host waits
-// that much longer than readTimeout, so the app keeps the 30 s it had before.
 func TestScreenSendsTheReplyLimit(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tree", func(map[string]any) map[string]any { return map[string]any{"seq": 1, "windows": []any{}} })
@@ -26,7 +22,6 @@ func TestScreenSendsTheReplyLimit(t *testing.T) {
 	if got := num(t, r.last("tree"), "replyMs"); got != 32000 {
 		t.Errorf("tree replyMs = %v, want 32000 (%v)", got, r.last("tree"))
 	}
-	// A context that ends sooner shortens the wait, and the agent is told so.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if _, err := d.Screen(ctx); err != nil {
@@ -37,8 +32,6 @@ func TestScreenSendsTheReplyLimit(t *testing.T) {
 	}
 }
 
-// Issue #142: the agent's fallback for a failed foreground query (the last app in front, not
-// SpringBoard) is CI mode's; the host says so with "ci" on each screen read, only in CI mode.
 func TestScreenSaysCIModeToTheAgent(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -57,8 +50,6 @@ func TestScreenSaysCIModeToTheAgent(t *testing.T) {
 	}
 }
 
-// Issue #137: the agent's wait for SpringBoard before a swipe or drag is CI mode's; the host
-// says so with "ci" on each swipe, only in CI mode.
 func TestSwipeSaysCIModeToTheAgent(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -79,8 +70,6 @@ func TestSwipeSaysCIModeToTheAgent(t *testing.T) {
 	}
 }
 
-// Issue #137: hideKeyboard's own swipes wait for SpringBoard in CI mode too, so the host says
-// "ci" on hideKeyboard, only in CI mode (also before any swipe of the flow's).
 func TestHideKeyboardSaysCIModeToTheAgent(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -99,9 +88,6 @@ func TestHideKeyboardSaysCIModeToTheAgent(t *testing.T) {
 	}
 }
 
-// Issue #130: an agent that gave up on a screen read because the app's main thread was busy
-// says so with "transient". In CI mode the host asks once more (a read has no effect on the
-// app); elsewhere the agent's error, which says what it waited for, fails the step.
 func TestScreenAsksAgainInCIWhenTheAppDidNotAnswer(t *testing.T) {
 	busy := map[string]any{"ok": false, "transient": true,
 		"error": "reading the screen did not finish: the app did not answer accessibility for 30.0 s (taking the snapshot); nothing was read"}
@@ -153,23 +139,18 @@ func TestScreenAsksAgainInCIWhenTheAppDidNotAnswer(t *testing.T) {
 	}
 }
 
-// Issue #130: key and hideKeyboard wait on the app too: they carry replyMs, as
-// type and erase do (issue #46), and in CI mode an op that gave up before sending anything is
-// asked once more.
 func TestKeyAndHideKeyboardSendTheReplyLimit(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)
 	if _, err := d.PressKey(context.Background(), "enter", driver.ActionOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	// 5 s timeout + 15 s: the limit call() waits for the reply.
 	if got := num(t, r.last("key"), "replyMs"); got != 20000 {
 		t.Errorf("key replyMs = %v, want 20000 (%v)", got, r.last("key"))
 	}
 	if err := d.HideKeyboard(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// 5 s timeout + 5 s for the tries + 15 s.
 	if got := num(t, r.last("hideKeyboard"), "replyMs"); got != 25000 {
 		t.Errorf("hideKeyboard replyMs = %v, want 25000 (%v)", got, r.last("hideKeyboard"))
 	}
@@ -219,8 +200,6 @@ func TestKeyAndHideKeyboardAskAgainOnlyWhenNothingWasSent(t *testing.T) {
 	}
 }
 
-// Issue #130: the host's typing budget (40 ms a character) counts characters, not bytes:
-// "héllo 👋" is 7 characters in 11 bytes, "こんにちは" 5 in 15.
 func TestTypingBudgetCountsCharacters(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)

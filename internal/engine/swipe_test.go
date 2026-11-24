@@ -10,7 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A swipe in a direction crosses the screen; on iOS an upward swipe starts lower.
 func TestSwipeDirection(t *testing.T) {
 	for _, tc := range []struct {
 		plat, dir string
@@ -35,7 +34,6 @@ func TestSwipeDirection(t *testing.T) {
 	}
 }
 
-// A swipe's duration and settle timeout come from the command.
 func TestSwipeOptions(t *testing.T) {
 	f := &fakeDriver{screen: static(), onSwipe: func(x1, y1, x2, y2 int) {}}
 	mustPass(t, runWith(t, f, quick, "- swipe: {direction: UP, duration: 1000, waitToSettleTimeoutMs: 250}"))
@@ -44,7 +42,6 @@ func TestSwipeOptions(t *testing.T) {
 	}
 }
 
-// A swipe from start to end: pixels or percentages; iOS keeps it on screen.
 func TestSwipeStartEnd(t *testing.T) {
 	for _, tc := range []struct {
 		plat, start, end string
@@ -78,9 +75,6 @@ func TestSwipeStartEnd(t *testing.T) {
 	}
 }
 
-// A swipe from an element starts at its center (or the point in it) and goes toward the edge:
-// to 10% from it, or farther, until it has crossed 70% of the element (a full-width pager
-// turns a page only for a swipe past its middle).
 func TestSwipeFromElement(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
@@ -103,11 +97,6 @@ func TestSwipeFromElement(t *testing.T) {
 	}
 }
 
-// Issue #127: a swipe from a slider left it at 71 instead of 80+ on a slow CI simulator: the
-// finger lifted while still moving, and the slider settled short of where it lifted. In CI mode
-// a swipe from an element (it places what it starts on) asks for a finger that rests before it
-// moves and before it lifts; outside CI it is as before. A swipe in a direction or between two
-// points never rests.
 func TestSwipeFromElementRestsInCI(t *testing.T) {
 	for _, tc := range []struct {
 		tbCI, cmd string
@@ -131,7 +120,6 @@ func TestSwipeFromElementRestsInCI(t *testing.T) {
 	}
 }
 
-// A swipe from an element that is not there fails; an optional one warns.
 func TestSwipeFromMissing(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -149,12 +137,6 @@ func TestSwipeFromMissing(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- swipe: {from: {id: '${(}'}, direction: UP}"), "JavaScript error")
 }
 
-// Issue #330: a drag-and-drop reorder (SwiftUI .onDrag/.onMove) begins only once the finger has
-// rested on the row for a long press; a swipe moves at once and only scrolls. `drag` sends one
-// swipe from the from element's centre to the to element's centre that the agent holds still
-// first (Hold), for the flow's hold (default 800 ms), moved over its duration (default 1 s).
-// Issue #358: Android's agent holds too (ItemTouchHelper, Compose's
-// detectDragGesturesAfterLongPress), so the same drag goes there.
 func TestDragHoldsThenMovesBetweenElements(t *testing.T) {
 	for _, plat := range []string{"ios", "android"} {
 		t.Run(plat, func(t *testing.T) { testDragHoldsThenMoves(t, plat) })
@@ -171,8 +153,7 @@ func testDragHoldsThenMoves(t *testing.T, plat string) {
 		{"{from: A, to: C}", [4]int{200, 225, 200, 325}, 800 * time.Millisecond, time.Second},
 		{"{from: {id: reorder_C}, to: {id: reorder_A}, hold: 1200, duration: 500}", [4]int{200, 325, 200, 225}, 1200 * time.Millisecond, 500 * time.Millisecond},
 		{"{start: '50%,28%', end: '50%,50%'}", [4]int{200, 224, 200, 400}, 800 * time.Millisecond, time.Second},
-		{"{from: A, end: '900,900'}", [4]int{200, 225, 399, 799}, 800 * time.Millisecond, time.Second}, // kept on screen
-		// No hold is still a drag (the agent's holdDrag), not a swipe that flings.
+		{"{from: A, end: '900,900'}", [4]int{200, 225, 399, 799}, 800 * time.Millisecond, time.Second},
 		{"{from: A, to: B, hold: 0}", [4]int{200, 225, 200, 275}, time.Millisecond, time.Second},
 	} {
 		t.Run(tc.cmd, func(t *testing.T) {
@@ -191,10 +172,6 @@ func testDragHoldsThenMoves(t *testing.T, plat string) {
 	}
 }
 
-// Issue #330: a drag whose element is not there fails before any touch (or warns when
-// optional); a drag on a platform whose agent cannot hold first (web; Android holds since issue
-// #358) fails rather than swiping, and a device error fails the step, the drag never sent
-// again (issue #358: a second drag would reorder again).
 func TestDragFailures(t *testing.T) {
 	rows := static(btn("A", "reorder_A", 200))
 	f := &fakeDriver{screen: rows, plat: "ios"}
@@ -224,7 +201,6 @@ func TestDragFailures(t *testing.T) {
 	}
 }
 
-// A swipe the device fails fails the command.
 func TestSwipeError(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("Swipe", errors.New("touch lost"))
@@ -233,17 +209,10 @@ func TestSwipeError(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Nope}"), "touch lost")
 }
 
-// volume is the bench's slider (bench/SCENARIOS.md, controls) as iOS 27 reports it: 362 by 31
-// points, its value a percentage.
 func volume(value string) *ui.Node {
 	return &ui.Node{ID: "slider_volume", Class: "Slider", Text: value, Value: value, Bounds: ui.Rect{L: 20, T: 591, R: 382, B: 622}, Enabled: true, Clickable: true}
 }
 
-// Issue #139, item 1: a swipe between two points that drags a slider's thumb lifted while
-// moving, in CI mode too, and left the bench slider at 59-66 instead of 98 with the app stopped
-// 0.9 s of every 1.2 s. In CI mode on iOS, one that starts on a slider's thumb rests and creeps
-// like a swipe from an element. Elsewhere, and off a thumb, it is as before: it may be meant to
-// fling.
 func TestSwipeBetweenPointsOnASliderRestsInCI(t *testing.T) {
 	for _, tc := range []struct {
 		tbCI, plat, value, cmd string
@@ -251,15 +220,13 @@ func TestSwipeBetweenPointsOnASliderRestsInCI(t *testing.T) {
 	}{
 		{"1", "ios", "50%", "{start: '201,606', end: '362,606'}", true},
 		{"1", "ios", "50%", "{start: '50%,75%', end: '90%,75%'}", true},
-		{"1", "ios", "10%", "{start: '201,606', end: '362,606'}", false}, // not on the thumb
-		{"1", "ios", "50%", "{start: '201,300', end: '201,100'}", false}, // not on the slider
+		{"1", "ios", "10%", "{start: '201,606', end: '362,606'}", false},
+		{"1", "ios", "50%", "{start: '201,300', end: '201,100'}", false},
 		{"0", "ios", "50%", "{start: '201,606', end: '362,606'}", false},
 		{"1", "android", "50%", "{start: '201,606', end: '362,606'}", false},
 	} {
 		t.Run("TB_CI="+tc.tbCI+" "+tc.plat+" "+tc.value+" "+tc.cmd, func(t *testing.T) {
 			t.Setenv("TB_CI", tc.tbCI)
-			// The drag leaves the slider where it was: one that rests is dragged again once (see
-			// TestASliderLeftShortIsDraggedAgainInCI).
 			f := &fakeDriver{screen: static(volume(tc.value)), plat: tc.plat, onSwipe: func(x1, y1, x2, y2 int) {}}
 			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
 			if len(f.swipes) == 0 || f.swipes[0].Rest != tc.rest || !tc.rest && len(f.swipes) != 1 {
@@ -269,14 +236,10 @@ func TestSwipeBetweenPointsOnASliderRestsInCI(t *testing.T) {
 	}
 }
 
-// Issue #139, item 2: the creep before the lift (issue #182) outlasts an app stall of about a
-// second; a longer one still left the slider short of where the drag ended (the app stopped 2 s
-// of every 2.3 s). In CI mode on iOS, a slider left short is dragged again from its thumb to the
-// same end, at most twice, and not again once a drag left it where it was.
 func TestASliderLeftShortIsDraggedAgainInCI(t *testing.T) {
 	for _, tc := range []struct {
 		name, tbCI, cmd string
-		after           []string // the slider's value after each swipe
+		after           []string
 		want            [][4]int
 	}{
 		{"reached", "1", "{from: {id: slider_volume}, direction: RIGHT}", []string{"100%"},
@@ -320,20 +283,17 @@ func TestASliderLeftShortIsDraggedAgainInCI(t *testing.T) {
 	}
 }
 
-// Review of issue #139: only a swipe along the slider (mostly sideways) is taken for a drag of
-// its thumb. One up or down that starts on a thumb scrolls the page: resting would hand the
-// touch to the slider after the scroll view's delay, and the page would not scroll.
 func TestOnlyASwipeAlongASliderIsTakenForADragOfItsThumb(t *testing.T) {
 	for _, tc := range []struct {
 		cmd    string
 		rest   bool
 		swipes int
 	}{
-		{"{start: '201,606', end: '362,606'}", true, 2}, // left at 50: dragged again once
+		{"{start: '201,606', end: '362,606'}", true, 2},
 		{"{start: '201,606', end: '201,200'}", false, 1},
-		{"{start: '201,606', end: '260,300'}", false, 1}, // more up than sideways
+		{"{start: '201,606', end: '260,300'}", false, 1},
 		{"{from: {id: slider_volume}, direction: RIGHT}", true, 2},
-		{"{from: {id: slider_volume}, direction: UP}", true, 1}, // a swipe from an element rests (#127); not a drag of the thumb
+		{"{from: {id: slider_volume}, direction: UP}", true, 1},
 	} {
 		t.Run(tc.cmd, func(t *testing.T) {
 			t.Setenv("TB_CI", "1")
@@ -346,13 +306,8 @@ func TestOnlyASwipeAlongASliderIsTakenForADragOfItsThumb(t *testing.T) {
 	}
 }
 
-// Review of issue #139: a slider is dragged again only when the first drag moved it toward the
-// end, or left it where it was (a stall lost the whole drag), and it is still well short; never
-// one the drag moved the wrong way (right to left), a disabled one, one the app holds short (a
-// clamp: one drag again at most), a stepped one that snapped to its nearest step, one under a
-// window that came up, or from a thumb at the screen's edge.
 func TestASliderIsDraggedAgainOnlyWhenTheDragFellShortOnTheWay(t *testing.T) {
-	full := func(value string) *ui.Node { // the screen's width: its ends are in the edge zone
+	full := func(value string) *ui.Node {
 		n := volume(value)
 		n.Bounds.L, n.Bounds.R = 0, 400
 		return n
@@ -363,7 +318,7 @@ func TestASliderIsDraggedAgainOnlyWhenTheDragFellShortOnTheWay(t *testing.T) {
 		slider    func(string) *ui.Node
 		start     string
 		after     []string
-		alert     bool // a system window comes up over the app with the first swipe
+		alert     bool
 		swipes    int
 	}{
 		{"partial stall 50 to 60", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"60%", "98%"}, false, 2},

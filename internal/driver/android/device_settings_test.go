@@ -15,10 +15,9 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// SetOrientation maps flow names to the protocol's, then re-reads the size (it swaps in landscape).
 func TestSetOrientation(t *testing.T) {
 	defer func(w time.Duration) { rotateWait = w }(rotateWait)
-	rotateWait = 200 * time.Millisecond // info always says landscape here: portrait cases wait it out
+	rotateWait = 200 * time.Millisecond
 	cases := map[string]string{"PORTRAIT": "portrait", "landscape_left": "landscapeLeft", "LANDSCAPE_RIGHT": "landscapeRight",
 		"upside_down": "upsideDown", "Landscape": "landscape"}
 	for in, want := range cases {
@@ -40,10 +39,6 @@ func TestSetOrientation(t *testing.T) {
 	}
 }
 
-// The display turns after the rotate request returns: right after it the agent can still
-// report the old size (Maestro's e2e demo_app setOrientation.yaml, rotating back to portrait:
-// tb kept 2400x1080 and swiped at x=1200 on a 1080-wide screen). The size is asked again until
-// it has the orientation asked for, for up to rotateWait.
 func TestSetOrientationWaitsForTheTurn(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return nil })
@@ -51,7 +46,7 @@ func TestSetOrientationWaitsForTheTurn(t *testing.T) {
 	var asked atomic.Int64
 	a.on("info", func(map[string]any) map[string]any {
 		if asked.Add(1) <= 2 {
-			return map[string]any{"w": 2400, "h": 1080} // still landscape
+			return map[string]any{"w": 2400, "h": 1080}
 		}
 		return map[string]any{"w": 1080, "h": 2400}
 	})
@@ -63,12 +58,9 @@ func TestSetOrientationWaitsForTheTurn(t *testing.T) {
 	}
 }
 
-// issue #115: a run cancelled while setOrientation waits for the display to turn ends the
-// wait at once and reports the cancellation: it used to return nil, so the step read as done.
-// A run cancelled before the step sends no rotation.
 func TestSetOrientationCancelled(t *testing.T) {
 	defer func(w time.Duration) { rotateWait = w }(rotateWait)
-	rotateWait = 30 * time.Second // the display never turns here: only the cancel ends the wait
+	rotateWait = 30 * time.Second
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return nil })
 	d := newDriver(t, a)
@@ -76,9 +68,9 @@ func TestSetOrientationCancelled(t *testing.T) {
 	var asked atomic.Int64
 	a.on("info", func(map[string]any) map[string]any {
 		if asked.Add(1) == 2 {
-			cancel() // the run is stopped while the wait polls
+			cancel()
 		}
-		return map[string]any{"w": 2400, "h": 1080} // still landscape
+		return map[string]any{"w": 2400, "h": 1080}
 	})
 	start := time.Now()
 	err := d.SetOrientation(ctx, "PORTRAIT")
@@ -97,10 +89,9 @@ func TestSetOrientationCancelled(t *testing.T) {
 	}
 }
 
-// A failed rotation keeps the old size; an info without a size does not zero it.
 func TestSetOrientationErrors(t *testing.T) {
 	defer func(w time.Duration) { rotateWait = w }(rotateWait)
-	rotateWait = 200 * time.Millisecond // an info without a size never shows the turn
+	rotateWait = 200 * time.Millisecond
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "locked"} })
 	d := newDriver(t, a)
@@ -119,10 +110,9 @@ func TestSetOrientationErrors(t *testing.T) {
 	}
 }
 
-// A protocol name passed straight through (not a flow name) should keep its case.
 func TestSetOrientationKeepsProtocolNames(t *testing.T) {
 	defer func(w time.Duration) { rotateWait = w }(rotateWait)
-	rotateWait = 200 * time.Millisecond // its info does not turn
+	rotateWait = 200 * time.Millisecond
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return nil })
 	d := newDriver(t, a)
@@ -132,7 +122,6 @@ func TestSetOrientationKeepsProtocolNames(t *testing.T) {
 	}
 }
 
-// Airplane mode goes through cmd connectivity; toggling reads the current setting first.
 func TestAirplaneMode(t *testing.T) {
 	for _, c := range []struct {
 		current string
@@ -160,7 +149,6 @@ func TestAirplaneMode(t *testing.T) {
 	}
 }
 
-// Foreground returns the package the agent reports.
 func TestForeground(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": "com.android.launcher3"} })
@@ -174,7 +162,6 @@ func TestForeground(t *testing.T) {
 	}
 }
 
-// DisableAnimations zeroes the three scales and tells the agent; restore puts back the old values (null → 1).
 func TestDisableAnimations(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -217,9 +204,6 @@ func TestDisableAnimations(t *testing.T) {
 	}
 }
 
-// DisableAnimations returns a usable no-op restore when reading the settings fails. When
-// writing them fails, part of the write may have been applied (`a; b; c` exits with the last
-// one's code): restore puts the values read back.
 func TestDisableAnimationsErrors(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"settings get": {"denied", 1}})
 	d := newDriver(t, a)
@@ -247,11 +231,6 @@ func TestDisableAnimationsErrors(t *testing.T) {
 	}
 }
 
-// issue #202 (reviews): a run cancelled while the scales are being set does not abandon the
-// write part way: DisableAnimations returns only once the agent has answered it, with the
-// cancellation and a restore that puts the scales back. It used to return a no-op restore,
-// which the caller dropped (the device's animations stayed off for good); then a restore that
-// could run, through adb, while the agent was still putting the zeros.
 func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
 	a.on("animations", func(map[string]any) map[string]any { return nil })
@@ -268,7 +247,7 @@ func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
 	getAndPut := a.handlers["sh"]
 	a.on("sh", func(req map[string]any) map[string]any {
 		if strings.Contains(fmt.Sprint(req["cmd"]), "animation_scale 0") {
-			close(put) // the device is putting the zeros; the answer is late
+			close(put)
 			<-release
 			defer setDone.Store(true)
 		}
@@ -317,8 +296,6 @@ func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
 	}
 }
 
-// issue #202 (second review): a run cancelled before the write changes nothing and gets a
-// no-op restore.
 func TestDisableAnimationsCancelledBeforeWrite(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
 	d := newDriver(t, a)
@@ -334,9 +311,6 @@ func TestDisableAnimationsCancelledBeforeWrite(t *testing.T) {
 	}
 }
 
-// issue #202 (review): restore puts the scales back with adb, which does not wait behind the
-// agent: an agent still running a request a cancelled run gave up on (it runs one at a time)
-// would hold the restore past its bound, and the animations would stay off.
 func TestDisableAnimationsRestoreUsesADB(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n0.5\n1\n", 0}})
 	a.on("animations", func(map[string]any) map[string]any { return nil })
@@ -346,7 +320,6 @@ func TestDisableAnimationsRestoreUsesADB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The agent is now busy with a request the run gave up on.
 	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
 	cancelInFlight(t, d, started, release)
 	done := make(chan struct{})
@@ -368,7 +341,6 @@ func TestDisableAnimationsRestoreUsesADB(t *testing.T) {
 	}
 }
 
-// Raw returns the agent's full JSON answer.
 func TestRaw(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("setQuiet", func(req map[string]any) map[string]any { return map[string]any{"quiet": req["ms"]} })
@@ -386,8 +358,6 @@ func TestRaw(t *testing.T) {
 	}
 }
 
-// StopRecording without a recording is a no-op; SetLocation on a device before Android 12 (or of
-// unknown version) needs an emulator.
 func TestRecordingAndLocationWithoutADB(t *testing.T) {
 	d := bareDriver(nil)
 	if err := d.StopRecording(ctxT(t)); err != nil {
@@ -399,7 +369,6 @@ func TestRecordingAndLocationWithoutADB(t *testing.T) {
 	}
 }
 
-// TB_DEBUG logs each request's time and each action's result to stderr.
 func TestDebugLogging(t *testing.T) {
 	a := actionAgent(t)
 	d := newDriver(t, a)

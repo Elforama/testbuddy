@@ -13,9 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// ---- helpers ----
-
-// flowSrc is a minimal valid flow with an optional name and tags.
 func flowSrc(name string, tags ...string) string {
 	var b strings.Builder
 	b.WriteString("appId: com.example\n")
@@ -29,7 +26,6 @@ func flowSrc(name string, tags ...string) string {
 	return b.String()
 }
 
-// writeTree writes slash-path -> content files under a fresh temp dir and returns it.
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -45,7 +41,6 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// rels lists the plan's flows as slash paths relative to dir, in run order.
 func rels(t *testing.T, dir string, p *Plan) []string {
 	t.Helper()
 	var out []string
@@ -67,7 +62,6 @@ func flowNames(p *Plan) []string {
 	return out
 }
 
-// captureStderr runs fn and returns what it wrote to os.Stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -98,9 +92,6 @@ func writeConfig(t *testing.T, src string) string {
 	return filepath.Join(dir, "config.yaml")
 }
 
-// ---- LoadConfig ----
-
-// TestLoadConfigDefaults pins the defaults of an empty config: every top-level flow, continue on failure.
 func TestLoadConfigDefaults(t *testing.T) {
 	for _, src := range []string{"", "# only a comment\n", "- a\n- b\n", "just text\n"} {
 		path := writeConfig(t, src)
@@ -115,7 +106,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
-// TestLoadConfigAllKeys pins every key LoadConfig reads.
 func TestLoadConfigAllKeys(t *testing.T) {
 	path := writeConfig(t, `flows:
   - "*"
@@ -149,7 +139,6 @@ executionOrder:
 	}
 }
 
-// TestLoadConfigCommaLists pins that list keys also take a comma-separated string.
 func TestLoadConfigCommaLists(t *testing.T) {
 	c, err := LoadConfig(writeConfig(t, `flows: "a/*, b/**"
 includeTags: "smoke,  fast ,,"
@@ -166,7 +155,6 @@ executionOrder:
 	}
 }
 
-// TestLoadConfigEmptyFlowsKeepsDefault pins that an empty flows value means every top-level flow.
 func TestLoadConfigEmptyFlowsKeepsDefault(t *testing.T) {
 	for _, src := range []string{"flows: []\n", "flows: \"\"\n", "flows:\n", "flows: \" , \"\n"} {
 		c, err := LoadConfig(writeConfig(t, src))
@@ -179,7 +167,6 @@ func TestLoadConfigEmptyFlowsKeepsDefault(t *testing.T) {
 	}
 }
 
-// TestLoadConfigContinueOnFailure pins executionOrder.continueOnFailure (default true).
 func TestLoadConfigContinueOnFailure(t *testing.T) {
 	for _, tc := range []struct {
 		src  string
@@ -201,7 +188,6 @@ func TestLoadConfigContinueOnFailure(t *testing.T) {
 	}
 }
 
-// TestLoadConfigContinueOnFailureYAMLBools pins that every YAML spelling of false stops on failure.
 func TestLoadConfigContinueOnFailureYAMLBools(t *testing.T) {
 	for _, v := range []string{"False", "FALSE"} {
 		c, err := LoadConfig(writeConfig(t, "executionOrder:\n  continueOnFailure: "+v+"\n"))
@@ -214,7 +200,6 @@ func TestLoadConfigContinueOnFailureYAMLBools(t *testing.T) {
 	}
 }
 
-// TestLoadConfigUnknownKeyWarns pins the stderr warning for unknown keys (and silence for known ones).
 func TestLoadConfigUnknownKeyWarns(t *testing.T) {
 	path := writeConfig(t, "flows: ['*']\nbogusKey: 1\nflow: x\n")
 	var c *Config
@@ -236,7 +221,6 @@ func TestLoadConfigUnknownKeyWarns(t *testing.T) {
 	}
 }
 
-// TestLoadConfigErrors pins file and syntax errors.
 func TestLoadConfigErrors(t *testing.T) {
 	_, err := LoadConfig(filepath.Join(t.TempDir(), "missing.yaml"))
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -249,16 +233,12 @@ func TestLoadConfigErrors(t *testing.T) {
 	}
 }
 
-// ---- Build: inputs ----
-
-// TestBuildNoPaths pins the error for an empty path list.
 func TestBuildNoPaths(t *testing.T) {
 	if _, err := Build(nil, Options{}); err == nil || !strings.Contains(err.Error(), "give a flow file or a folder") {
 		t.Errorf("%v", err)
 	}
 }
 
-// TestBuildSingleFile pins that one file runs as is: no globs, no tag filters.
 func TestBuildSingleFile(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"slow.yaml":   flowSrc("", "slow"),
@@ -269,14 +249,12 @@ func TestBuildSingleFile(t *testing.T) {
 		t.Errorf("%+v", p)
 	}
 
-	// An explicit config is loaded (for its other settings) but still filters nothing.
 	p = mustBuild(t, []string{filepath.Join(dir, "slow.yaml")}, Options{ConfigPath: filepath.Join(dir, "config.yaml")})
 	if len(p.Flows) != 1 || p.Config == nil || !reflect.DeepEqual(p.Config.ExcludeTags, []string{"slow"}) {
 		t.Errorf("with config: %+v", p)
 	}
 }
 
-// TestBuildSingleFileErrors pins errors for a single file that does not parse, or is missing.
 func TestBuildSingleFileErrors(t *testing.T) {
 	dir := writeTree(t, map[string]string{"bad.yaml": "appId: a\n---\n- tapOnn: X\n", "nocmds.yaml": "appId: a\n"})
 	_, err := Build([]string{filepath.Join(dir, "bad.yaml")}, Options{})
@@ -284,7 +262,6 @@ func TestBuildSingleFileErrors(t *testing.T) {
 	if !errors.As(err, &fe) || fe.Line != 3 {
 		t.Errorf("parse error: %v", err)
 	}
-	// An explicit file is parsed even when it has no `---` section (and so fails).
 	if _, err := Build([]string{filepath.Join(dir, "nocmds.yaml")}, Options{}); err == nil || !strings.Contains(err.Error(), "Commands Section Required") {
 		t.Errorf("no commands: %v", err)
 	}
@@ -296,7 +273,6 @@ func TestBuildSingleFileErrors(t *testing.T) {
 	}
 }
 
-// TestBuildFolderDefaults pins a folder without config: top-level flows only, sorted by path.
 func TestBuildFolderDefaults(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"c.yaml":         flowSrc(""),
@@ -321,7 +297,6 @@ func TestBuildFolderDefaults(t *testing.T) {
 	}
 }
 
-// TestBuildFolderConfigDiscovery pins that a folder's config.yaml (or config.yml) is used.
 func TestBuildFolderConfigDiscovery(t *testing.T) {
 	for _, name := range []string{"config.yaml", "config.yml"} {
 		t.Run(name, func(t *testing.T) {
@@ -360,7 +335,6 @@ func TestBuildFolderConfigDiscovery(t *testing.T) {
 	})
 }
 
-// TestBuildNoFlows pins the error when nothing is left to run.
 func TestBuildNoFlows(t *testing.T) {
 	dir := writeTree(t, map[string]string{"notes.txt": "x", "other.yaml": "foo: bar\n"})
 	_, err := Build([]string{dir}, Options{})
@@ -373,7 +347,6 @@ func TestBuildNoFlows(t *testing.T) {
 	}
 }
 
-// TestBuildFolderParseError pins that one broken flow in a folder fails the whole build.
 func TestBuildFolderParseError(t *testing.T) {
 	dir := writeTree(t, map[string]string{"a.yaml": flowSrc(""), "b.yaml": "appId: a\n---\n- frob\n"})
 	_, err := Build([]string{dir}, Options{})
@@ -383,7 +356,6 @@ func TestBuildFolderParseError(t *testing.T) {
 	}
 }
 
-// TestBuildMultiplePaths pins mixing files and folders, with duplicates run once.
 func TestBuildMultiplePaths(t *testing.T) {
 	dir := writeTree(t, map[string]string{"a.yaml": flowSrc(""), "b.yaml": flowSrc(""), "extra/x.yaml": flowSrc("")})
 	x := filepath.Join(dir, "extra", "x.yaml")
@@ -396,7 +368,6 @@ func TestBuildMultiplePaths(t *testing.T) {
 	}
 }
 
-// TestBuildDedupesRelativeAndAbsolute pins that the same file given two ways runs once.
 func TestBuildDedupesRelativeAndAbsolute(t *testing.T) {
 	dir := writeTree(t, map[string]string{"a.yaml": flowSrc(""), "b.yaml": flowSrc("")})
 	t.Chdir(dir)
@@ -406,9 +377,6 @@ func TestBuildDedupesRelativeAndAbsolute(t *testing.T) {
 	}
 }
 
-// ---- Build: globs ----
-
-// TestBuildGlobs pins the documented example: * one level, ** any depth, ! excludes.
 func TestBuildGlobs(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"config.yaml":          `flows: ["*", "auth/**", "wip/*", "!wip/draft*", "!auth/legacy/*"]` + "\n",
@@ -426,7 +394,6 @@ func TestBuildGlobs(t *testing.T) {
 	}
 }
 
-// TestBuildGlobsExcludeTopLevel pins that an exclusion can drop a top-level file by name.
 func TestBuildGlobsExcludeTopLevel(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "flows: ['**', '!*_wip.yaml']\n", "a.yaml": flowSrc(""), "b_wip.yaml": flowSrc(""), "s/c_wip.yaml": flowSrc("")})
 	if got := rels(t, dir, mustBuild(t, []string{dir}, Options{})); !reflect.DeepEqual(got, []string{"a.yaml", "s/c_wip.yaml"}) {
@@ -434,7 +401,6 @@ func TestBuildGlobsExcludeTopLevel(t *testing.T) {
 	}
 }
 
-// TestBuildOnlyExclusions pins the error for a flows list with no inclusions.
 func TestBuildOnlyExclusions(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "flows: ['!wip/*']\n", "a.yaml": flowSrc("")})
 	if _, err := Build([]string{dir}, Options{}); err == nil || !strings.Contains(err.Error(), "only exclusions") {
@@ -442,7 +408,6 @@ func TestBuildOnlyExclusions(t *testing.T) {
 	}
 }
 
-// TestBuildHiddenFolders pins that hidden folders are skipped, except .tb and .maestro.
 func TestBuildHiddenFolders(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"config.yaml":         "flows: ['**']\n",
@@ -460,7 +425,6 @@ func TestBuildHiddenFolders(t *testing.T) {
 	}
 }
 
-// TestBuildHiddenFolderGivenDirectly pins that a hidden folder named on the command line is walked.
 func TestBuildHiddenFolderGivenDirectly(t *testing.T) {
 	root := writeTree(t, map[string]string{".hidden/a.yaml": flowSrc(""), ".maestro/b.yaml": flowSrc("")})
 	for _, name := range []string{".hidden", ".maestro"} {
@@ -471,8 +435,6 @@ func TestBuildHiddenFolderGivenDirectly(t *testing.T) {
 	}
 }
 
-// TestBuildSkipsConfigFiles pins that config.yaml/yml files and the active config are never flows.
-// The configs below have a `---` section but no appId, so parsing one as a flow would fail.
 func TestBuildSkipsConfigFiles(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"config.yaml":    "flows: ['**']\n---\n- back\n",
@@ -484,7 +446,6 @@ func TestBuildSkipsConfigFiles(t *testing.T) {
 	if got := rels(t, dir, p); !reflect.DeepEqual(got, []string{"a.yaml", "sub/b.yaml"}) {
 		t.Errorf("config.yaml files: %v", got)
 	}
-	// An explicit config with another name is excluded from the walk too.
 	tools := writeTree(t, map[string]string{"ws.yaml": "flows: ['**']\n---\n- back\n", "real.yaml": flowSrc("")})
 	p = mustBuild(t, []string{tools}, Options{ConfigPath: filepath.Join(tools, "ws.yaml")})
 	if got := rels(t, tools, p); !reflect.DeepEqual(got, []string{"real.yaml"}) {
@@ -492,9 +453,6 @@ func TestBuildSkipsConfigFiles(t *testing.T) {
 	}
 }
 
-// ---- Build: tags ----
-
-// TestBuildTags pins include/exclude tags from options and config, combined.
 func TestBuildTags(t *testing.T) {
 	files := map[string]string{
 		"smoke.yaml":      flowSrc("", "smoke"),
@@ -545,7 +503,6 @@ func TestBuildTags(t *testing.T) {
 	}
 }
 
-// TestBuildTagsOnExplicitFiles pins that tag filters apply to files when several paths are given.
 func TestBuildTagsOnExplicitFiles(t *testing.T) {
 	dir := writeTree(t, map[string]string{"a.yaml": flowSrc("", "slow"), "b.yaml": flowSrc("")})
 	p := mustBuild(t, []string{filepath.Join(dir, "a.yaml"), filepath.Join(dir, "b.yaml")}, Options{ExcludeTags: []string{"slow"}})
@@ -554,7 +511,6 @@ func TestBuildTagsOnExplicitFiles(t *testing.T) {
 	}
 }
 
-// TestTagsPass pins the tag rule: include needs any match, exclude drops any match.
 func TestTagsPass(t *testing.T) {
 	for _, tc := range []struct {
 		tags, include, exclude []string
@@ -575,15 +531,12 @@ func TestTagsPass(t *testing.T) {
 	}
 }
 
-// ---- Build: executionOrder ----
-
-// TestBuildFlowsOrder pins ordered flows first (by flow name), then the rest, and continueOnFailure.
 func TestBuildFlowsOrder(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"config.yaml": "executionOrder:\n  continueOnFailure: false\n  flowsOrder: [login, Pay now]\n",
 		"a.yaml":      flowSrc(""),
 		"login.yaml":  flowSrc(""),
-		"pay.yaml":    flowSrc("Pay now"), // ordered by its config name
+		"pay.yaml":    flowSrc("Pay now"),
 		"z.yaml":      flowSrc(""),
 	})
 	p := mustBuild(t, []string{dir}, Options{})
@@ -595,7 +548,6 @@ func TestBuildFlowsOrder(t *testing.T) {
 	}
 }
 
-// TestBuildFlowsOrderDefaultsToContinue pins that continueOnFailure defaults to true with flowsOrder.
 func TestBuildFlowsOrderDefaultsToContinue(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "executionOrder:\n  flowsOrder: [b]\n", "a.yaml": flowSrc(""), "b.yaml": flowSrc("")})
 	p := mustBuild(t, []string{dir}, Options{})
@@ -604,7 +556,6 @@ func TestBuildFlowsOrderDefaultsToContinue(t *testing.T) {
 	}
 }
 
-// TestBuildContinueOnFailureNeedsFlowsOrder pins that continueOnFailure alone does not change the plan.
 func TestBuildContinueOnFailureNeedsFlowsOrder(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "executionOrder:\n  continueOnFailure: false\n", "a.yaml": flowSrc("")})
 	p := mustBuild(t, []string{dir}, Options{})
@@ -613,7 +564,6 @@ func TestBuildContinueOnFailureNeedsFlowsOrder(t *testing.T) {
 	}
 }
 
-// TestBuildFlowsOrderMissing pins a missing first ordered flow (error) and a later one (order stops there).
 func TestBuildFlowsOrderMissing(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "executionOrder:\n  flowsOrder: [ghost, a]\n", "a.yaml": flowSrc("")})
 	if _, err := Build([]string{dir}, Options{}); err == nil || err.Error() != `could not find flow "ghost" needed for executionOrder` {
@@ -630,7 +580,6 @@ func TestBuildFlowsOrderMissing(t *testing.T) {
 	}
 }
 
-// TestBuildFlowsOrderFilteredByTags pins that an ordered flow removed by tags counts as missing.
 func TestBuildFlowsOrderFilteredByTags(t *testing.T) {
 	dir := writeTree(t, map[string]string{"config.yaml": "excludeTags: [slow]\nexecutionOrder:\n  flowsOrder: [a]\n", "a.yaml": flowSrc("", "slow"), "b.yaml": flowSrc("")})
 	if _, err := Build([]string{dir}, Options{}); err == nil || !strings.Contains(err.Error(), `could not find flow "a"`) {
@@ -638,9 +587,6 @@ func TestBuildFlowsOrderFilteredByTags(t *testing.T) {
 	}
 }
 
-// ---- glob internals ----
-
-// TestGlobMatch pins the glob rules: * within one segment, ** across any number.
 func TestGlobMatch(t *testing.T) {
 	for _, tc := range []struct {
 		pattern, path string
@@ -680,14 +626,12 @@ func TestGlobMatch(t *testing.T) {
 	}
 }
 
-// TestGlobWalkError pins that an unreadable folder fails the walk.
 func TestGlobWalkError(t *testing.T) {
 	if _, err := glob(filepath.Join(t.TempDir(), "missing"), []string{"*"}, nil); err == nil {
 		t.Error("want an error for a missing folder")
 	}
 }
 
-// TestIsFlowFile pins what counts as a flow file.
 func TestIsFlowFile(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"flow.yaml":       flowSrc(""),

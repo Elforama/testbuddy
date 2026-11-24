@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// inDir runs fn with the working directory set to dir.
 func inDir(t *testing.T, dir string, fn func()) {
 	t.Helper()
 	old, _ := os.Getwd()
@@ -30,7 +29,6 @@ func writeFile(t *testing.T, path, src string) {
 
 const badPage = "<button><svg></svg></button>\n<button>Save</button>\n"
 
-// Nothing wrong: one "ok" line, exit 0.
 func TestA11yOK(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.html"), "<button>Save</button>")
@@ -41,7 +39,6 @@ func TestA11yOK(t *testing.T) {
 	}
 }
 
-// Problems: grouped by file, one element per line in tb look's notation, exit 1.
 func TestA11yListsElements(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.html"), badPage)
@@ -59,7 +56,6 @@ func TestA11yListsElements(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	// --fail-on none reports but passes.
 	capture(t, func() { code = cmdA11y([]string{dir, "--fail-on", "none"}) })
 	if code != 0 {
 		t.Errorf("--fail-on none: code %d", code)
@@ -99,7 +95,6 @@ func TestA11yFormats(t *testing.T) {
 	}
 }
 
-// --changed reports only lines added since the base, plus untracked files.
 func TestA11yChanged(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -130,8 +125,6 @@ func TestA11yChanged(t *testing.T) {
 	if code != 1 {
 		t.Errorf("code %d", code)
 	}
-	// old.html:1 predates the branch (old.html's first listed line is :2); old.html:2 and
-	// new.html:1 are new.
 	for _, want := range []string{filepath.Join("web", "new.html") + "\n  :1 button ✗", filepath.Join("web", "old.html") + "\n  :2 a ✗", "(2 files checked)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -140,7 +133,6 @@ func TestA11yChanged(t *testing.T) {
 	if strings.Contains(out, "node_modules") {
 		t.Errorf("checked node_modules:\n%s", out)
 	}
-	// Limited to a path that changed nothing.
 	writeFile(t, filepath.Join(dir, "other", "keep.txt"), "")
 	inDir(t, dir, func() { out, _ = capture(t, func() { code = cmdA11y([]string{"--changed", "other"}) }) })
 	if code != 0 || !strings.HasPrefix(out, "ok: 0 files checked") {
@@ -148,8 +140,6 @@ func TestA11yChanged(t *testing.T) {
 	}
 }
 
-// --fix adds the missing selectors, says what it added and what it left, then reports what
-// is left (here nothing an exit status counts), and exits from that.
 func TestA11yFix(t *testing.T) {
 	dir := t.TempDir()
 	page := filepath.Join(dir, "a.html")
@@ -174,7 +164,6 @@ func TestA11yFix(t *testing.T) {
 	}
 }
 
-// --dry-run says what --fix would add and changes nothing; the report is the check's.
 func TestA11yFixDryRun(t *testing.T) {
 	dir := t.TempDir()
 	page := filepath.Join(dir, "a.html")
@@ -209,7 +198,6 @@ func TestA11yFixJSON(t *testing.T) {
 		res.Fixed[0].Element != "button" || res.Fixed[0].Rule != "web-no-selector" || res.Left == nil {
 		t.Errorf("json %s: %+v", out, res)
 	}
-	// Without --fix there is no fixed list.
 	out, _ = capture(t, func() { cmdA11y([]string{dir, "--json"}) })
 	if strings.Contains(out, `"fixed"`) {
 		t.Errorf("json without --fix: %s", out)

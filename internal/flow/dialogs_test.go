@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// answerDialogs (issue #91): OK or CANCEL, or a map with button, text, label and optional;
-// the text stays raw (the engine interpolates it).
 func TestAnswerDialogs(t *testing.T) {
 	for _, c := range []struct {
 		src  string
@@ -18,11 +16,9 @@ func TestAnswerDialogs(t *testing.T) {
 		{"- answerDialogs: {button: CANCEL}\n", DialogChoice{Cancel: true}},
 		{"- answerDialogs: {text: \"${NAME}\"}\n", DialogChoice{Text: "${NAME}", HasText: true}},
 		{"- answerDialogs: {button: OK, text: \"\"}\n", DialogChoice{HasText: true}},
-		// A map without button means OK.
 		{"- answerDialogs: {}\n", DialogChoice{}},
 		{"- answerDialogs: {label: Default}\n", DialogChoice{}},
 		{"- answerDialogs: {optional: true}\n", DialogChoice{}},
-		// A button with ${} is read when the step runs.
 		{"- answerDialogs: \"${ANSWER}\"\n", DialogChoice{Button: "${ANSWER}"}},
 		{"- answerDialogs: {button: \"${ANSWER}\", text: Ada}\n", DialogChoice{Button: "${ANSWER}", Text: "Ada", HasText: true}},
 	} {

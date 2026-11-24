@@ -12,10 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A runner may withhold a tap it can prove would not reach the app ("preflight": the target
-// moved before the touch; "delivery": the touch landed on something else). tb trusts that
-// receipt only where it can be true: a guarded tap on a named target, with no click reported.
-// Anything else is a broken receipt and an error, never a silent "nothing happened".
 func TestTapDeliveryReceipt(t *testing.T) {
 	target := &driver.ActionTarget{Seq: 104, ID: "buy", Window: 4242}
 	clicked := true
@@ -30,7 +26,6 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "delivered", target: target,
 			answer: map[string]any{"result": "changed", "probed": true, "targeted": true, "seq": 5, "injectMs": 12, "settleMs": 80},
 			want:   driver.ActionResult{Settle: driver.Changed, Probed: true, Targeted: true, InjectMs: 12, SettleMs: 80}},
-		// Issue #134: how the probe saw the touch end is passed on, for the tap's trace line.
 		{name: "the touch's ending is passed on", target: target,
 			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "touch": "ended", "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, Touch: "ended"}},
@@ -40,14 +35,12 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "withheld before the touch", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "preflight", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "preflight", Guarded: true}},
-		// Issue #39: why the agent's check withheld the touch, and the button's live frame.
 		{name: "withheld before the touch, saying why", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "preflight", "withheldWhy": "the button is disabled", "liveFrame": []int{36, 179, 156, 213}, "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "preflight", WithheldWhy: "the button is disabled", LiveFrame: &ui.Rect{L: 36, T: 179, R: 156, B: 213}, Guarded: true}},
 		{name: "withheld at delivery", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "delivery", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "delivery", Guarded: true}},
-		// Issue #103: withheld at delivery because the target moved after the agent read it.
 		{name: "withheld at delivery, the target moved", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "moved", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "moved", Guarded: true}},
@@ -61,7 +54,6 @@ func TestTapDeliveryReceipt(t *testing.T) {
 			answer: map[string]any{"withheld": "delivery", "guarded": true, "clicked": true, "seq": 5}, wantErr: true},
 		{name: "a swipe is never withheld", swipe: true, target: target,
 			answer: map[string]any{"withheld": "preflight", "guarded": true, "seq": 5}, wantErr: true},
-		// Issue #131: the probe saw the touch end cancelled; no handler took it as a tap.
 		{name: "cancelled", target: target,
 			answer: map[string]any{"cancelled": true, "guarded": true, "probed": true, "seq": 5},
 			want:   driver.ActionResult{Cancelled: true, Guarded: true, Probed: true}},
@@ -75,7 +67,6 @@ func TestTapDeliveryReceipt(t *testing.T) {
 			answer: map[string]any{"cancelled": true, "withheld": "delivery", "guarded": true, "probed": true, "seq": 5}, wantErr: true},
 		{name: "a swipe is never cancelled", swipe: true, target: target,
 			answer: map[string]any{"cancelled": true, "guarded": true, "probed": true, "seq": 5}, wantErr: true},
-		// Issue #149: a solid change after the host's read, before the touch went out.
 		{name: "a change since the read is passed on", target: target,
 			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "changedSinceRead": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, ChangedSinceRead: true}},
@@ -85,16 +76,12 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "a change since the read counts only for a targeted tap", target: nil,
 			answer: map[string]any{"result": "changed", "changedSinceRead": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed}},
-		// Issue #111: the agent saw no "touches completed" for a swipe; testmanagerd confirmed
-		// it only when its wait for one timed out.
 		{name: "an unconfirmed swipe is passed on", swipe: true,
 			answer: map[string]any{"result": "no_change", "unconfirmed": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Unconfirmed: true}},
 		{name: "unconfirmed is only for swipes", target: target,
 			answer: map[string]any{"result": "no_change", "unconfirmed": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange}},
-		// Issue #280: a tap that went to an app still coming to the foreground (issue #290's
-		// appActive: false) feeds the shared swallowed-tap rule; an older agent sends nothing.
 		{name: "a tap into an app still entering is passed on", target: target,
 			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, AppEntering: true}},
@@ -104,8 +91,6 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "appActive counts only for a tap", swipe: true,
 			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange}},
-		// Issue #334: the token to ask, after the settle, whether the app got the touches;
-		// only for a touch nothing says reached the app.
 		{name: "a delivery token is passed on", target: target,
 			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "touch": "none", "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Touch: "none", DeliveryToken: 7}},
@@ -118,8 +103,6 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "no token for a clicked tap", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
-		// Issue #111: a swipe's token, for scrollUntilVisible to ask about a drag that left the
-		// list unmoved (it sends it again only on "not delivered").
 		{name: "a swipe's delivery token is passed on", swipe: true,
 			answer: map[string]any{"result": "no_change", "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, DeliveryToken: 7}},
@@ -169,15 +152,12 @@ func TestTapDeliveryReceipt(t *testing.T) {
 	}
 }
 
-// A targeted tap names its target for the runner's delivery check: the element's id, its app
-// process, and the tree generation in the current runner's own count (0 when the tree is from
-// a runner before a restart: older than anything this runner has).
 func TestTapSendsTheTarget(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} })
 	d := newIOSDriver(t, r)
 	d.mu.Lock()
-	d.seqBase = 100 // the runner restarted once: driver 100 is this runner's 0
+	d.seqBase = 100
 	d.mu.Unlock()
 	for _, c := range []struct {
 		seq, want int64
@@ -194,7 +174,6 @@ func TestTapSendsTheTarget(t *testing.T) {
 			t.Errorf("tree %d: a still target was sent as moving: %v", c.seq, q)
 		}
 	}
-	// Issue #103: a target that may still be moving is tapped if the point is on it.
 	if _, err := d.Tap(ctxT(t), 1, 2, driver.ActionOpts{Target: &driver.ActionTarget{Seq: 104, ID: "buy", Window: 77, Moving: true}}); err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +189,6 @@ func TestTapSendsTheTarget(t *testing.T) {
 	}
 }
 
-// ReleaseDevice stops every tb runner serving this simulator in its port range, and leaves
-// runners of other simulators alone.
 func TestReleaseDeviceStopsOnlyThisSimulatorsRunners(t *testing.T) {
 	port := freePorts(t, 3)
 	udid := udidFor(t, port)
@@ -245,7 +222,6 @@ func TestReleaseDeviceStopsOnlyThisSimulatorsRunners(t *testing.T) {
 	}
 }
 
-// Keep asks a connected runner to stay after the connection closes; with none, it does nothing.
 func TestKeep(t *testing.T) {
 	if err := (&Driver{}).Keep(ctxT(t)); err != nil {
 		t.Errorf("Keep with no connection: %v", err)
@@ -262,8 +238,6 @@ func TestKeep(t *testing.T) {
 	}
 }
 
-// copyTree copies files with their permissions, folders, and symlinks as links (an app
-// container's contents, for a fast clearState snapshot).
 func TestCopyTree(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "src")
 	must := func(err error) {
@@ -293,7 +267,6 @@ func TestCopyTree(t *testing.T) {
 		t.Errorf("symlink: %q, %v", link, err)
 	}
 
-	// Copying over an existing file truncates it; a missing source is an error.
 	must(os.WriteFile(filepath.Join(src, "Library", "prefs.plist"), []byte("x"), 0o644))
 	must(os.Remove(filepath.Join(dst, "link")))
 	must(copyTree(src, dst))
@@ -305,9 +278,6 @@ func TestCopyTree(t *testing.T) {
 	}
 }
 
-// Issue #324: a tap on a button found by its text (no target) sends the button's bounds to
-// watch, and passes on whether the probe saw its touch go to its view. Only for a
-// watched tap: "reached" means nothing for a named target's tap, nor without the bounds.
 func TestTapWatchesAnUnnamedButton(t *testing.T) {
 	bounds := &ui.Rect{L: 16, T: 733, R: 155, B: 771}
 	for _, c := range []struct {
@@ -345,9 +315,6 @@ func TestTapWatchesAnUnnamedButton(t *testing.T) {
 	}
 }
 
-// Issue #337: the agent's press cut short (pressSeenMs, pressMs, pressStallMs) reaches the
-// engine for a tap, a double tap and a long press; an agent that says nothing (no probe, an
-// older agent, a press seen whole) leaves it nil.
 func TestPressCutDecoded(t *testing.T) {
 	cut := map[string]any{"result": "changed", "probed": true, "seq": 1, "pressSeenMs": 5, "pressMs": 129, "pressStallMs": 133}
 	plain := map[string]any{"result": "changed", "probed": true, "seq": 1}
@@ -380,8 +347,6 @@ func TestPressCutDecoded(t *testing.T) {
 	}
 }
 
-// Issue #334: the runner asks the agent, after a tap's settle, whether the app got its
-// touches; anything but a known verdict (an older agent's error aside) is unknown.
 func TestDeliveryVerdict(t *testing.T) {
 	for _, tc := range []struct{ answer, want string }{
 		{"delivered", driver.Delivered}, {"notDelivered", driver.NotDelivered}, {"unknown", driver.Unknown}, {"maybe", driver.Unknown},
@@ -401,15 +366,12 @@ func TestDeliveryVerdict(t *testing.T) {
 		if got.Pending {
 			t.Errorf("%q: pending, want decided", tc.answer)
 		}
-		// Review of 3b8b330: what the verdict rests on, for the trace.
 		if got.ReportMs == nil || *got.ReportMs != 22 || len(got.AnswerMs) != 2 || got.AnswerMs[0] != 30 || got.AnswerMs[1] != 45 {
 			t.Errorf("%q: evidence %+v, want SpringBoard's report at 22 ms and answers in 30, 45 ms", tc.answer, got)
 		}
 	}
 }
 
-// Issue #111: for a swipe testmanagerd confirmed only implicitly (no process reported its
-// touches), the agent's "report" is that confirmation, and it says so.
 func TestDeliveryVerdictImplicit(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("delivery", func(map[string]any) map[string]any {
@@ -422,7 +384,6 @@ func TestDeliveryVerdictImplicit(t *testing.T) {
 	}
 }
 
-// Review of e732b33: a wait that ran out before the agent decided says so (pending).
 func TestDeliveryVerdictPending(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("delivery", func(map[string]any) map[string]any {
@@ -435,9 +396,6 @@ func TestDeliveryVerdictPending(t *testing.T) {
 	}
 }
 
-// Review of 3b8b330: taps, double taps and long presses say whether the host is in CI mode,
-// so the agent tracks a tap's delivery (and asks the app to go idle) only when the host will
-// ask for its verdict.
 func TestTouchRequestsSayCIMode(t *testing.T) {
 	for _, on := range []bool{true, false} {
 		t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[on])

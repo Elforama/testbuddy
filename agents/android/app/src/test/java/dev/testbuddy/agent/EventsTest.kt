@@ -7,7 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** How the agent decides the UI changed and settled, on fake events and a fake clock. */
 class EventsTest {
     private val clock = FakeClock(1_000)
     private val probe = FakeProbe()
@@ -26,9 +25,8 @@ class EventsTest {
     @Test
     fun aChangeSettlesOnceQuiet() {
         val since = events.solid
-        clock.postDelayed({ events.onEvent(content()) }, 40) // the app reacts to the action
+        clock.postDelayed({ events.onEvent(content()) }, 40)
         assertEquals(Events.Settle.CHANGED, events.awaitSettled(since, 250, 5000))
-        // Settled one quiet window after the change, no later.
         assertEquals(1_000L + 40 + Events.DEFAULT_QUIET_MS, clock.now)
         assertEquals(listOf("{\"ev\":\"changed\",\"seq\":1,\"pkg\":\"com.app\"}", "{\"ev\":\"settled\",\"seq\":1}"), pushed)
     }
@@ -42,7 +40,6 @@ class EventsTest {
 
     @Test
     fun aTimeoutShorterThanNoChangeEndsAtTheTimeout() {
-        // No change within the timeout is no change: it must not wait on past the deadline.
         assertEquals(Events.Settle.NO_CHANGE, events.awaitSettled(events.solid, 250, 100))
         assertEquals(1_100L, clock.now)
     }
@@ -56,7 +53,6 @@ class EventsTest {
     @Test
     fun aScreenThatNeverStopsChangingTimesOut() {
         val since = events.solid
-        // Changes with no known source can never be told apart from the app working.
         clock.repeat(clock.now + 10, 50, clock.now + 10_000) { events.onEvent(content()) }
         assertEquals(Events.Settle.TIMEOUT, events.awaitSettled(since, 250, 5000))
         assertEquals(6_000L, clock.now)
@@ -65,12 +61,9 @@ class EventsTest {
     @Test
     fun aTickerStopsHoldingTheScreenUnsettled() {
         val since = events.solid
-        // A stopwatch: the same view's text, every 50 ms, for good.
         clock.repeat(clock.now + 10, 50, clock.now + 10_000) { events.onEvent(content(source = 42L, textOnly = true)) }
         assertEquals(Events.Settle.CHANGED, events.awaitSettled(since, 250, 5000))
-        // Restless after RESTLESS_AFTER_MS of changes, then quiet: well before the timeout.
         assertTrue("settled at ${clock.now}", clock.now < 1_000 + Events.RESTLESS_AFTER_MS + 300)
-        // Its changes still count, so the host re-reads the screen on them.
         val seq = events.seq
         clock.advance(200)
         assertTrue(events.seq > seq)
@@ -89,7 +82,6 @@ class EventsTest {
     fun theStatusBarIsNoChange() {
         events.onEvent(content(pkg = "com.android.systemui"))
         assertEquals(0L, events.seq)
-        // Unless the system UI is what is in front (the notification shade).
         events.onEvent(window("com.android.systemui"))
         events.onEvent(content(pkg = "com.android.systemui"))
         assertEquals(2L, events.seq)
@@ -113,14 +105,12 @@ class EventsTest {
     @Test
     fun framesDrawnAfterAnActionHoldItUnsettled() {
         probe.activeWindow = 7
-        // The window keeps drawing (a sheet sliding in) with no accessibility events.
         probe.framePresented = { clock.nanoTime() - 10_000_000 }
         val since = events.solid
         events.beginAction()
         assertEquals(listOf(7), probe.cleared)
         events.onEvent(content())
         assertEquals(Events.Settle.CHANGED, events.awaitSettled(since, 250, 5000))
-        // Held for its frames, up to FRAME_GRACE_MS past the last event.
         assertTrue("settled at ${clock.now}", clock.now >= 1_000 + Events.FRAME_GRACE_MS)
         assertTrue("settled at ${clock.now}", clock.now < 1_000 + Events.FRAME_GRACE_MS + Events.DEFAULT_QUIET_MS + 10)
     }
@@ -148,39 +138,28 @@ class EventsTest {
         assertFalse(events.awaitQuiet(500))
     }
 
-    /**
-     * Issue #71: on a device the quiet timer runs on its own thread. A timer already due can
-     * start [Events.onQuiet] just as a new change arrives: the event thread re-arms the timer
-     * after its locked section, too late to stop the one already running. The change lands
-     * here while the running timer reads the window's frame stats, before it takes the lock;
-     * it must not report the screen settled 0 ms after that change, only a quiet window later.
-     */
     @Test
     fun aTimerFiringJustAfterAnEventDoesNotSettle() {
         probe.activeWindow = 7
         events.beginAction()
         var raced = false
         probe.framePresented = {
-            if (!raced) { raced = true; events.onEvent(content()) } // the second change, in the gap
-            0L // no frame drawn: the timer would settle
+            if (!raced) { raced = true; events.onEvent(content()) }
+            0L
         }
-        events.onEvent(content()) // the first change, at 1000
-        // The timer armed by the first change comes due; the second change arrives as it runs.
+        events.onEvent(content())
         clock.advance(Events.DEFAULT_QUIET_MS.toLong())
         assertTrue(raced)
         assertEquals(2L, events.solid)
         assertFalse("settled 0 ms after a change: $pushed", pushed.any { it.startsWith("{\"ev\":\"settled\"") })
         assertTrue("settledSolid ${events.settledSolid}", events.settledSolid != events.solid)
-        // It settles a quiet window after the second change.
         assertTrue(events.awaitQuiet(1000))
         assertEquals(1_000L + 2 * Events.DEFAULT_QUIET_MS, clock.now)
         assertEquals("{\"ev\":\"settled\",\"seq\":2}", pushed.last())
-        // Both the racing change and the re-armed timer posted a timer: one "settled" all the same.
         clock.advance(500)
         assertEquals("pushed: $pushed", 1, pushed.count { it.startsWith("{\"ev\":\"settled\"") })
     }
 
-    /** Issue #87 review: a held-back change with no package does not drop the burst's package. */
     @Test
     fun aTrailingPushKeepsTheBurstsPackage() {
         events.onEvent(content())
@@ -192,34 +171,24 @@ class EventsTest {
         assertEquals("{\"ev\":\"changed\",\"seq\":3,\"pkg\":\"com.app\"}", pushed[1])
     }
 
-    /**
-     * Issue #87: "changed" is pushed at most every ~30 ms, so a burst's last changes are left
-     * to "settled". A screen that does not settle (here, a window still drawing) sends no
-     * "settled" for a long time, and the host's change counter lags the screen meanwhile. The
-     * trailing change of a burst is pushed at the end of the coalescing window.
-     */
     @Test
     fun theLastChangeOfABurstIsPushedOnAScreenThatDoesNotSettle() {
         probe.activeWindow = 7
         events.beginAction()
-        probe.framePresented = { clock.nanoTime() - 5_000_000 } // keeps drawing: no "settled" for a while
-        events.onEvent(content())             // 1000: pushed
-        clock.advance(10); events.onEvent(content()) // 1010: coalesced
-        clock.advance(10); events.onEvent(content()) // 1020: coalesced
+        probe.framePresented = { clock.nanoTime() - 5_000_000 }
+        events.onEvent(content())
+        clock.advance(10); events.onEvent(content())
+        clock.advance(10); events.onEvent(content())
         assertEquals(3L, events.seq)
-        // Once the coalescing window after the last push has passed, the host has the last count.
         clock.advanceTo(1_000L + 30)
         val lastPushed = pushed.last { it.startsWith("{\"ev\":\"changed\"") }
         assertEquals("pushed: $pushed", "{\"ev\":\"changed\",\"seq\":3,\"pkg\":\"com.app\"}", lastPushed)
         assertFalse(pushed.any { it.startsWith("{\"ev\":\"settled\"") })
-        // No more than one push per window: three changes, two pushes.
         assertEquals(2, pushed.size)
-        // Nothing new: nothing more is pushed, until it settles with the same count.
         clock.advanceTo(1_000L + Events.FRAME_GRACE_MS + Events.DEFAULT_QUIET_MS + 10)
         assertEquals(listOf("{\"ev\":\"settled\",\"seq\":3}"), pushed.drop(2))
     }
 
-    /** Issue #87: a burst that a settle ends pushes no extra "changed" with the settled count. */
     @Test
     fun aBurstThatSettlesPushesEachCountOnce() {
         events.onEvent(content())
@@ -276,8 +245,6 @@ class EventsTest {
         assertEquals(3_000L, clock.now)
     }
 
-    /** Issue #211: the window an app's latest window-state event came from is the screen it
-     *  opened, which a tree read looks for; the keyboard's and the status bar's are not. */
     @Test
     fun theWindowAnAppOpenedIsKept() {
         probe.settings["secure/default_input_method"] = "com.ime/.Service"
@@ -290,14 +257,12 @@ class EventsTest {
         events.onEvent(state("com.ime", 8))
         events.onEvent(state("com.android.systemui", 9))
         events.onEvent(content(pkg = "com.app"))
-        events.onEvent(window("com.app")) // no window id
+        events.onEvent(window("com.app"))
         assertEquals(7, events.openedWindow?.id)
         events.onEvent(state("com.app", 10))
         assertEquals(10, events.openedWindow?.id)
     }
 
-    /** Issue #211 review: a pane's change (contentChangeTypes set) and the system's own windows do
-     *  not count as a window opened: a late event from the screen left must not replace it. */
     @Test
     fun aPaneChangeOrTheSystemDoesNotReplaceTheOpenedWindow() {
         events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Activity", windowId = 7))
@@ -307,8 +272,6 @@ class EventsTest {
         assertEquals(7, events.openedWindow?.id)
     }
 
-    /** Issue #211 review: a keyboard switched to after the agent started is learned from its
-     *  first window-state event, which then does not stand as the window opened. */
     @Test
     fun aKeyboardSwitchedToIsNotTheOpenedWindow() {
         probe.settings["secure/default_input_method"] = "com.ime/.Service"

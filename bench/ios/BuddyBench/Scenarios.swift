@@ -1,5 +1,3 @@
-// The start screen (bench/SCENARIOS.md): a list of scenarios, each a self-contained part of the
-// app that puts a test runner in a known hard situation. Plus the shared scenario screen frame.
 import SwiftUI
 
 enum Scenario: String, CaseIterable, Hashable {
@@ -56,8 +54,6 @@ struct ScenarioListView: View {
                 .accessibilityIdentifier("scenarios_title")
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-            // A List (a UICollectionView): rows scrolled out of it leave the accessibility
-            // tree, so the last rows really are below the fold.
             List(Scenario.allCases, id: \.self) { scenario in
                 NavigationLink(value: Route.scenario(scenario)) {
                     Text(verbatim: scenario.name)
@@ -73,8 +69,6 @@ struct ScenarioListView: View {
     }
 }
 
-/// The frame of every scenario screen: Back at the top left, the title (`scenario_title`),
-/// then the content, in a page that scrolls (`page`) when `scrolls` is set.
 struct ScenarioScreen<Content: View>: View {
     let scenario: Scenario
     var scrolls = false
@@ -109,7 +103,6 @@ struct ScenarioScreen<Content: View>: View {
     }
 }
 
-/// A pushed sub-screen of a scenario: Back, a title with the given id, then the content.
 struct SubScreen<Content: View>: View {
     let title: String
     let titleID: String
@@ -130,8 +123,6 @@ struct SubScreen<Content: View>: View {
     }
 }
 
-/// Scenario 1, Journey: the original Buddy Bench (SPEC.md). Login until someone signs in,
-/// then Home; Detail and Live are pushed on the app's one navigation stack.
 struct JourneyView: View {
     @EnvironmentObject private var model: BenchModel
 
@@ -144,12 +135,10 @@ struct JourneyView: View {
     }
 }
 
-/// A text with an id: the status lines of every scenario.
 func status(_ text: String, _ id: String) -> some View {
     Text(verbatim: text).accessibilityIdentifier(id)
 }
 
-/// Sleeps on the main actor, then runs `body` unless the task was cancelled.
 @MainActor func after(_ ms: Int, _ body: @escaping @MainActor () -> Void) -> Task<Void, Never> {
     Task { @MainActor in
         guard (try? await Task.sleep(for: .milliseconds(ms))) != nil else { return }
@@ -157,13 +146,11 @@ func status(_ text: String, _ id: String) -> some View {
     }
 }
 
-/// A count of lines as the multiline fields report it: 0 when empty.
 func lineCount(_ text: String) -> Int {
     text.isEmpty ? 0 : text.components(separatedBy: "\n").count
 }
 
 extension View {
-    /// A list row of exactly `height` points (the List's own insets would add to it).
     func benchRow(_ height: CGFloat = 56) -> some View {
         frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))

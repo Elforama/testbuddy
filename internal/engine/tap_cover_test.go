@@ -14,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// hitFake is a web-like driver whose hit test reports a cover while veiled is set.
 type hitFake struct {
 	*fakeDriver
 	veiled atomic.Bool
@@ -29,8 +28,6 @@ func (h *hitFake) CoveredAt(ctx context.Context, index, x, y int) (string, error
 	return "", nil
 }
 
-// A web tap whose point a veil covers waits for the veil to go (the browser's hit test says
-// so), then taps: the veil would swallow the tap.
 func TestTapWaitsForHitClear(t *testing.T) {
 	t.Parallel()
 	h := &hitFake{fakeDriver: &fakeDriver{screen: static(btn("Under", "under", 300)), plat: "web"}}
@@ -50,7 +47,6 @@ func TestTapWaitsForHitClear(t *testing.T) {
 	if d := time.Since(start); d < 250*time.Millisecond || d > 2*time.Second {
 		t.Errorf("took %s, want the veil's 300 ms", d)
 	}
-	// Not covered: one check, no wait.
 	h2 := &hitFake{fakeDriver: &fakeDriver{screen: static(btn("Go", "", 300)), plat: "web"}}
 	mustPass(t, runWith(t, h2, quick, "- tapOn: Go"))
 	if h2.checks.Load() != 1 {
@@ -58,17 +54,14 @@ func TestTapWaitsForHitClear(t *testing.T) {
 	}
 }
 
-// A web tap target pushed out of view (a banner grew above it) while something else moved into
-// its place is not tapped "anyway": that would tap the other element. The step fails on the
-// target instead.
 func TestTapDoesNotHitWhatTookTheTargetsPlace(t *testing.T) {
 	t.Parallel()
 	h := &hitFake{fakeDriver: &fakeDriver{plat: "web"}}
 	var reads atomic.Int64
 	h.screen = func() []*ui.Node {
-		if reads.Add(1) > 1 { // moved right after it was found
-			h.veiled.Store(true)                            // the hit test at Stop's old place reaches Target
-			return []*ui.Node{btn("Target", "target", 300)} // Stop is below the view now
+		if reads.Add(1) > 1 {
+			h.veiled.Store(true)
+			return []*ui.Node{btn("Target", "target", 300)}
 		}
 		return []*ui.Node{btn("Stop", "stop", 300)}
 	}
@@ -81,9 +74,6 @@ func TestTapDoesNotHitWhatTookTheTargetsPlace(t *testing.T) {
 	}
 }
 
-// iOS: a tap on a button that got no reaction at all was taken by something tb cannot see (a
-// veil hidden from accessibility). When the screen changes (the veil goes), the button is
-// tapped again, and that tap reaches it.
 func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
 	t.Parallel()
 	under := btn("Under", "under", 300)
@@ -103,13 +93,12 @@ func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
 		f.mu.Lock()
 		f.tapSettle = driver.Changed
 		f.mu.Unlock()
-		f.change(true) // the veil went
+		f.change(true)
 	}()
 	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
 	if reached.Load() != 1 {
 		t.Errorf("taps %v, %d reached the button: want exactly one", f.taps, reached.Load())
 	}
-	// A button that does not react while nothing else changes is tapped once.
 	g := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
 	mustPass(t, runWith(t, g, quick, "- tapOn: Under"))
 	if len(g.taps) != 1 {
@@ -117,9 +106,6 @@ func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
 	}
 }
 
-// iOS, on a screen that never stops moving: the tap lands (the counter goes up) but its
-// reaction is filtered out with the screen's endless motion, so it reports no change. What the
-// screen lists changed, so it is not tapped again (that would tap twice).
 func TestIOSNoReactionButScreenChangedIsNotRetried(t *testing.T) {
 	t.Parallel()
 	var count atomic.Int64
@@ -136,8 +122,6 @@ func TestIOSNoReactionButScreenChangedIsNotRetried(t *testing.T) {
 	}
 }
 
-// iOS: a veil's spinner is listed with the whole veil's frame. A tap on a button under it
-// waits for it to go; a small spinner beside a button does not hold the tap.
 func TestIOSVeilSpinnerHoldsTheTap(t *testing.T) {
 	t.Parallel()
 	under := btn("Under", "under", 600)
@@ -163,7 +147,6 @@ func TestIOSVeilSpinnerHoldsTheTap(t *testing.T) {
 	if underVeil.Load() || len(f.taps) != 1 {
 		t.Errorf("taps %v, under the veil %v", f.taps, underVeil.Load())
 	}
-	// A spinner of its own size beside the button.
 	small := &ui.Node{Class: "ActivityIndicator", Bounds: ui.Rect{L: 0, T: 540, R: 40, B: 580}}
 	g := &fakeDriver{plat: "ios", screen: static(small, under)}
 	start := time.Now()
@@ -173,9 +156,6 @@ func TestIOSVeilSpinnerHoldsTheTap(t *testing.T) {
 	}
 }
 
-// A floating bar over a content layer that holds a spinner far away (a feed loading more):
-// the layer is drawn under the bar, so it is no cover. Android lists the layer after the bar
-// (by place, not as drawn); the drawing order says which is on top. Issue #11.
 func TestLoadingCoverDrawnUnderTarget(t *testing.T) {
 	const pb = "android.widget.ProgressBar"
 	order := func(n *ui.Node, o int) *ui.Node { n.DrawOrder, n.DrawOrderKnown = o, true; return n }
@@ -185,7 +165,7 @@ func TestLoadingCoverDrawnUnderTarget(t *testing.T) {
 		action := clickable(2, 120, 690, 280, 730)
 		layer := at("FrameLayout", 1, 0, 0, 400, 800)
 		rows := at("LinearLayout", 2, 0, 0, 400, 800)
-		spin := at(pb, 3, 180, 100, 220, 140) // near the top, far from the bar
+		spin := at(pb, 3, 180, 100, 220, 140)
 		if known {
 			order(bar, barOrder)
 			order(layer, layerOrder)
@@ -206,8 +186,6 @@ func TestLoadingCoverDrawnUnderTarget(t *testing.T) {
 	}
 }
 
-// The tap itself: no wait for a layer drawn under the floating bar (it took the whole lookup
-// time before, Issue #11).
 func TestTapOnFloatingBarOverSpinningLayerDoesNotWait(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -232,20 +210,15 @@ func TestTapOnFloatingBarOverSpinningLayerDoesNotWait(t *testing.T) {
 	}
 }
 
-// closingList is an account list over a form that, once a row is picked, leaves the tree at
-// once but stays drawn, still, and taking touches for hold (bench/flows/scenarios/transitions.yaml;
-// a React Native screen closing while its JavaScript thread is busy). A touch on it in that
-// time picks the row under it and starts the hold again. Its last row, "Credit card", lies
-// over the form's amount field.
 type closingList struct {
 	f        *fakeDriver
 	hold     time.Duration
-	open     bool      // listed and drawn
-	heldTill time.Time // drawn and taking touches, though out of the tree, until then
+	open     bool
+	heldTill time.Time
 	account  string
-	focused  bool      // the amount field took a tap
-	picked   time.Time // the last pick
-	tapped   time.Time // the amount field's tap
+	focused  bool
+	picked   time.Time
+	tapped   time.Time
 }
 
 var (
@@ -257,7 +230,6 @@ var (
 	clAccount = ui.Rect{L: 20, T: 110, R: 380, B: 130}
 )
 
-// drawn: the list shows (open, or closed but not yet removed). Called with f.mu held or not.
 func (c *closingList) drawn() bool { return c.open || time.Now().Before(c.heldTill) }
 
 func (c *closingList) nodes() []*ui.Node {
@@ -271,7 +243,7 @@ func (c *closingList) nodes() []*ui.Node {
 	node := func(class, id, text string, depth int, b ui.Rect, touch bool) *ui.Node {
 		return &ui.Node{Class: class, ID: id, Text: text, Depth: depth, Bounds: b, Enabled: true, Clickable: touch, Editable: class == "EditText"}
 	}
-	d := 0 // the form's and the list's depth: on Android both sit in a frame
+	d := 0
 	var out []*ui.Node
 	if !ios {
 		out = append(out, node("FrameLayout", "", "", 0, clList, false))
@@ -286,7 +258,7 @@ func (c *closingList) nodes() []*ui.Node {
 			out = append(out, node(kind("TextView", "Button"), "tr_account_"+strings.ToLower(strings.Fields(clNames[i])[0]), clNames[i], d+1, r, true))
 		}
 	case ios && c.drawn():
-		list.ID = "" // iOS keeps the closing view, with no id and nothing in it
+		list.ID = ""
 		out = append(out, list)
 	}
 	fd := d
@@ -320,19 +292,18 @@ func (c *closingList) image() image.Image {
 	if drawn {
 		fill(clList, color.RGBA{235, 235, 235, 255})
 		for _, r := range clRows {
-			fill(ui.Rect{L: 20, T: r.T + 20, R: 140, B: r.T + 40}, color.RGBA{30, 30, 30, 255}) // its label
+			fill(ui.Rect{L: 20, T: r.T + 20, R: 140, B: r.T + 40}, color.RGBA{30, 30, 30, 255})
 		}
 		return img
 	}
 	fill(clAccount, color.RGBA{30, 30, 30, 255})
 	fill(clPick, color.RGBA{40, 80, 200, 255})
-	fill(clAmount, color.RGBA{20, 20, 20, 255}) // the border
+	fill(clAmount, color.RGBA{20, 20, 20, 255})
 	fill(ui.Rect{L: clAmount.L + 2, T: clAmount.T + 2, R: clAmount.R - 2, B: clAmount.B - 2}, color.RGBA{250, 250, 255, 255})
-	fill(ui.Rect{L: 30, T: 312, R: 100, B: 328}, color.RGBA{150, 150, 150, 255}) // the hint
+	fill(ui.Rect{L: 30, T: 312, R: 100, B: 328}, color.RGBA{150, 150, 150, 255})
 	return img
 }
 
-// tap is what a touch at (x, y) does. Called without f.mu held.
 func (c *closingList) tap(x, y int) {
 	f := c.f
 	f.mu.Lock()
@@ -347,7 +318,7 @@ func (c *closingList) tap(x, y int) {
 		f.mu.Unlock()
 		f.change(true)
 		if hold > 0 && hold < time.Minute {
-			time.AfterFunc(hold, func() { f.change(true) }) // removed: the screen redraws
+			time.AfterFunc(hold, func() { f.change(true) })
 		}
 		return
 	}
@@ -363,20 +334,12 @@ func (c *closingList) tap(x, y int) {
 
 func newClosingList(plat string, hold time.Duration) *closingList {
 	c := &closingList{f: &fakeDriver{plat: plat}, hold: hold, account: "none"}
-	c.f.screen = func() []*ui.Node { return c.nodes() } // f.mu is held here
+	c.f.screen = func() []*ui.Node { return c.nodes() }
 	c.f.draw = c.image
 	c.f.onTap = c.tap
 	return c
 }
 
-// A tap on an element a closing screen still covers waits until the screen's pixels go
-// (bench/flows/scenarios/transitions.yaml; a React Native screen closing while its
-// JavaScript thread is busy): picking an account takes the list out of the tree at once, but
-// it stays drawn, still, and takes touches for a while. The amount field under it is listed
-// at once; nothing in the tree or the event stream says the list is still there, but the
-// pixels where the field is are still the list's, as they were before the pick. The tap waits
-// until they change. A list really gone at once costs no wait; one that never goes is waited
-// for up to the cap, then tapped anyway, and the trace says so.
 func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
 	t.Parallel()
 	flow := "- tapOn: {id: tr_pick}\n- tapOn: {id: tr_account_savings}\n- tapOn: {id: tr_amount}\n"
@@ -408,15 +371,12 @@ func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
 			if c.account != "Savings" || !c.focused {
 				t.Fatalf("account %q, field tapped %v\n%s", c.account, c.focused, tr)
 			}
-			// Well under a hold (800 ms in the bench): no wait. Not tighter: a busy CI runner with
-			// -race took 155 ms for the pick, a read and the screenshots.
 			if gap := c.tapped.Sub(c.picked); gap > 500*time.Millisecond {
 				t.Errorf("waited %s to tap the field, with the list gone at once", gap)
 			}
 			if strings.Contains(tr, "still drawn") {
 				t.Errorf("waited for a list that went at once:\n%s", tr)
 			}
-			// One screenshot before the pick, one to see the list gone; none for the others.
 			if len(shots) != 2 {
 				t.Errorf("screenshots %v, want 2", shots)
 			}
@@ -424,7 +384,7 @@ func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
 		t.Run(plat+", never goes", func(t *testing.T) {
 			t.Parallel()
 			c := newClosingList(plat, time.Hour)
-			res, tr := traced(t, c.f, flow) // quick: the tap's lookup timeout (400 ms) caps it
+			res, tr := traced(t, c.f, flow)
 			mustPass(t, res)
 			c.f.mu.Lock()
 			defer c.f.mu.Unlock()
@@ -436,11 +396,6 @@ func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
 	}
 }
 
-// A tap in a see-through layer over the content takes no screenshot (bench/flows/scenarios/
-// navigation.yaml on iOS: a full-screen container holding only the tab buttons, listed apart
-// from the tab's content, whose order iOS does not tell): the layer takes no touches over the
-// content's buttons, so it covers nothing a tap could miss. A list whose rows lie over two of
-// a form's buttons does (bench/flows/scenarios/transitions.yaml).
 func TestCoverOverNeedsTouchesOverWhatItCovers(t *testing.T) {
 	t.Parallel()
 	tab := &ui.Node{Class: "Button", ID: "navtab_feed", Depth: 1, Bounds: ui.Rect{L: 100, T: 740, R: 200, B: 800}, Enabled: true}

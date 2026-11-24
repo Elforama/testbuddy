@@ -1,8 +1,5 @@
 package web
 
-// Test doubles: a fake DevTools endpoint (httptest + websocket) that records every command and
-// answers it with per-method handlers, and pushes events; a Driver wired to it without Chrome.
-
 import (
 	"context"
 	"encoding/json"
@@ -24,7 +21,6 @@ type cdpMsg struct {
 	Params    json.RawMessage `json:"params"`
 }
 
-// params decodes a recorded command's params into a map.
 func (m cdpMsg) params() map[string]any {
 	var p map[string]any
 	json.Unmarshal(m.Params, &p)
@@ -36,10 +32,8 @@ type cdpError struct {
 	Message string `json:"message"`
 }
 
-// errReply as a handler result makes the command fail with that error.
 type errReply struct{ cdpError }
 
-// noAnswer as a handler result leaves the command unanswered.
 var noAnswer = &struct{ x int }{}
 
 type fakeCDP struct {
@@ -50,9 +44,8 @@ type fakeCDP struct {
 	msgs     []cdpMsg
 	handlers map[string]func(m cdpMsg) any
 	conns    []*websocket.Conn
-	// up is closed while conns holds a connection (issue #118).
-	up     chan struct{}
-	onHTTP func(w http.ResponseWriter, r *http.Request) bool // true: handled
+	up       chan struct{}
+	onHTTP   func(w http.ResponseWriter, r *http.Request) bool
 }
 
 func newFakeCDP(t *testing.T) *fakeCDP {
@@ -124,10 +117,6 @@ func (f *fakeCDP) on(method string, h func(m cdpMsg) any) {
 	f.mu.Unlock()
 }
 
-// send writes a raw message on the latest connection. It waits for the driver's connection
-// first: the client's websocket handshake can finish before serveHTTP records the
-// connection, so a test that sends right after dialing could otherwise find none and the
-// message would be lost (issue #118).
 func (f *fakeCDP) send(v any) {
 	f.mu.Lock()
 	up := f.up
@@ -157,7 +146,6 @@ func (f *fakeCDP) send(v any) {
 	c.Write(context.Background(), websocket.MessageText, b)
 }
 
-// event pushes a CDP event (session "" = the page's own).
 func (f *fakeCDP) event(method string, params any, session string) {
 	m := map[string]any{"method": method, "params": params}
 	if session != "" {
@@ -183,7 +171,6 @@ func (f *fakeCDP) close() {
 	f.srv.Close()
 }
 
-// calls returns the recorded commands of method ("" for all).
 func (f *fakeCDP) calls(method string) []cdpMsg {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -214,13 +201,11 @@ func (f *fakeCDP) reset() {
 	f.mu.Unlock()
 }
 
-// value is a Runtime.evaluate result holding v (returnByValue).
 func value(v any) map[string]any {
 	b, _ := json.Marshal(v)
 	return map[string]any{"result": map[string]any{"type": "string", "value": json.RawMessage(b)}}
 }
 
-// evaluator answers Runtime.evaluate by expression; unknown expressions return undefined.
 func (f *fakeCDP) evaluator(fn func(expr, session string) any) {
 	f.on("Runtime.evaluate", func(m cdpMsg) any {
 		expr, _ := m.params()["expression"].(string)
@@ -238,7 +223,6 @@ func newBareDriver() *Driver {
 	return d
 }
 
-// newWebDriver wires a Driver to a fake page target (and, when given, a fake browser target).
 func newWebDriver(t *testing.T, page, browser *fakeCDP) *Driver {
 	t.Helper()
 	d := newBareDriver()
@@ -288,7 +272,6 @@ func waitEvent(t *testing.T, ch <-chan driver.Event, kind string) driver.Event {
 	}
 }
 
-// state reads the driver's counters under its lock.
 func state(d *Driver) (seq, solid, settled int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -6,17 +6,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DialogTypes are the kinds of JavaScript dialog an assertDialog's type names.
 var DialogTypes = []string{"alert", "confirm", "prompt", "beforeunload"}
 
-// parseAssertDialog reads an assertDialog step (a Test Buddy extension for web flows, issue
-// #91): a JavaScript dialog opened since the last step that acted on the page, as in
-//
-//	assertDialog: "Delete it?"                      # its message (the format's text rule)
-//	assertDialog: {text: "Delete .*", type: confirm}
-//	assertDialog                                    # any dialog ({} too)
-//
-// The map form takes text, type (alert, confirm, prompt or beforeunload), label and optional.
 func (p *parser) parseAssertDialog(c *Command, m *mapView, v *yaml.Node) error {
 	ch := &DialogCheck{}
 	switch {

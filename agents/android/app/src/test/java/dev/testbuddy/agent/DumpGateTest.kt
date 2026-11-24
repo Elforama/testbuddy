@@ -6,13 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
-/** Issue #99 review: BinderDump's in-process dumps, one in flight per service, failures to dumpsys. */
 class DumpGateTest {
     private val held = ArrayList<Runnable>()
     private var reads = 0
     private var closes = 0
 
-    /** Runs each dump at once, or holds it (a dump blocked in the service) until a test runs it. */
     private fun gate(runNow: Boolean) = DumpGate { if (runNow) it.run() else held += it }
 
     private fun DumpGate.ask(service: String = "input_method", fail: Throwable? = null, out: String = "x", timedOut: Boolean = false) =
@@ -30,7 +28,6 @@ class DumpGateTest {
     @Test
     fun whileADumpIsStuckNoOtherStartsAndTheAnswerIsTimedOutAtOnce() {
         val g = gate(runNow = false)
-        // The service never answers: the read times out, the dump's thread stays blocked.
         assertTrue(g.ask(out = "", timedOut = true)!!.timedOut)
         assertEquals(1, held.size)
         repeat(3) {
@@ -41,10 +38,8 @@ class DumpGateTest {
         assertEquals("no new dump thread while one is stuck", 1, held.size)
         assertEquals("nothing read while one is stuck", 1, reads)
         assertEquals("each refused dump's write end closed", 3, closes)
-        // Another service is not held up.
         assertEquals("y", g.ask(service = "window", out = "y")!!.out)
         held.removeAt(1).run()
-        // The stuck one returns: the next dump of that service starts.
         held.removeAt(0).run()
         assertEquals(0, g.ask(out = "z", timedOut = false).let { held.removeAt(0).run(); it!!.code })
     }

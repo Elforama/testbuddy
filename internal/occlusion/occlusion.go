@@ -1,14 +1,3 @@
-// Package occlusion says what is drawn over an element on a screen: what would take a tap
-// meant for it (its cover), and whether that cover is a bar that scrolling can bring the
-// element clear of, or a modal layer (a drawer, a sheet, a dialog) that nothing but its own
-// going can. It is the one definition of "covered": the matcher ranks the matches a person can
-// reach before those under a cover (issue #282), and the runner steers its taps by it.
-//
-// Android and iOS covers are worked out from the tree (windows, drawing order, bounds). The
-// web's are the browser's own hit test, read with each screen (ui.Node.Covers, issue #300): a
-// page's element order is not its drawing order, so only the browser can say what a click
-// reaches. Both feed the same rules here: what counts as covered (Covered), a modal layer or a
-// bar (Modal), and so how matches rank and whether a drag may bring one clear.
 package occlusion
 
 import (
@@ -17,8 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// IOSTouchTypes are the iOS element types that take touches: one drawn over an element
-// covers it.
 var IOSTouchTypes = map[string]bool{
 	"Button": true, "Link": true, "Cell": true, "TextField": true, "SecureTextField": true,
 	"SearchField": true, "TextView": true, "Switch": true, "Toggle": true, "Slider": true,
@@ -27,17 +14,8 @@ var IOSTouchTypes = map[string]bool{
 	"MenuButton": true, "ComboBox": true,
 }
 
-// IOSBars are always drawn over content, whatever their place in the tree (which iOS orders
-// by position on screen, not as drawn: a navigation bar comes before the list under it).
 var IOSBars = map[string]bool{"NavigationBar": true, "TabBar": true, "Toolbar": true}
 
-// At returns what would take a tap at (x, y) instead of n, or nil: the keyboard, a node of
-// another app window above n's (a dialog, a popup), a node of n's own window drawn over n (by
-// the drawing order where reported, else listed after it) that takes touches there and is
-// neither n's container nor inside it, an iOS bar, or (Android) a sticky
-// section header. On the web, what the browser's hit test found there (webAt): a page's
-// element order is not its drawing order (screens stack through CSS), so the tree would take
-// another screen's rows for covers.
 func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	if s.Platform == "web" {
 		return webAt(s, n, x, y)
@@ -45,8 +23,6 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	if n.Window < 0 || n.Window >= len(s.Windows) {
 		return nil
 	}
-	// A window above the element's (windows are listed top-most first): the keyboard, or
-	// another app window (a dialog, a menu, a sheet shown as a window of its own).
 	for i := 0; i < n.Window; i++ {
 		w := s.Windows[i]
 		if !w.Bounds.Contains(x, y) {
@@ -75,27 +51,20 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			continue
 		}
 		bar := s.Platform == "ios" && IOSBars[c.Class]
-		// Drawn over the element: as the drawing order tells, where the platform reports it
-		// (Android: a parent lists its children in its own order, not as drawn, so the
-		// previous screen of a stack can be listed after the one drawn over it, issue #320);
-		// else listed after it.
 		over := after
 		if under, known := DrawOrder(c, n); known {
 			over = !under
 		} else if over && (s.Platform == "android" || s.Platform == "ios") && pinnedOver(n, c, x, y, edgeOf(s)) {
-			over = false // a row under its list's pinned header
+			over = false
 		}
 		if !over && !bar {
-			continue // drawn before the element, under it
+			continue
 		}
 		if Within(c.Bounds, n.Bounds) || 2*c.Bounds.Area() >= screenArea {
-			// Inside the element's own frame (a part of it the tree lists apart, as React
-			// Native does), or a container as large as half the screen (a transparent overlay
-			// would hide everything): no cover.
 			continue
 		}
 		if inOtherList(c, n) {
-			continue // another list's content (a closed drawer's menu still placed on screen)
+			continue
 		}
 		if bar || TakesTouches(s.Platform, c, x, y) {
 			return c
@@ -107,10 +76,6 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	return nil
 }
 
-// webAt is what the browser's hit test found taking a click meant for n at (x, y): at one of
-// the points it samples on n (samples), the cover it reported there, if any; at another point
-// (the middle of the part of n beside a cover), a reported cover whose box holds it. The runner
-// asks the browser again at the point it taps (engine's awaitHitClear).
 func webAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	if len(n.Covers) == 0 {
 		return nil
@@ -122,7 +87,7 @@ func webAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	}
 	for _, p := range samples(hitPart(s, n)) {
 		if p[0] == x && p[1] == y {
-			return nil // sampled, and found clear (or not asked: its middle was covered)
+			return nil
 		}
 	}
 	for _, h := range n.Covers {
@@ -133,8 +98,6 @@ func webAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	return nil
 }
 
-// hitPart is the part of n whose points are sampled: its visible part, or all of it when none
-// shows.
 func hitPart(s *ui.Screen, n *ui.Node) ui.Rect {
 	v := VisiblePart(s, n)
 	if v.Empty() {
@@ -143,10 +106,6 @@ func hitPart(s *ui.Screen, n *ui.Node) ui.Rect {
 	return v
 }
 
-// SamplePoints are the points of n that Covered reads (samples of hitPart); ok is false when
-// no part of n shows (off the screen, or out of a scrolling ancestor: ClipRect). The web driver
-// asks the page about these points over a cross-origin frame's elements (issue #315), so its
-// covers land on the points Covered reads.
 func SamplePoints(s *ui.Screen, n *ui.Node) (pts [5][2]int, ok bool) {
 	v := VisiblePart(s, n)
 	if v.Empty() || n.Bounds.Intersect(n.ClipRect(ui.Rect{R: s.Width, B: s.Height})).Empty() {
@@ -155,9 +114,6 @@ func SamplePoints(s *ui.Screen, n *ui.Node) (pts [5][2]int, ok bool) {
 	return samples(v), true
 }
 
-// samples are the points where a person would touch the part v of an element: its middle,
-// then the middles of its quarters (top left, top right, bottom left, bottom right). The web's
-// page script (page.js hitPass) samples the same points, in the same order.
 func samples(v ui.Rect) [5][2]int {
 	return [5][2]int{
 		{v.CX(), v.CY()},
@@ -166,29 +122,24 @@ func samples(v ui.Rect) [5][2]int {
 	}
 }
 
-// keyboardAt is the part of a keyboard window (window i) drawn at (x, y), or nil. The window's
-// bounds are not what it draws: with a hardware keyboard, Gboard shows only a small floating
-// toolbar, in a window still as large as the full keyboard. What the window lists says where
-// it draws: a node at the point smaller than the window. A keyboard that lists nothing
-// smaller than its window is taken at its window's bounds.
 func keyboardAt(i int, w *ui.Window, x, y int) *ui.Node {
 	whole := &ui.Node{Class: "Keyboard", Bounds: w.Bounds, Enabled: true, Window: i}
 	if len(w.Nodes) == 0 {
 		return whole
 	}
 	var at *ui.Node
-	parts := false // it lists something smaller than itself
+	parts := false
 	for _, k := range w.Nodes {
 		if 10*k.Bounds.Area() >= 9*w.Bounds.Area() || k.Bounds.Empty() {
 			continue
 		}
 		parts = true
 		if k.Bounds.Contains(x, y) {
-			at = k // deepest last, in pre-order
+			at = k
 		}
 	}
 	if !parts {
-		return whole // only a node as large as the window: it draws all of it
+		return whole
 	}
 	if at == nil {
 		return nil
@@ -198,17 +149,11 @@ func keyboardAt(i int, w *ui.Window, x, y int) *ui.Node {
 	return &c
 }
 
-// windowAt is the deepest node of app window w drawn at (x, y), or nil when it lists none
-// there (a window's bounds can be larger than what it draws), or when what is there is the
-// scrim of a window that takes every touch (see Scrim, blocks): a tap there is how a person
-// dismisses the window, and a flow that taps through it means just that. (A window without
-// focus that draws one plain node, a picture-in-picture video, has no scrim: that is its
-// content.)
 func windowAt(w *ui.Window, x, y int) *ui.Node {
 	var at *ui.Node
 	for _, c := range w.Nodes {
 		if !c.Bounds.Empty() && c.Bounds.Contains(x, y) {
-			at = c // deepest last, in pre-order
+			at = c
 		}
 	}
 	if at != nil && blocks(w) && Scrim(w, at) {
@@ -217,10 +162,6 @@ func windowAt(w *ui.Window, x, y int) *ui.Node {
 	return at
 }
 
-// Scrim: n, a node of window w, is the window's "outside": the part a tap on dismisses it (a
-// BottomSheetDialog's touch_outside, a dim layer that closes its dialog). It is named so, or
-// it is a clickable node with no label and nothing in it that spans its window. One that does
-// not take clicks is a veil (a loading dialog, one still mounting): a cover, waited for.
 func Scrim(w *ui.Window, n *ui.Node) bool {
 	if strings.HasSuffix(n.ID, "touch_outside") {
 		return true
@@ -228,13 +169,6 @@ func Scrim(w *ui.Window, n *ui.Node) bool {
 	return n.Clickable && n.Label() == "" && len(n.Children) == 0 && 10*n.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
 }
 
-// Veil: cover (of an element on s) is a veil: a node with no label and nothing in it filling a
-// window above that takes every touch, and no clicks itself (a clickable one is a scrim, no
-// cover). A loading dialog, or one still mounting: it goes when the work is done, as a
-// loading overlay does.
-//
-// On the web, a cover with nothing in it a person could tap (a loading overlay: a spinner, a
-// message) is one: a backdrop that closes its drawer, or a dialog with buttons, is not.
 func Veil(s *ui.Screen, cover *ui.Node) bool {
 	if cover == nil {
 		return false
@@ -255,18 +189,12 @@ func Veil(s *ui.Screen, cover *ui.Node) bool {
 		10*cover.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
 }
 
-// blocks: app window w, above another, takes every touch within its bounds whatever it draws
-// there. The window with input focus (a dialog, a sheet shown as a window) does; a window
-// without it (a picture-in-picture window, an autocomplete popup, a floating window) only
-// takes the touches on what it draws, as a bar would.
 func blocks(w *ui.Window) bool { return w.Type == "app" && w.Focused }
 
-// Within: a lies inside b (give or take a pixel).
 func Within(a, b ui.Rect) bool {
 	return a.L >= b.L-1 && a.T >= b.T-1 && a.R <= b.R+1 && a.B <= b.B+1
 }
 
-// inOtherList: c is inside a scroll view that does not also hold n.
 func inOtherList(c, n *ui.Node) bool {
 	for p := c.Parent; p != nil; p = p.Parent {
 		if p.Scrollable && !n.IsDescendantOf(p) {
@@ -276,13 +204,11 @@ func inOtherList(c, n *ui.Node) bool {
 	return false
 }
 
-// TakesTouches: c, or a node in it at (x, y), handles touches. A view that does not (a label,
-// a layout) lets them through on Android and iOS alike.
 func TakesTouches(platform string, c *ui.Node, x, y int) bool {
 	found := false
 	c.Walk(func(d *ui.Node) bool {
 		if found || !d.Bounds.Contains(x, y) {
-			return !found && d == c // a node not at the point: skip its subtree
+			return !found && d == c
 		}
 		switch platform {
 		case "ios":
@@ -295,7 +221,6 @@ func TakesTouches(platform string, c *ui.Node, x, y int) bool {
 	return found
 }
 
-// Touchable: n itself takes touches.
 func Touchable(platform string, n *ui.Node) bool {
 	if platform == "ios" {
 		return IOSTouchTypes[n.Class]
@@ -303,7 +228,6 @@ func Touchable(platform string, n *ui.Node) bool {
 	return n.Clickable || n.LongClickable || n.Editable || n.Checkable
 }
 
-// InIOSBar: n is an iOS bar or in one (bars are drawn over content, whatever their place).
 func InIOSBar(n *ui.Node) bool {
 	for p := n; p != nil; p = p.Parent {
 		if IOSBars[p.Class] {
@@ -313,16 +237,8 @@ func InIOSBar(n *ui.Node) bool {
 	return false
 }
 
-// StickyHeader: Android and iOS order a list's children by place, not as drawn, so a sticky
-// section header comes before the rows it is drawn over (iOS: a UICollectionView's or
-// UITableView's header pinned at the list's top, as a plain SwiftUI List's; it takes the touches
-// on what it draws). A row (or header) before the element's own row, in the same list, that
-// overlaps it at the point and spans its width is one. A container is none, whatever its size
-// (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
-// view, as tall as its content, before its cells; a background behind a card).
 func StickyHeader(n *ui.Node, x, y int) *ui.Node { return stickyHeader(n, x, y, 0) }
 
-// stickyHeader is StickyHeader with covers reaching e past their bounds (edgeOf).
 func stickyHeader(n *ui.Node, x, y, e int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
@@ -330,7 +246,7 @@ func stickyHeader(n *ui.Node, x, y, e int) *ui.Node {
 	}
 	list := row.Parent
 	if list == nil || row.Bounds.W()*2 < list.Bounds.W() {
-		return nil // not in a list, or a cell of a sideways one (its cells may overlap a little)
+		return nil
 	}
 	for _, c := range list.Children {
 		if c == row {
@@ -343,10 +259,6 @@ func stickyHeader(n *ui.Node, x, y, e int) *ui.Node {
 	return nil
 }
 
-// edgeOf is how far past its bounds in the tree a cover may really reach on s: on iOS 1 pt,
-// for frames are fractional and the tree rounds them (a pinned header [0,161][402,201] took a
-// tap at y 201, on its bottom edge, CI run 44430794044); a tap point that close to a cover is
-// not clear. Android's and the web's bounds are exact pixels: 0.
 func edgeOf(s *ui.Screen) int {
 	if s.Platform == "ios" {
 		return 1
@@ -354,40 +266,26 @@ func edgeOf(s *ui.Screen) int {
 	return 0
 }
 
-// grown is r, e wider on each side.
 func grown(r ui.Rect, e int) ui.Rect {
 	return ui.Rect{L: r.L - e, T: r.T - e, R: r.R + e, B: r.B + e}
 }
 
-// reaches: a cover with bounds r may take a tap at (x, y), its edges e wider.
 func reaches(r ui.Rect, e, x, y int) bool { return !r.Empty() && grown(r, e).Contains(x, y) }
 
-// holdsRow: c, a child of list before row, is a container: it holds all of row. (Holding
-// another row says nothing: a sticky header taller than the rows wholly covers the one
-// scrolled under it.)
 func holdsRow(row, c *ui.Node) bool { return Within(row.Bounds, c.Bounds) }
 
-// contentView: c, a child of list before row, is the list's content view or a background: it
-// holds all of the list's view and the part of row in it. A SwiftUI list's content view is
-// only as large as the list, so a row cut off at the list's end is not wholly inside it.
 func contentView(list, row, c *ui.Node) bool {
 	return Within(list.Bounds, c.Bounds) && Within(row.Bounds.Intersect(list.Bounds), c.Bounds)
 }
 
-// pinnedOver: n is (in) a section header pinned at the top of its list, and c (in a row of the
-// same list listed after the header) lies under it at (x, y). Android and iOS order a list's
-// children by place, so the rows a pinned header is drawn over come after it: they do not
-// cover it (StickyHeader: the header covers them).
 func pinnedOver(n, c *ui.Node, x, y, e int) bool {
 	h := stickyHeader(c, x, y, e)
 	if h == nil || (h != n && !n.IsDescendantOf(h)) || h.Parent == nil {
 		return false
 	}
-	return h.Bounds.T >= h.Parent.Bounds.T-1 // wholly in its list: not a row scrolled out of it
+	return h.Bounds.T >= h.Parent.Bounds.T-1
 }
 
-// VisiblePart is the part of n a tap can reach: on screen, within the scroll views around it
-// (iOS frames are not cut to them).
 func VisiblePart(s *ui.Screen, n *ui.Node) ui.Rect {
 	r := n.Bounds.Intersect(ui.Rect{R: s.Width, B: s.Height})
 	for p := n.Parent; p != nil; p = p.Parent {
@@ -400,9 +298,6 @@ func VisiblePart(s *ui.Screen, n *ui.Node) ui.Rect {
 	return r
 }
 
-// UncoveredPoint is where to tap n: the middle of its visible part, unless something covers
-// it there; then the middle of the largest part of it around the cover, if that is no sliver.
-// cover is what covers the middle (nil: nothing); ok is false when no part shows clear.
 func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool) {
 	v := VisiblePart(s, n)
 	if v.Empty() {
@@ -415,10 +310,10 @@ func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool
 	}
 	c := grown(cover.Bounds, edgeOf(s))
 	parts := []ui.Rect{
-		{L: v.L, T: v.T, R: v.R, B: min(v.B, c.T)}, // above it
-		{L: v.L, T: max(v.T, c.B), R: v.R, B: v.B}, // below
-		{L: v.L, T: v.T, R: min(v.R, c.L), B: v.B}, // left of it
-		{L: max(v.L, c.R), T: v.T, R: v.R, B: v.B}, // right of it
+		{L: v.L, T: v.T, R: v.R, B: min(v.B, c.T)},
+		{L: v.L, T: max(v.T, c.B), R: v.R, B: v.B},
+		{L: v.L, T: v.T, R: min(v.R, c.L), B: v.B},
+		{L: max(v.L, c.R), T: v.T, R: v.R, B: v.B},
 	}
 	least := max(s.Width/60, 4)
 	best := ui.Rect{}
@@ -433,11 +328,6 @@ func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool
 	return best.CX(), best.CY(), cover, true
 }
 
-// Covered is what covers n where a person would touch it: at the middle of its visible part,
-// or else at three of the middles of its four quarters (most of its area), by At's rule; nil
-// when n shows clear. modal says the cover is a modal layer (see Modal): n cannot be reached
-// until it goes, and no scroll brings n clear of it. On the web, the points are the ones the
-// browser's hit test sampled, read as it reported them.
 func Covered(s *ui.Screen, n *ui.Node) (cover *ui.Node, modal bool) {
 	pts := samples(hitPart(s, n))
 	at := func(i int) *ui.Node { return At(s, n, pts[i][0], pts[i][1]) }
@@ -469,25 +359,6 @@ func Covered(s *ui.Screen, n *ui.Node) (cover *ui.Node, modal bool) {
 	return cover, Modal(s, n, cover) != nil
 }
 
-// Modal is the modal layer cover belongs to, over n, or nil when cover is a bar. A bar (a
-// toolbar, a tab bar, a sticky header or footer, a mini-player, a floating button, the
-// keyboard, a picture-in-picture window) is fixed over content that scrolls under it, so a
-// drag brings n clear. A modal layer (a drawer, a sheet, a dialog) lies over the content as a
-// whole: a drag would move what is under it, or close it through its scrim.
-//
-// The rule is structural, not a share of the screen (a drawer on a tablet is a fifth of it):
-//   - in another app window: modal when that window takes every touch in its bounds (blocks);
-//   - in n's own window: the layer is the branch holding cover below the nearest container of
-//     both (drawn after n). It is modal when it holds all of what shows of n, draws over most
-//     of n (5 of 9 points over n), and neither it nor its only child is a strip across the
-//     viewport (Strip). A see-through frame holding a floating button draws little over n; a
-//     toolbar or a mini-player, alone or in such a frame, is a strip: no modal layer. A
-//     drawer, a sheet (its full-width rows are its content), a portal's backdrop and dialog
-//     are. On iOS with the keyboard up, the keyboard listed in the app's window is a bar.
-//
-// On the web the browser says what the cover's branch is (ui.Hit.Layers): it is a modal layer
-// when one of it is shown modal (a modal <dialog>, aria-modal="true"), or is fixed or sticky,
-// holds all of what shows of n and is no strip across the viewport (webModal).
 func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	if cover == nil {
 		return nil
@@ -499,7 +370,7 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 		if cover.Window >= 0 && cover.Window < len(s.Windows) && blocks(s.Windows[cover.Window]) {
 			return cover
 		}
-		return nil // the keyboard, or a window that only takes touches on what it draws
+		return nil
 	}
 	if s.Platform == "ios" && InIOSBar(cover) {
 		return nil
@@ -519,14 +390,9 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 		return nil
 	}
 	if keyboardInWindow(s, layer, cover) {
-		// iOS can list the keyboard's views in the app's own window: a bar (the runner hides
-		// the keyboard to reach what is under it).
 		return nil
 	}
 	port := viewport(s, n)
-	// The layer is a strip, or holds one alone (a see-through frame holding a bar): a bar laid
-	// over the content. Strips deeper in a layer that is not one (a sheet's full-width rows)
-	// are its content.
 	if Strip(layer.Bounds, port) || (len(layer.Children) == 1 && Strip(layer.Children[0].Bounds, port)) {
 		return nil
 	}
@@ -542,11 +408,6 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	return layer
 }
 
-// webModal is Modal on the web: the layer of cover's branch (as the browser's hit test
-// reported it over n) that makes it modal, or nil when it is a bar. A layer shown modal (a
-// <dialog> opened with showModal, aria-modal="true") is; a fixed or sticky one is when it
-// holds all of what shows of n and is no strip across the viewport (a drawer, a backdrop, a
-// full-screen sheet; not a sticky header, a cookie bar or a bottom navigation).
 func webModal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	v := hitPart(s, n)
 	port := viewport(s, n)
@@ -568,11 +429,6 @@ func webModal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	return nil
 }
 
-// Lasting: cover, a modal layer over n, stays until a person closes it. On Android and iOS,
-// every modal layer does (a drawer, a sheet, a dialog: not a veil, which Veil tells). On the
-// web, only one shown modal does (a <dialog> opened with showModal, aria-modal="true"): a
-// fixed or sticky layer that holds n (a toast, a banner) is modal for ranking, but often goes
-// by itself, so the runner gives it its whole lookup timeout (issue #300 review).
 func Lasting(s *ui.Screen, n, cover *ui.Node) bool {
 	if s.Platform != "web" {
 		return true
@@ -590,10 +446,6 @@ func Lasting(s *ui.Screen, n, cover *ui.Node) bool {
 	return false
 }
 
-// Positioned: on the web, the branch over n that cover belongs to has a fixed or sticky layer
-// (as the browser's hit test reported it): scrolling the page moves n but not the cover. A
-// cover in the page's flow (a stretched link over a card, an absolutely placed badge) scrolls
-// along with n: no drag brings n clear of it.
 func Positioned(n, cover *ui.Node) bool {
 	for _, h := range n.Covers {
 		if h.By != cover {
@@ -608,17 +460,11 @@ func Positioned(n, cover *ui.Node) bool {
 	return false
 }
 
-// Strip: r is a bar across the viewport: it spans its width (give or take a twentieth) and is
-// at most a quarter of its height. A toolbar, a tab bar, a footer, a mini-player are; a drawer
-// (Material leaves at least 56 dp beside one), a sheet over a quarter of the list, a dialog
-// are not.
 func Strip(r, port ui.Rect) bool {
 	tol := port.W() / 20
 	return r.L <= port.L+tol && r.R >= port.R-tol && 4*r.H() <= port.H()
 }
 
-// viewport is what n is seen through: the list (scrolling up and down) around it, on screen,
-// else the screen.
 func viewport(s *ui.Screen, n *ui.Node) ui.Rect {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	for p := n.Parent; p != nil; p = p.Parent {
@@ -631,8 +477,6 @@ func viewport(s *ui.Screen, n *ui.Node) ui.Rect {
 	return screen
 }
 
-// draws: layer draws something at (x, y): a node in it is there. The layer itself counts only
-// when it takes touches (a layer's own frame may be see-through).
 func draws(platform string, layer *ui.Node, x, y int) bool {
 	found := false
 	layer.Walk(func(d *ui.Node) bool {
@@ -645,25 +489,6 @@ func draws(platform string, layer *ui.Node, x, y int) bool {
 	return found
 }
 
-// keyboardInWindow: cover, in layer of the app's own window, is the keyboard as iOS also lists
-// it there. The agent moves every Keyboard element (and its keys) into a keyboard window of
-// its own, so keyboard views left in the app's window are never typed Keyboard: nothing in a
-// node says what it is. What tells:
-//   - a keyboard window is listed: the keyboard's own window stays in the app's tree, its host
-//     holding the prediction bar, the keys' place and the emoji and dictation buttons (the
-//     bench keyboard scenario, on an iPhone simulator). A node from cover up to layer that
-//     holds the keyboard window's frame, across the screen, starting no higher above it than
-//     a quarter of the keyboard's height (its prediction bar), is that host;
-//   - none is listed, yet the keyboard is up (s.Keyboard): a layer across the bottom of the
-//     screen and no taller than two thirds of it.
-//
-// Either way, a layer holding the focused field the keyboard types into (a sheet with a
-// search field) is what the keyboard serves, never the keyboard itself.
-//
-// Known gap, accepted: a sheet with no focused field, presented while a field behind it keeps
-// the keyboard up, whose content starts within that quarter-height band above the keyboard and
-// runs to the bottom, reads as the host, so a target in the band is taken to be under a bar.
-// UIKit normally resigns the field when it presents a sheet, so this is not expected in practice.
 func keyboardInWindow(s *ui.Screen, layer, cover *ui.Node) bool {
 	if s.Platform != "ios" || !s.Keyboard {
 		return false
@@ -701,10 +526,8 @@ func keyboardInWindow(s *ui.Screen, layer, cover *ui.Node) bool {
 	return b.B >= s.Height-1 && across(b) && 3*b.H() <= 2*s.Height
 }
 
-// textTypes are the iOS element types that take text.
 var textTypes = map[string]bool{"TextField": true, "SecureTextField": true, "SearchField": true, "TextView": true}
 
-// grid is 9 points over r: the middles of its ninths.
 func grid(r ui.Rect) [][2]int {
 	var out [][2]int
 	for i := 0; i < 3; i++ {

@@ -35,14 +35,10 @@ func defaults(o driver.ActionOpts) driver.ActionOpts {
 	return o
 }
 
-// act runs an input and then waits (on events) for the page to react.
 func (d *Driver) act(ctx context.Context, o driver.ActionOpts, do func() error) (driver.ActionResult, error) {
 	return d.actQuiet(ctx, o, quietWindow, do, nil)
 }
 
-// actQuiet is act whose page settles on the quiet window quiet, until the next action:
-// typing's is longer (typingQuietWindow). reacted, when given, is asked once after the input
-// when the page has reported no change yet: true counts as the page's reaction (focusKept).
 func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.Duration, do func() error, reacted func() bool) (driver.ActionResult, error) {
 	o = defaults(o)
 	d.mu.Lock()
@@ -59,12 +55,6 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 		none := d.solid == since
 		d.mu.Unlock()
 		if none && reacted() {
-			// A change of the page's state, not of its DOM (as a request is: netChanged). What
-			// the input started (a short timer, a request) then holds the settle after it, as
-			// after any change (onQuiet), so a late reaction is still waited for. What it starts
-			// through something page.js does not track (a requestAnimationFrame loop, a
-			// worker's reply, a MessageChannel chain) is covered by a quiet floor instead
-			// (focusQuietFloor), which the no-change window covered before.
 			d.mu.Lock()
 			d.quietUntil = time.Now().Add(focusQuietFloor)
 			d.mu.Unlock()
@@ -72,8 +62,6 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 		}
 	}
 	if o.React && !o.NoSettle {
-		// Only until the page starts reacting: the caller waits for the rest when it next
-		// needs a still page.
 		t1 := time.Now()
 		res.Settle = driver.NoChange
 		if d.waitUntil(ctx, time.Duration(o.NoChangeMs)*time.Millisecond, func() bool { return d.solid != since }) {
@@ -92,11 +80,6 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 	return res, nil
 }
 
-// Pointer input over a cross-origin frame (a tap, a press, a drag, a wheel) is routed by the
-// browser from what the frame has drawn: sent before the frame's first paint, it reaches the
-// page's frame element instead, and does nothing (issue #326). Each waits for the frames under
-// its point to draw first (awaitFramesDrawn).
-
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.actQuiet(ctx, o, quietWindow, func() error {
 		fx, fy := float64(x), float64(y)
@@ -111,25 +94,11 @@ func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver
 	}, func() bool { return d.focusKept(ctx, x, y) })
 }
 
-// focusKept says whether the focus is on what a tap at (x, y) focuses (issue #311): the element
-// there, or the focused element it is in. A tap whose only effect is focus changes nothing
-// page.js reports when that element already had it (a field tapped again, one the page focused
-// itself, a field the browser's validation focused), or when it moved within one shadow root
-// (focusin does not leave a shadow root then): it waited out the whole no-change window. Asked
-// only after a tap the page reported no change for, so it costs one evaluation there.
 func (d *Driver) focusKept(ctx context.Context, x, y int) bool {
 	var kept bool
 	return d.eval(ctx, fmt.Sprintf(focusKeptJS, x, y), &kept) == nil && kept
 }
 
-// focusKeptJS: whether the focused element (down through shadow roots) is the element at
-// (x, y), or holds it with no control between them (a click there would act on that control
-// instead: a button inside a focused dialog is not the dialog's focus). The focused element
-// must be one a tap is for focusing: a text field (an input that takes text, a textarea,
-// contenteditable) or a focusable element that is no control. A focused button, link,
-// checkbox or select tapped again is tapped for its action, which may come late through
-// something not tracked (a worker's reply): it still waits for it. Never over a frame, whose
-// own focus is in its own document, nor when nothing (the body) has the focus.
 const focusKeptJS = `(function (x, y) {
   let at = document.elementFromPoint(x, y);
   while (at && at.shadowRoot) { const i = at.shadowRoot.elementFromPoint(x, y); if (!i || i === at) break; at = i; }
@@ -179,7 +148,7 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 		if err := d.mouse(ctx, "mousePressed", fx, fy, 1, nil); err != nil {
 			return err
 		}
-		select { // the hold is the gesture
+		select {
 		case <-time.After(hold):
 		case <-ctx.Done():
 			return ctx.Err()
@@ -188,30 +157,13 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 	})
 }
 
-// Swipe scrolls what is under the start point by the swipe's distance (a wheel event), the
-// way a person scrolls a web page. A drag (ActionOpts.Drag: scrollUntilVisible, clearing a
-// cover) scrolls that element itself instead (scrollBy, instant): Chrome may apply a wheel
-// event's scroll later than the event, after the screen was read for the next step, and a tap
-// then landed on the row that scrolled in under it (bench/clicks.py: "meant Item 30, hit Item
-// 34", one wheel step). The drag goes down through shadow roots and frames: same-origin ones
-// in the page's evaluation, cross-origin ones in their own session (frameUnder). Nothing that
-// scrolls there falls back to the wheel.
-//
-// A wheel over a cross-origin frame is routed by the browser, from what the frame has drawn: a
-// wheel sent after the frame's document is ready (tb reads it through its own session, and a
-// frame's renderer kept from an earlier load has it ready within some 20 ms) but before the
-// frame's first paint goes to the page under it instead, and scrolls the page (issue #326).
-// The wheel waits for the frames under the point to draw (awaitDrawn), as a person can only
-// scroll what shows.
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
-		// A swipe that starts on something made to be dragged (a range slider, a draggable
-		// item, a handle whose cursor says so) is a mouse drag: scrolling would not move it.
 		var draggable bool
 		if err := d.eval(ctx, fmt.Sprintf(dragTargetJS, x1, y1), &draggable); err == nil && draggable {
 			return d.mouseDrag(ctx, x1, y1, x2, y2, dur)
 		}
-		var frames []frameAt // the cross-origin frames under the point
+		var frames []frameAt
 		if o.Drag {
 			var res string
 			err := d.eval(ctx, fmt.Sprintf(scrollByJS, x1, y1, x1-x2, y1-y2), &res)
@@ -220,7 +172,6 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 			}
 			if err == nil && res == "frame" {
 				frames = d.frameUnder(ctx, x1, y1)
-				// The deepest frame first: what a wheel there would scroll.
 				for i := len(frames) - 1; i >= 0; i-- {
 					f := frames[i]
 					if err := d.evalIn(ctx, f.session, fmt.Sprintf(scrollByJS, f.x, f.y, x1-x2, y1-y2), &res); err == nil && res == "moved" {
@@ -239,18 +190,11 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 	})
 }
 
-// frameAt is a cross-origin frame under a point: its session, and the point in its viewport.
 type frameAt struct {
 	session string
 	x, y    int
 }
 
-// frameUnder lists the cross-origin frames under the page's point (x, y), outermost first: the
-// frame element a click there reaches (page.js frameAt, down through shadow roots and
-// same-origin frames), then the same in that frame's document, and so on. A frame element is
-// tied to its session by its frame id (DOM.describeNode), which is the out-of-process frame's
-// target id. Nil when the point is over no cross-origin frame, or the frame is not attached;
-// at once, with no evaluation, when the tab has no cross-origin frame attached.
 func (d *Driver) frameUnder(ctx context.Context, x, y int) []frameAt {
 	d.mu.Lock()
 	cur, has := d.curSessionLocked(), false
@@ -306,7 +250,6 @@ func (d *Driver) frameUnder(ctx context.Context, x, y int) []frameAt {
 	return out
 }
 
-// evalIn evaluates expr in a session ("" the page's) and decodes its value into out.
 func (d *Driver) evalIn(ctx context.Context, session, expr string, out any) error {
 	if session == "" {
 		return d.eval(ctx, expr, out)
@@ -331,9 +274,6 @@ func (d *Driver) evalIn(ctx context.Context, session, expr string, out any) erro
 	return nil
 }
 
-// awaitFramesDrawn waits for the cross-origin frames under the page's point (x, y) to draw
-// (awaitDrawn); nothing to do, with no evaluation, when every cross-origin frame of the tab has
-// drawn already (or there is none).
 func (d *Driver) awaitFramesDrawn(ctx context.Context, x, y int) {
 	d.mu.Lock()
 	cur, undrawn := d.curSessionLocked(), false
@@ -352,14 +292,8 @@ func (d *Driver) awaitFramesDrawn(ctx context.Context, x, y int) {
 	}
 }
 
-// drawnWait is the most input waits for a frame to draw (awaitDrawn).
 const drawnWait = 250 * time.Millisecond
 
-// awaitDrawn waits until a frame's document has drawn twice since now: the browser routes
-// input over the frame from what it drew. Once it has, its document is remembered as drawn
-// (frame.drawn, until it navigates or reloads), and later input does not ask again. The wait
-// is at most drawnWait (a frame out of view may not draw), on the host's clock: the frame's
-// own timer, throttled in a hidden tab, is not relied on.
 func (d *Driver) awaitDrawn(ctx context.Context, session string) {
 	d.mu.Lock()
 	f := d.frames[session]
@@ -382,9 +316,6 @@ func (d *Driver) awaitDrawn(ctx context.Context, session string) {
 	}
 }
 
-// dragTargetJS: whether the element under (x, y) is made to be dragged: a range input, a
-// slider, a draggable element, or one whose cursor (or an ancestor's, up to 3 levels) offers a
-// drag (grab, move, resize).
 const dragTargetJS = `(function (x, y) {
   let el = document.elementFromPoint(x, y);
   while (el && el.shadowRoot) { const i = el.shadowRoot.elementFromPoint(x, y); if (!i || i === el) break; el = i; }
@@ -398,8 +329,6 @@ const dragTargetJS = `(function (x, y) {
   return false;
 })(%d, %d)`
 
-// mouseDrag presses at (x1, y1), moves to (x2, y2) in steps over dur (at least 200 ms), and
-// releases there.
 func (d *Driver) mouseDrag(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration) error {
 	if dur < 200*time.Millisecond {
 		dur = 200 * time.Millisecond
@@ -427,10 +356,6 @@ func (d *Driver) mouseDrag(ctx context.Context, x1, y1, x2, y2 int, dur time.Dur
 	return d.mouse(ctx, "mouseReleased", float64(x2), float64(y2), 1, nil)
 }
 
-// scrollByJS scrolls the nearest scrollable element under (x, y) (else its document) by
-// (dx, dy) at once, down through open shadow roots and same-origin frames (issue #326: the
-// element under the point, whatever document it is in). "moved", "still" (nothing scrolled)
-// or "frame" (the point is over a cross-origin frame: scrolled in its own session).
 const scrollByJS = `(function (x, y, dx, dy) {
   let doc = document, at = doc.elementFromPoint(x, y);
   const style = (el) => (doc.defaultView && doc.defaultView.getComputedStyle ? doc.defaultView.getComputedStyle(el) : getComputedStyle(el));
@@ -525,21 +450,16 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 		o.NoChangeMs = 300
 	}
 	return d.actQuiet(ctx, o, typingQuietWindow, func() error {
-		// Issue #289: eraseText erases from the end of the text, and a click leaves the caret
-		// where it landed, often mid-text, where a Backspace deletes what is before it. The
-		// caret goes to the end first: set by the page where the field allows it, else by the
-		// End key (an email or number input refuses setSelectionRange).
 		probe := struct {
 			Len    int  `json:"len"`
 			Placed bool `json:"placed"`
-		}{Len: -1} // unknown if the probe fails: press all n
+		}{Len: -1}
 		d.eval(ctx, eraseProbe, &probe)
 		if probe.Len > 0 && !probe.Placed {
 			if err := d.key(ctx, endKey); err != nil {
 				return err
 			}
 		}
-		// No more presses than the field holds.
 		length := probe.Len
 		if length >= 0 && length < n {
 			n = length
@@ -553,8 +473,6 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 	}, nil)
 }
 
-// eraseProbe: the focused field's length, with its caret put at the end of its text (issue
-// #289); placed is false when the page could not put it there.
 const eraseProbe = `(() => {
   const e = document.activeElement;
   if (e && 'value' in e) {
@@ -569,7 +487,6 @@ const eraseProbe = `(() => {
   return { len: -1, placed: false };
 })()`
 
-// endKey moves the caret to the end of a field's line, where the page cannot set it.
 var endKey = keyDef{"End", "End", 35, ""}
 
 func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -617,14 +534,8 @@ func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) (
 	return d.capture(ctx, p)
 }
 
-// screenshotTimeout bounds one Page.captureScreenshot, as the Android and iOS drivers bound
-// theirs (20 s). Chrome answers it only once the page draws a frame, so a page it cannot draw
-// (a window too small or too large for it, a script that never yields, a stalled compositor or
-// GPU) leaves it unanswered for good (issue #163). A variable so tests can shorten it.
 var screenshotTimeout = 20 * time.Second
 
-// capture takes a screenshot with params, giving up after screenshotTimeout even when ctx has
-// no deadline. Every Page.captureScreenshot goes through here.
 func (d *Driver) capture(ctx context.Context, params map[string]any) ([]byte, error) {
 	c, cancel := context.WithTimeout(ctx, screenshotTimeout)
 	defer cancel()

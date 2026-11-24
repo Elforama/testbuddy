@@ -13,25 +13,13 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Network mocks (mockNetwork) go through Chrome's Fetch domain: while any mock is active,
-// requests matching a mock's URL pattern pause in the browser (Fetch.requestPaused) and the
-// driver answers each one: with the latest matching mock's response, as a network error, or
-// by letting it go on to the network (another method, or a pattern Chrome matched more
-// loosely). The page and every attached cross-origin frame intercept, since a frame's
-// requests pause in its own session.
-//
-// A paused request still shows in the Network events, so the settle bookkeeping (in-flight
-// XHR/fetch) sees a mocked request start and finish like a real one.
-
 var _ driver.NetworkMocker = (*Driver)(nil)
 
-// heldRequest is a paused request whose mocked response waits for the mock's delay.
 type heldRequest struct {
 	session, id string
 	timer       *time.Timer
 }
 
-// MockNetwork adds a mock and makes the page and its frames intercept its URL pattern.
 func (d *Driver) MockNetwork(ctx context.Context, m driver.NetworkMock) error {
 	if m.URL == "" {
 		return errors.New("mockNetwork: the url pattern is empty")
@@ -46,13 +34,11 @@ func (d *Driver) MockNetwork(ctx context.Context, m driver.NetworkMock) error {
 		return err
 	}
 	for _, s := range d.frameSessions() {
-		d.page.callIn(ctx, s, "Fetch.enable", params, nil) // a frame may be gone already
+		d.page.callIn(ctx, s, "Fetch.enable", params, nil)
 	}
 	return nil
 }
 
-// ClearNetworkMocks drops every mock: requests held for a delay go on to the network at once,
-// and the page and its frames stop intercepting. With nothing mocked it sends nothing.
 func (d *Driver) ClearNetworkMocks(ctx context.Context) error {
 	d.mockMu.Lock()
 	on, held := d.fetchOn, d.held
@@ -74,7 +60,6 @@ func (d *Driver) ClearNetworkMocks(ctx context.Context) error {
 	return err
 }
 
-// dropHeld forgets held requests without answering them (the browser is closing).
 func (d *Driver) dropHeld() {
 	d.mockMu.Lock()
 	defer d.mockMu.Unlock()
@@ -93,7 +78,6 @@ func heldInOrder(held map[string]*heldRequest) []*heldRequest {
 	return out
 }
 
-// patternsLocked is the Fetch.enable pattern list: each mock's URL once, in order.
 func (d *Driver) patternsLocked() []map[string]any {
 	seen := map[string]bool{}
 	pats := []map[string]any{}
@@ -106,7 +90,6 @@ func (d *Driver) patternsLocked() []map[string]any {
 	return pats
 }
 
-// mockPatterns is the pattern list while mocks are active, else nil.
 func (d *Driver) mockPatterns() []map[string]any {
 	d.mockMu.Lock()
 	defer d.mockMu.Unlock()
@@ -116,7 +99,6 @@ func (d *Driver) mockPatterns() []map[string]any {
 	return d.patternsLocked()
 }
 
-// frameSessions lists the attached cross-origin frames' sessions, in attach order.
 func (d *Driver) frameSessions() []string {
 	d.mu.Lock()
 	fs := make([]*frame, 0, len(d.frames))
@@ -132,8 +114,6 @@ func (d *Driver) frameSessions() []string {
 	return out
 }
 
-// onRequestPaused answers an intercepted request. It runs on the connection's read loop, so
-// the answer is sent from another goroutine (a call waits for a reply the loop delivers).
 func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 	var e struct {
 		RequestID string `json:"requestId"`
@@ -150,9 +130,6 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 	d.mockMu.Lock()
 	m, ok := d.matchLocked(e.Request.URL, e.Request.Method)
 	if asks, isPre := req.preflight(); isPre && (!ok || m.Method == "") {
-		// A CORS preflight is the browser's, not the page's: the mock for the request it asks
-		// about answers it, whatever that mock's method (issue #77). A mock for OPTIONS
-		// itself is answered as written.
 		if pm, found := d.matchLocked(e.Request.URL, asks); found {
 			d.mockMu.Unlock()
 			go d.answerPreflight(session, e.RequestID, req, pm)
@@ -169,7 +146,7 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 			_, still := d.held[key]
 			delete(d.held, key)
 			d.mockMu.Unlock()
-			if still { // not cleared or closed meanwhile
+			if still {
 				d.respond(session, e.RequestID, req, m)
 			}
 		})}
@@ -184,14 +161,11 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 	go d.respond(session, e.RequestID, req, m)
 }
 
-// pausedRequest is what the answer to a paused request depends on besides its mock.
 type pausedRequest struct {
 	url, method string
 	headers     map[string]string
 }
 
-// crossOrigin is the request's Origin when it differs from the origin of the URL requested
-// (Chrome sends Origin on same-origin POSTs too, which need no CORS headers), else "".
 func (r pausedRequest) crossOrigin() string {
 	origin := r.header("Origin")
 	if origin == "" {
@@ -204,7 +178,7 @@ func (r pausedRequest) crossOrigin() string {
 	host := u.Host
 	if p := u.Port(); p == map[string]string{"http": "80", "https": "443"}[u.Scheme] {
 		host = u.Hostname()
-		if strings.Contains(host, ":") { // IPv6
+		if strings.Contains(host, ":") {
 			host = "[" + host + "]"
 		}
 	}
@@ -214,7 +188,6 @@ func (r pausedRequest) crossOrigin() string {
 	return origin
 }
 
-// header is a request header's value, whatever the case of its name.
 func (r pausedRequest) header(name string) string {
 	for k, v := range r.headers {
 		if strings.EqualFold(k, name) {
@@ -224,13 +197,11 @@ func (r pausedRequest) header(name string) string {
 	return ""
 }
 
-// preflight is the method a CORS preflight asks about, when the request is one.
 func (r pausedRequest) preflight() (string, bool) {
 	m := r.header("Access-Control-Request-Method")
 	return m, strings.EqualFold(r.method, "OPTIONS") && m != "" && r.header("Origin") != ""
 }
 
-// matchLocked is the latest mock for this request.
 func (d *Driver) matchLocked(url, method string) (driver.NetworkMock, bool) {
 	for i := len(d.mocks) - 1; i >= 0; i-- {
 		m := d.mocks[i]
@@ -241,8 +212,6 @@ func (d *Driver) matchLocked(url, method string) (driver.NetworkMock, bool) {
 	return driver.NetworkMock{}, false
 }
 
-// respond sends a mock's answer to a paused request. A cross-origin request (its Origin is
-// not the URL's) gets the CORS headers it needs, unless the mock sets its own (issue #77).
 func (d *Driver) respond(session, id string, req pausedRequest, m driver.NetworkMock) {
 	if m.Fail {
 		d.answer(session, "Fetch.failRequest", map[string]any{"requestId": id, "errorReason": "Failed"})
@@ -255,7 +224,7 @@ func (d *Driver) respond(session, id string, req pausedRequest, m driver.Network
 		for _, h := range m.Headers {
 			names = append(names, h[0])
 		}
-		if len(names) > 0 { // so the page can read them all (* is not allowed with credentials)
+		if len(names) > 0 {
 			hs = append(hs, [2]string{"Access-Control-Expose-Headers", strings.Join(names, ", ")})
 		}
 	}
@@ -263,9 +232,6 @@ func (d *Driver) respond(session, id string, req pausedRequest, m driver.Network
 		"responseHeaders": headerParams(hs), "body": base64.StdEncoding.EncodeToString(m.Body)})
 }
 
-// answerPreflight answers a CORS preflight for a mocked request, at once: it allows what the
-// preflight asks for (the method and headers) from the request's origin. A mock that sets its
-// own CORS headers answers with those instead; a failing mock fails the preflight.
 func (d *Driver) answerPreflight(session, id string, req pausedRequest, m driver.NetworkMock) {
 	if m.Fail {
 		d.answer(session, "Fetch.failRequest", map[string]any{"requestId": id, "errorReason": "Failed"})
@@ -289,14 +255,10 @@ func (d *Driver) answerPreflight(session, id string, req pausedRequest, m driver
 		"responseHeaders": headerParams(hs)})
 }
 
-// allowOrigin allows the request's origin, echoed rather than *, so that a credentialed
-// request passes too.
 func allowOrigin(origin string) [][2]string {
 	return [][2]string{{"Access-Control-Allow-Origin", origin}, {"Access-Control-Allow-Credentials", "true"}}
 }
 
-// varyOnOrigin adds Origin to the headers' Vary: in the mock's own Vary when it sets one
-// (once), else as a Vary header of its own.
 func varyOnOrigin(hs [][2]string) [][2]string {
 	for i, h := range hs {
 		if !strings.EqualFold(h[0], "Vary") {
@@ -317,7 +279,6 @@ func varyOnOrigin(hs [][2]string) [][2]string {
 	return append(hs, [2]string{"Vary", "Origin"})
 }
 
-// setsCORS reports whether a mock's headers give their own CORS answer.
 func setsCORS(hs [][2]string) bool {
 	for _, h := range hs {
 		if strings.EqualFold(h[0], "Access-Control-Allow-Origin") {
@@ -338,14 +299,12 @@ func headerParams(hs [][2]string) []map[string]string {
 func (d *Driver) answer(session, method string, params map[string]any) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	d.page.callIn(ctx, session, method, params, nil) // a request the page dropped meanwhile errors: nothing to do
+	d.page.callIn(ctx, session, method, params, nil)
 }
 
-// globMatch matches s against Chrome's URL pattern syntax: * is any run of characters
-// (none included), ? exactly one, and \ makes the next character literal.
 func globMatch(pat, s string) bool {
 	type tok struct {
-		kind byte // 'l' literal, '*', '?'
+		kind byte
 		c    byte
 	}
 	toks := make([]tok, 0, len(pat))

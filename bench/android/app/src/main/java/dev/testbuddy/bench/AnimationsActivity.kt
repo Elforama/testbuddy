@@ -18,10 +18,6 @@ import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * Scenario 12, "Animations". Every animation runs on a TimeAnimator or Handler, so it keeps
- * moving (and keeps its timing) even with the device's animations turned off.
- */
 class AnimationsActivity : ScenarioActivity() {
     private lateinit var status: TextView
 
@@ -90,7 +86,6 @@ class AnimationsActivity : ScenarioActivity() {
         })
     }
 
-    /** "Sprung" comes in from off-screen right on an under-damped spring: overshoots, settles in ~900 ms. */
     private fun springIn() {
         lateinit var lane: FrameLayout
         lateinit var sprung: View
@@ -113,7 +108,6 @@ class AnimationsActivity : ScenarioActivity() {
         lane.addView(sprung, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_VERTICAL))
     }
 
-    /** 600 ms after "Shift", a 200 dp banner grows above "Target" over 400 ms, pushing it down. */
     private fun layoutShift() {
         lateinit var banner: TextView
         content.button(R.id.anim_shift_open, "Shift") {
@@ -136,7 +130,6 @@ class AnimationsActivity : ScenarioActivity() {
         content.button(R.id.anim_target, "Target") { status.text = "Target tapped" }
     }
 
-    /** "Add row" below its rows: each tap adds "Row N" above it, so its own tap moves it down. */
     private fun addRows() {
         val rows = content.put(android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }, top = 0)
         content.button(R.id.anim_add_row, "Add row") {
@@ -191,7 +184,6 @@ class AnimationsActivity : ScenarioActivity() {
         track(animateFor(CONFETTI_MS, { view.progress = it; view.invalidate() }) { root.removeView(view) })
     }
 
-    /** 60 falling particles over the whole screen. Not touchable, not in the accessibility tree. */
     private class Confetti(context: Context) : View(context) {
         var progress = 0f
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -207,7 +199,6 @@ class AnimationsActivity : ScenarioActivity() {
         override fun onDraw(canvas: Canvas) {
             val size = context.dp(8).toFloat()
             for (i in 0 until 60) {
-                // Deterministic: no randomness, each particle's lane and delay from its index.
                 val x0 = (i * 37 % 100) / 100f * width
                 val delay = (i * 13 % 40) / 100f
                 val t = ((progress - delay) / (1f - delay)).coerceIn(0f, 1f)

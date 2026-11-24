@@ -6,7 +6,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Long presses, double taps and erasing: the gestures' timing and the keys erasing sends. */
 class GesturesTest {
     private val clock = FakeClock(10_000)
     private val injector = FakeInjector(density = 2f)
@@ -30,13 +29,6 @@ class GesturesTest {
         assertTrue("both ends wait for the app to take them", injector.touches.all { it.sync })
     }
 
-    /**
-     * Issue #358: a press-and-hold drag. ItemTouchHelper, Compose's
-     * detectDragGesturesAfterLongPress and a long-click drag and drop lift the item only once the
-     * finger rested past the long-press timeout, then follow its moves: one gesture (one DOWN
-     * time), DOWN, still for the hold, even moves over the duration, a still rest at the end
-     * with a move each frame, UP there.
-     */
     @Test
     fun holdDragPressesHoldsMovesEvenlyRestsAndLiftsInOneGesture() {
         val sentAt = ArrayList<Long>()
@@ -72,16 +64,9 @@ class GesturesTest {
         assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
     }
 
-    /**
-     * Issue #358: a drop right on a row's centre is a tie for a stock ItemTouchHelper, which
-     * swaps only once the dragged row's edge is strictly past the other's: on the bench, A
-     * dragged onto C's centre ended at curY 294 = C's top in 2 runs of 5 (no swap, BACDE) and
-     * 295 in the others. The settle goes past the drop point along the move, whichever way it
-     * goes, never past the start on a short drag, and comes back before the UP.
-     */
     @Test
     fun holdDragSettlesPastTheDropPointAndBack() {
-        input.holdDrag(300f, 500f, 100f, 500f, holdMs = 800, durationMs = 400) // leftwards
+        input.holdDrag(300f, 500f, 100f, 500f, holdMs = 800, durationMs = 400)
         val end = touches.indexOfLast { it.action == MotionEvent.ACTION_MOVE && it.at <= 10_000L + 800 + 400 }
         val rest = touches.subList(end + 1, touches.size - 1)
         assertEquals(listOf(96f, 92f, 88f, 92f, 96f, 100f), rest.take(6).map { it.x })
@@ -89,29 +74,23 @@ class GesturesTest {
         assertEquals(100f, touches.last().x)
 
         injector.touches.clear()
-        input.holdDrag(0f, 0f, 0f, 5f, holdMs = 1, durationMs = 100) // shorter than the settle
+        input.holdDrag(0f, 0f, 0f, 5f, holdMs = 1, durationMs = 100)
         val farthest = touches.maxOf { it.y }
         assertEquals("the settle goes no farther past than the drag is long", 10f, farthest)
         assertEquals(5f, touches.last().y)
     }
 
-    /** Issue #358: a long, quick drag still goes in steps of at most 20 dp; a hold of 1 ms barely waits. */
     @Test
     fun holdDragStepsAreShortOnALongQuickMove() {
         input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 1, durationMs = 100)
         val all = touches.map { it.y }
-        val ys = all.take(all.indexOf(2000f) + 1) // up to the drop point, before the settle
+        val ys = all.take(all.indexOf(2000f) + 1)
         assertTrue("steps at most 40 px", ys.zipWithNext { a, b -> b - a }.all { it in 0f..40f })
         assertEquals("ends at the drop", 2000f, touches.last().y)
         val firstMove = touches[1]
         assertEquals("the first step a frame after the 1 ms hold", 1L + Input.FRAME_MS, firstMove.at - touches[0].at)
     }
 
-    /**
-     * Issue #358 review: a long drag with a short duration is slowed to a frame a step. Moves
-     * sent within one frame reach the app batched, one jump of more than 20 dp, and a reorder
-     * that swaps a row at a time (Collections.swap in onMove) would skip a row.
-     */
     @Test
     fun holdDragLongAndQuickStillGoesAFrameAStep() {
         input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 800, durationMs = 100)
@@ -123,7 +102,6 @@ class GesturesTest {
         assertEquals("the move takes 50 frames, not 100 ms", 50 * Input.FRAME_MS, glide.last().at - (touches[0].at + 800))
     }
 
-    /** Issue #358: a DOWN the platform refuses ends the drag there, with an error: nothing more is sent. */
     @Test
     fun holdDragStopsWhenTheDownIsRefused() {
         injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
@@ -150,16 +128,9 @@ class GesturesTest {
         assertTrue(touches.all { it.x == 50f && it.y == 60f })
     }
 
-    /**
-     * Issue #89: on a slow emulator each injection that waits for the app to handle it returns
-     * late. A click-counting double tap (the bench's doubletap_box) needs the second click within
-     * 300 ms of the first, and a gesture detector the second DOWN within 300 ms of the first UP.
-     * The taps' spacing must come from the agent's fixed schedule, not from how long the app
-     * takes to answer: nothing between the first UP and the second UP waits for it.
-     */
     @Test
     fun doubleTapSpacingDoesNotStretchWhenTheAppIsSlowToTakeEvents() {
-        injector.onSyncTouch = { clock.advance(150) } // each waited-for event costs 150 ms
+        injector.onSyncTouch = { clock.advance(150) }
         input.doubleTap(50f, 60f)
         val (down1, up1, down2, up2) = touches
         val gap = down2.at - up1.at
@@ -170,18 +141,9 @@ class GesturesTest {
         assertEquals("only the last UP waits for the app", listOf(false, false, false, true), injector.touches.map { it.sync })
     }
 
-    /**
-     * Issue #144: on a loaded emulator the agent's own sleeps return late (a 100 ms sleep took
-     * 191 ms), and each late sleep between the taps reached the app: the bench's doubletap_box
-     * counts clicks on its main thread and wants the second within 300 ms of the first, and a
-     * GestureDetector the second DOWN within 300 ms of the first, both in real time. The taps'
-     * contacts and gap are in the events' times; in real time only one sleep may separate the
-     * taps. The events' times stay exact however late it returns: 100 ms contacts (the Flutter
-     * bench's reaction row wants 75 ms, and its UPs within 350 ms), an 80 ms gap.
-     */
     @Test
     fun doubleTapRealTimeSpacingSurvivesSleepsThatReturnLate() {
-        clock.oversleep = 100 // every sleep returns 100 ms late
+        clock.oversleep = 100
         val sentAt = ArrayList<Long>()
         injector.onTouch = { sentAt += clock.now }
         input.doubleTap(50f, 60f)
@@ -194,11 +156,6 @@ class GesturesTest {
         assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
     }
 
-    /**
-     * Issue #144 review: Flutter's onDoubleTap starts a 40 ms timer when it handles the first
-     * DOWN, and a second DOWN handled before it fires reads as a new first tap. The second
-     * contact goes in a real-time pause after the first, with room for a busy UI thread.
-     */
     @Test
     fun doubleTapPausesInRealTimeBetweenTheContacts() {
         val sentAt = ArrayList<Long>()
@@ -220,7 +177,6 @@ class GesturesTest {
         assertEquals(1, injector.keys.count { it.sync })
     }
 
-    /** Issue #289: a caret reported at the end is set there all the same: a Compose field reported that while its caret was mid-text. */
     @Test
     fun eraseSetsACaretReportedAtTheEnd() {
         field = FakeField("hello")
@@ -239,7 +195,7 @@ class GesturesTest {
     @Test
     fun eraseFallsBackToTheEndKeyWhenTheCursorCannotBeSet() {
         for (f in listOf(
-            null, // nothing focused
+            null,
             FakeField("abc", editable = false, selectionStart = 0, selectionEnd = 0),
             FakeField("abc", selectionStart = 0, selectionEnd = 0, acceptSelect = false),
         )) {

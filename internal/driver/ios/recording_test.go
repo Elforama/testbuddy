@@ -2,11 +2,6 @@
 
 package ios
 
-// Issue #52: the recorder (simctl io recordVideo) must not outlive tb, even a tb killed with
-// SIGKILL, and Close stops a recording; a start that simctl never confirms says so in the trace.
-// Unix only: these send signals (syscall.Kill), and iOS simulators need macOS anyway. The tb
-// they kill is in killedtb_test.go.
-
 import (
 	"bufio"
 	"context"
@@ -20,10 +15,6 @@ import (
 	"time"
 )
 
-// recorderStub answers recordVideo: it writes its pid to pidFile, says the recording started
-// (confirm), and records until SIGINT or SIGTERM. Then, as real simctl does, it says so before it
-// writes the file ($7) and exits: a recorder whose output nobody reads any more dies of SIGPIPE
-// there and writes nothing (issue #52 review).
 func recorderStub(pidFile string, confirm bool) []stubRule {
 	say := `echo "Recording started"; `
 	if !confirm {
@@ -33,7 +24,6 @@ func recorderStub(pidFile string, confirm bool) []stubRule {
 		`while :; do /bin/sleep 0.02; done;`}}
 }
 
-// readPid waits for the stub recorder's pid.
 func readPid(t *testing.T, pidFile string) int {
 	t.Helper()
 	waitFile(t, pidFile)
@@ -52,8 +42,6 @@ func readPid(t *testing.T, pidFile string) int {
 
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
-// waitGone waits up to d for pid to be gone. The stub recorder is this test's own process: it
-// is killed at the test's end either way, so a failing run leaves nothing behind.
 func waitGone(t *testing.T, pid int, d time.Duration) bool {
 	t.Helper()
 	t.Cleanup(func() {
@@ -73,8 +61,6 @@ func waitGone(t *testing.T, pid int, d time.Duration) bool {
 	}
 }
 
-// Issue #52: a tb killed with SIGKILL mid-recording (nothing in it can run) must not leave
-// simctl recording: the recorder is stopped with SIGINT within seconds, its file written.
 func TestKilledTBStopsTheRecorder(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
@@ -92,7 +78,7 @@ func TestKilledTBStopsTheRecorder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tb.Wait()
-	defer tb.Process.Kill() // the tb this test started
+	defer tb.Process.Kill()
 	line, _ := bufio.NewReader(stdout).ReadString('\n')
 	if line != "recording\n" {
 		t.Fatalf("the tb to kill did not start recording: %q", line)
@@ -110,7 +96,6 @@ func TestKilledTBStopsTheRecorder(t *testing.T) {
 	}
 }
 
-// Issue #52: Close stops a recording in progress.
 func TestCloseStopsTheRecording(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
@@ -133,8 +118,6 @@ func TestCloseStopsTheRecording(t *testing.T) {
 	}
 }
 
-// Issue #52 review: a Close that comes while a start still waits for simctl's word waits for
-// that start, then stops the recording it made, instead of leaving it to record on.
 func TestCloseDuringStartStopsTheRecording(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
@@ -145,7 +128,7 @@ func TestCloseDuringStartStopsTheRecording(t *testing.T) {
 	d := &Driver{info: testInfo()}
 	started := make(chan error, 1)
 	go func() { started <- d.StartRecording(context.Background(), filepath.Join(t.TempDir(), "run.mp4")) }()
-	pid := readPid(t, pidFile) // the start waits for "Recording started", which never comes
+	pid := readPid(t, pidFile)
 	d.Close()
 	if err := <-started; err != nil {
 		t.Logf("start: %v", err)
@@ -155,8 +138,6 @@ func TestCloseDuringStartStopsTheRecording(t *testing.T) {
 	}
 }
 
-// Issue #52: a recording simctl never confirms goes on (it may only be slow), but the run's
-// trace says the recorder did not confirm it started.
 func TestRecordingStartTimeoutIsNoted(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
@@ -179,11 +160,6 @@ func TestRecordingStartTimeoutIsNoted(t *testing.T) {
 	}
 }
 
-// simctl writes a frame only when the screen changes, so a recording of a still screen begins
-// at the first change after it started, which can be long after "Recording started" (CI: an
-// iOS video began 43 s late, and --annotate drew everything 43 s behind the picture). Right
-// after the start, the driver changes the status bar's time for a moment, then clears it: the
-// video begins then, and RecordingStarted says when.
 func TestRecordingStartsWithAStatusBarChange(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
@@ -207,15 +183,12 @@ func TestRecordingStartsWithAStatusBarChange(t *testing.T) {
 	if got := d.RecordingStarted(); got.Before(before) || got.After(time.Now()) {
 		t.Errorf("RecordingStarted %v, not the status bar change's time", got)
 	}
-	// --annotate finds the mark in the video (PR #393): when it showed and how long it stayed
 	shown, held, ok := d.RecordingMark()
 	if !ok || !shown.Equal(d.RecordingStarted()) || held < statusBarHold {
 		t.Errorf("RecordingMark = %v, %v, %v; want the start, held at least %s", shown, held, ok, statusBarHold)
 	}
 }
 
-// A simulator whose status bar someone set (screenshots at 9:41) keeps it: the driver changes
-// nothing, and the video's start is when simctl said it started.
 func TestRecordingLeavesAStatusBarOverrideAlone(t *testing.T) {
 	ts := stubTools(t)
 	pidFile := filepath.Join(t.TempDir(), "recorder.pid")

@@ -1,11 +1,5 @@
-// Input synthesized through testmanagerd (XCSynthesizedEventRecord), without XCUIElement's
-// waits for the app to go idle before and after. Every call returns once testmanagerd has
-// confirmed the app received the events (its completion, pushed, not polled), or once the app
-// reported its touches completed: then the record stays unconfirmed in the gate (InputGate,
-// issue #286), and no other device event is sent until testmanagerd confirms it.
 import XCTest
 
-/// XCTest's finger paths (Private.swift), for Gestures.swift.
 struct XCTPaths: PathBuilder {
     func touch(at p: CGPoint, offset: TimeInterval) throws -> NSObject { try Private.touchPath(at: p, offset: offset) }
     func move(_ path: NSObject, to p: CGPoint, at offset: TimeInterval) throws { try Private.move(path, to: p, at: offset) }
@@ -23,9 +17,6 @@ final class Input {
     private let paths = XCTPaths()
     init(tree: Tree) { self.tree = tree }
 
-    // MARK: coordinates
-
-    /// Touches are given in the app's UI points and played in the hardware's portrait points.
     private func hardware(_ p: CGPoint) -> CGPoint {
         guard tree.landscape else { return p }
         let o = onMain { XCUIDevice.shared.orientation }
@@ -35,48 +26,17 @@ final class Input {
         return CGPoint(x: w - p.y, y: p.x)
     }
 
-    // MARK: playing
-
-    /// The gate every device event goes through (InputGate, issue #286): no event is sent while
-    /// an earlier one is unconfirmed. Records (play) and the buttons (key) here; the ops' other
-    /// XCTest calls that make testmanagerd synthesize an event (rotate, launch, activate,
-    /// terminate, typing's XCUIElement.tap()) in Ops. Used on the op's thread. Its lock is the
-    /// events lock, which testmanagerd's confirmations signal.
     let gate = InputGate(wait: { done, ms in Events.shared.awaitInput(done, inputEndConfirms: nil, timeoutMs: ms) },
                          locked: { f in Events.shared.signal(f) },
-                         // An XCTest issue a call raises is its op's, even after the op gave up
-                         // on it (IssueSink, issue #286).
                          wrap: { f in let gen = Ops.issues.current; return { try Ops.issues.within(gen, f) } })
     private final class Flag { var on = false }
 
-    /// Whether testmanagerd confirmed the last record played only implicitly, with no touches
-    /// completed from the app (Gestures.implicitlyConfirmed, issue #111): the swipe op tells the
-    /// host. Set and read on the op's thread, as the gate is.
     private(set) var lastImplicitlyConfirmed = false
 
-    /// Issue #334: the last record played, when it started (uptime ns) and when its last finger
-    /// lifted (seconds in), for its Delivery verdict, which the host asks for after the settle.
-    /// implicitAt: when testmanagerd confirmed it only implicitly (seconds in, issue #111), else nil.
     private(set) var lastRecord: (start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval?)?
 
-    /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
-    /// its last event) or, with early, once a process reports its touches completed after the
-    /// record's lift at liftAt (XCTest's TouchEventsCompleted user-testing event, ~30 ms after
-    /// the lift; one that comes before is another record's, Gestures.confirmsEarly): both
-    /// pushed. A record answered early stays unconfirmed in the gate (InputGate): the next
-    /// device event of any kind waits for it, as overlapping records could mix their events and
-    /// testmanagerd refuses a button press meanwhile (issue #286). With system, the record then waits for
-    /// SpringBoard to keep up (SystemWait, issue #137): it holds the app's gestures until it
-    /// has ruled on the touch.
-    /// timeout: the record's own confirmation timeout. deadlineMs: the time the op has left
-    /// (issue #130), or nil. With one, the wait for the previous record ends at the deadline; a
-    /// previous record still unconfirmed then is InputNotSent (nothing of this one went, and it
-    /// stays pending, so an op asked again waits for it too). This record then waits for its own
-    /// confirmation for its own timeout, cut to what is left (PendingInput.confirmMs). Without
-    /// one, the wait for the previous record is up to 10 s, as before.
     private func play(_ paths: [NSObject], timeout own: TimeInterval, deadlineMs: Int? = nil, early: Bool = false,
                       liftAt: TimeInterval = 0, system: Bool = false) throws {
-        // Issue #111: a record that throws before it is confirmed leaves no word from an earlier one.
         lastImplicitlyConfirmed = false
         lastRecord = nil
         try gate.send(deadlineMs: deadlineMs) { budget in
@@ -87,7 +47,6 @@ final class Input {
         }
     }
 
-    /// Plays a record the gate let through (play).
     private func playNow(_ paths: [NSObject], timeout: TimeInterval, early: Bool, liftAt: TimeInterval, system: Bool) throws {
         if system { Input.awaitSystem() }
         let rec = try Private.record(paths)
@@ -96,11 +55,6 @@ final class Input {
         try Private.synthesize(rec) { err in
             Events.shared.signal { p.error = err; p.done = true }
         }
-        // Whether a "touches completed" from the app ended the wait (issue #111). awaitInput
-        // checks done() first and short-circuits: once testmanagerd's confirmation is in,
-        // confirms is not called, so this stays false even if a "touches completed" came at
-        // the same time. That is why implicitlyConfirmed also needs the confirmation to come
-        // seconds after the lift: a normal one comes ~200 ms after it.
         let endedEarly = Flag()
         let confirms: ((UInt64) -> Bool)? = early ? { at in
             let yes = Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
@@ -112,31 +66,22 @@ final class Input {
         let confirmedAt = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
         let implicit = Gestures.implicitlyConfirmed(early: early, endedEarly: endedEarly.on, confirmedAt: confirmedAt, liftAt: liftAt)
         if implicit {
-            // Issue #111: testmanagerd gave up waiting for the app's touches completed.
             lastImplicitlyConfirmed = true
             NSLog("tb: input confirmed %.1f s after its lift with no touches completed from the app: its touches may not have reached it", confirmedAt - liftAt)
         }
         lastRecord = (start, liftAt, implicit ? confirmedAt : nil)
         let finished = Events.shared.signal { p.done }
-        // Answered on the app's "touches completed": testmanagerd has not confirmed it yet, and
-        // the gate holds the next device event until it does (issue #286).
         if !finished { gate.leave(p); return }
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }
     }
 
-    /// timeoutMs, when given, shortens the gesture's own confirmation timeout. ci: the host's CI
-    /// mode, in which a swipe or drag waits for SpringBoard first (Gestures.waitsForSystem).
     private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil, ci: Bool = false) throws {
         try play(g.paths, timeout: g.timeout, deadlineMs: timeoutMs, early: g.early, liftAt: g.liftAt,
                  system: Gestures.waitsForSystem(g, ci: ci))
     }
 
-    /// SpringBoard keeping up, for swipes and drags (one for the agent: it stops asking a
-    /// SpringBoard that does not answer for a while).
     private static let system = SystemWait { done in try Events.shared.askSystemIdle(done) }
 
-    /// Waits for SpringBoard (SystemWait), logging how long and how it ended (the simulator log
-    /// and the trace show whether the wait happens, issue #137).
     private static func awaitSystem() {
         let t0 = DispatchTime.now().uptimeNanoseconds
         let r = system.wait(pid: Apps.shared.springboardPidIfKnown)
@@ -156,16 +101,10 @@ final class Input {
         try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs), timeoutMs: timeoutMs)
     }
 
-    /// count taps at a point as one gesture (one finger path per tap).
     func taps(_ x: Double, _ y: Double, count: Int) throws {
         try play(Gestures.taps(paths, at: hardware(CGPoint(x: x, y: y)), count: count))
     }
 
-    /// The flow format's swipe (Gestures.swipe). timeoutMs, when given, shortens its
-    /// confirmation timeout (an op's deadline).
-    /// ci: the host's CI mode ("ci" on the swipe request), in which a swipe or drag waits for
-    /// SpringBoard first (issue #137); nil (the agent's own swipes, hideKeyboard's): as the last
-    /// swipe request said.
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false, timeoutMs: Int? = nil,
                ci: Bool? = nil) throws {
         if let ci { hostCI = ci }
@@ -173,7 +112,6 @@ final class Input {
                  timeoutMs: timeoutMs, ci: hostCI)
     }
 
-    /// A press-and-hold drag (Gestures.holdDrag, issue #330): still for holdMs, then the move.
     func holdDrag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, holdMs: Double, ms: Double, ci: Bool? = nil) throws {
         if let ci { hostCI = ci }
         try play(Gestures.holdDrag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)),
@@ -181,7 +119,6 @@ final class Input {
                  ci: hostCI)
     }
 
-    /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
     func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double, tailPt: Double, ci: Bool? = nil) throws {
         if let ci { hostCI = ci }
         try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)),
@@ -189,15 +126,8 @@ final class Input {
                  ci: hostCI)
     }
 
-    /// The host's CI mode, as the last request that says it said ("ci" on swipe and
-    /// hideKeyboard): swipe and drag set it, the hideKeyboard op sets it before its own swipes.
-    /// Set and read on the op's thread (ops run one at a time, as `pending` is).
     var hostCI = false
 
-    // MARK: keyboard
-
-    /// Types text into whatever has the focus, at cps characters a second. timeoutMs, when
-    /// given, shortens the wait for testmanagerd's confirmation (an op's deadline).
     func typeNow(_ text: String, cps: Int, timeoutMs: Int? = nil) throws {
         let path = try Private.textPath()
         try Private.type(path, text, at: 0, cps: cps)
@@ -211,34 +141,26 @@ final class Input {
         try play([path], timeout: 10, deadlineMs: timeoutMs)
     }
 
-    /// ⌘A in the focused field (the clear op: Typist.clear decides, issue #130).
     func selectAll(timeoutMs: Int) throws {
         try pressKeyboardKey("a", modifiers: XCUIElement.KeyModifierFlags.command.rawValue, timeoutMs: timeoutMs)
     }
 
-    /// The down arrow (issue #301, CaretToEnd): a record of its own, as a record plays only the
-    /// first key of its path; through the gate like every key.
     func caretDown(timeoutMs: Int) throws {
         try pressKeyboardKey(XCUIKeyboardKey.downArrow.rawValue, timeoutMs: timeoutMs)
     }
 
-    /// Android key codes as iOS keys. timeoutMs, when given, shortens the wait for a
-    /// keystroke's confirmation, and main runs a button press on the main thread (which an
-    /// earlier call to a busy app can hold): both bounded by the op's deadline (issue #130).
-    /// A button press goes through the gate like a keystroke (issue #286): it waits for the
-    /// last input's confirmation, as testmanagerd refuses it until then.
     func key(_ code: Int, long: Bool, timeoutMs: Int? = nil,
              onMain main: (@escaping () throws -> Void) throws -> Void = { try onMain($0) }) throws {
         func button(_ f: @escaping () throws -> Void) throws { try gate.call(deadlineMs: timeoutMs, on: main, f) }
         switch code {
-        case 66: try typeNow("\n", cps: Input.typeRate, timeoutMs: timeoutMs)        // ENTER: return
-        case 67: try typeNow("\u{8}", cps: Input.typeRate, timeoutMs: timeoutMs)     // DEL: delete
-        case 61: try pressKeyboardKey(XCUIKeyboardKey.tab.rawValue, timeoutMs: timeoutMs)     // TAB: move focus
-        case 3: try button { XCUIDevice.shared.press(.home) }                        // HOME
-        case 26: try button { try Private.pressLock() }                              // POWER: lock
-        case 24: try button { try Private.pressButton(2) }                           // VOLUME_UP
-        case 25: try button { try Private.pressButton(3) }                           // VOLUME_DOWN
-        case 111: try pressKeyboardKey(XCUIKeyboardKey.escape.rawValue, timeoutMs: timeoutMs) // ESCAPE
+        case 66: try typeNow("\n", cps: Input.typeRate, timeoutMs: timeoutMs)
+        case 67: try typeNow("\u{8}", cps: Input.typeRate, timeoutMs: timeoutMs)
+        case 61: try pressKeyboardKey(XCUIKeyboardKey.tab.rawValue, timeoutMs: timeoutMs)
+        case 3: try button { XCUIDevice.shared.press(.home) }
+        case 26: try button { try Private.pressLock() }
+        case 24: try button { try Private.pressButton(2) }
+        case 25: try button { try Private.pressButton(3) }
+        case 111: try pressKeyboardKey(XCUIKeyboardKey.escape.rawValue, timeoutMs: timeoutMs)
         case 4: throw AgentError("iOS has no back key")
         default: throw AgentError("key code \(code) is not supported on iOS")
         }

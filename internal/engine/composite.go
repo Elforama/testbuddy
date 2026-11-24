@@ -104,8 +104,6 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 	var last error
 	for attempt := 0; attempt <= max; attempt++ {
 		r.pushEnv()
-		// The retry's own env is the retry's, not part of what it retries: an error in it
-		// fails the retry at once.
 		if err := r.define(c.Env); err != nil {
 			r.popEnv()
 			return "", err
@@ -143,11 +141,6 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 	return "", last
 }
 
-// retryable: an error after which a retry runs its commands again. As Maestro's retry does
-// after any failing command, that is a test failure or a JavaScript error thrown while a
-// script runs (issue #38: a script that throws until a backend is ready). A script that does
-// not compile fails the same way every time, and an error of the device or of the run itself
-// (cancelled, device lost) is no failure of the flow's: both end the retry at once.
 func retryable(err error) bool {
 	if isFlowError(err) {
 		return true

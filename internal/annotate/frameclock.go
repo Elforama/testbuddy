@@ -1,19 +1,5 @@
 package annotate
 
-// An Android screen recording says when each of its frames showed. screenrecord adds to the
-// MP4 a data track for Android's Winscope (frameworks/av, cmds/screenrecord/screenrecord.cpp,
-// writeWinscopeMetadata), version 2 laid out, little endian:
-//
-//	"#VV1NSC0PET1ME2#"  16 bytes
-//	version             uint32 (2)
-//	realtime - elapsed  int64, ns: the device's wall clock less its elapsed-realtime clock
-//	frames              uint32
-//	per frame           uint64, ns: when it showed, on the elapsed-realtime clock
-//
-// So the video's first frame showed at the device's wall-clock time first + offset: the exact
-// start of the video by the device's clock, which tb's own guess (when screenrecord said it
-// started) misses by however long the first frame took.
-
 import (
 	"bytes"
 	"encoding/binary"
@@ -24,9 +10,6 @@ import (
 
 var winscopeMagic = []byte("#VV1NSC0PET1ME2#")
 
-// FirstFrame reads, from the screen recording at path, when its first frame showed by the
-// device's wall clock. An error when the file holds no frame times (older Android versions
-// write none, or only the legacy kind, which has no wall-clock offset).
 func FirstFrame(path string) (time.Time, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

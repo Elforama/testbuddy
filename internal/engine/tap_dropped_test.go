@@ -10,9 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// startList is a list app's screen just after launch (issue #204: the Flutter bench app's
-// scenario list): a title, a spinner and the rows. step turns the spinner: the app's own redraw,
-// away from the tap point.
 func startList(step int, extra ...*ui.Node) []*ui.Node {
 	nodes := []*ui.Node{
 		{Class: "TextView", ID: "title", Text: "Scenarios", Bounds: ui.Rect{R: 400, B: 50}},
@@ -27,12 +24,6 @@ func startList(step int, extra ...*ui.Node) []*ui.Node {
 	return append(nodes, extra...)
 }
 
-// Issue #204 (second review): an app that never reports a click (Compose, React Native, a bare
-// gesture detector), with a redraw of its own on screen as it is tapped and a window that just
-// changed, and the tap's effect coming late: a toggle that flips after a slow update, a counter,
-// a submit whose result shows after a network call. However late the effect (0.5 to 3 s), the
-// tap is sent once, in CI mode or not: nothing tells tb a tap was lost but the platform's own
-// report that its touch was not injected (TestTapWhoseDownWasRefusedIsSentAgainOnce).
 func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		for _, probe := range []string{"slow toggle", "counter", "submit"} {
@@ -54,9 +45,9 @@ func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 						return nodes
 					}
 					no := false
-					f.clicked = func(_, _ int) *bool { return &no } // never a click event
+					f.clicked = func(_, _ int) *bool { return &no }
 					f.onTap = func(_, _ int) {
-						step.Add(1) // the app's own redraw
+						step.Add(1)
 						f.change(true)
 						go func() {
 							time.Sleep(delay)
@@ -76,24 +67,14 @@ func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 	}
 }
 
-// Issue #204: Android dropped the touch of a tap made just after launch (the window, just
-// added, had no input channel yet) while the app redrew for its own start-up, so the reply said
-// "the screen changed" and the tap passed with nothing done. The agent now holds a touch until
-// its window can take input, and reports a touch the platform did not inject. A refused DOWN
-// (nothing else sent: no app saw a tap) is sent again, once, in CI mode; refused twice, the step
-// fails. Outside CI mode (a CI allowance) a refused DOWN is not sent again: the step fails at
-// once, saying the platform refused the touch. A release (UP) not delivered is not sent again in
-// either mode: its DOWN may have reached the app (the agent cancels the gesture), so the step
-// fails, saying the tap may or may not have taken effect. A tap injected is never sent again on
-// this account.
 func TestTapWhoseDownWasRefusedIsSentAgainOnce(t *testing.T) {
 	const refused = "the platform refused the touch: no app saw it"
 	for _, tc := range []struct {
 		name          string
-		missed        []string // per tap: what the platform reports not injected ("" injected)
+		missed        []string
 		wantTaps      int
-		fail          string // what the step's failure says ("": it passes), in CI mode
-		wantTapsNotCI int    // outside CI mode
+		fail          string
+		wantTapsNotCI int
 		failNotCI     string
 	}{
 		{"injected", []string{""}, 1, "", 1, ""},
@@ -130,7 +111,7 @@ func TestTapWhoseDownWasRefusedIsSentAgainOnce(t *testing.T) {
 					f.mu.Lock()
 					landed := f.notInjected(len(f.taps)) == ""
 					f.mu.Unlock()
-					step.Add(1) // the start-up redraw goes on either way
+					step.Add(1)
 					if landed {
 						opened.Store(true)
 					}

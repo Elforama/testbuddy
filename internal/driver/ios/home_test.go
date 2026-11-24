@@ -7,8 +7,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// homeRunner answers the key op as the agent before issue #286 did when XCTest refused the
-// Home press: ok, nothing changed. springboard says whether SpringBoard comes to the front.
 func homeRunner(t *testing.T, springboard bool) *fakeRunner {
 	r := newFakeRunner(t)
 	r.on("key", func(map[string]any) map[string]any {
@@ -26,9 +24,6 @@ func homeRunner(t *testing.T, springboard bool) *fakeRunner {
 	return r
 }
 
-// Issue #286: a Home press XCTest refused ("only one gesture can be performed at a time")
-// answered ok and the step passed, with the app still in front; the flow failed later, on a
-// misleading assertion. After the press, SpringBoard must be in front.
 func TestPressHomeFailsWhenTheAppStaysInFront(t *testing.T) {
 	r := homeRunner(t, false)
 	d := newIOSDriver(t, r)
@@ -44,7 +39,6 @@ func TestPressHomeFailsWhenTheAppStaysInFront(t *testing.T) {
 	}
 }
 
-// Issue #286: a Home press that took effect passes; other keys do not look at the foreground.
 func TestPressHomePassesWithSpringBoardInFront(t *testing.T) {
 	r := homeRunner(t, true)
 	d := newIOSDriver(t, r)

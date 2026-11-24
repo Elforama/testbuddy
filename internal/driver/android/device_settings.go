@@ -19,8 +19,7 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 	d.stateMu.Lock()
 	sdk := d.sdk
 	d.stateMu.Unlock()
-	if sdk < 31 { // 0: not known yet
-		// No test providers from the shell before Android 12: the emulator's own GPS.
+	if sdk < 31 {
 		if d.info.Emulator {
 			_, err := d.adb.Run(ctx, "emu", "geo", "fix", strconv.FormatFloat(lon, 'f', -1, 64), strconv.FormatFloat(lat, 'f', -1, 64))
 			return err
@@ -30,25 +29,13 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 	return d.mockLocation(ctx, lat, lon)
 }
 
-// Location on Android 12+: the shell's test providers (gps, network and fused), which apps read
-// through the location service whatever provider they ask for. An emulator's own GPS
-// (`emu geo fix`) does not reach apps that use the fused provider. The agent adds the providers,
-// sets the point and sends it again every locationResend while the run lasts (a watch that asks
-// for updates at an interval gets them, and the fused provider forgets a fix that does not come
-// again): one "location" request per point, nothing in between (issue #72). The repeats end,
-// and the providers go, at Close or Release ("off"), and a grace (50 s, longer than
-// reconnectFor) after this connection closed: a tb that is killed leaves nothing behind. A new
-// connection (a reconnect, a restarted agent) gets the point again in adopt, so the location
-// holds through a drop.
 const locationResend = time.Second
 
-// locPoint is the point setLocation last set on the test providers.
 type locPoint struct{ lat, lon float64 }
 
 func (d *Driver) mockLocation(ctx context.Context, lat, lon float64) error {
 	d.locMu.Lock()
 	defer d.locMu.Unlock()
-	// Recorded first: a reconnect while the request is on its way sends it in adopt too.
 	d.locAt.Store(&locPoint{lat, lon})
 	_, err := d.call(ctx, "location", locationParams(lat, lon), 10*time.Second)
 	if err != nil {
@@ -61,22 +48,6 @@ func locationParams(lat, lon float64) map[string]any {
 	return map[string]any{"lat": lat, "lon": lon, "everyMs": locationResend.Milliseconds()}
 }
 
-// resumeLocation sets the point again on a new connection c (adopt): a restarted agent never had
-// it, and the agent ends the repeats of a connection that closed once its grace is over. Sent on
-// c itself: adopt runs inside reconnect, where d.call could reconnect again, and without locMu,
-// which a stopLocation that is reconnecting holds. A Close or Release, or a setLocation, that
-// changed the point meanwhile may have reached the agent first: what the driver holds now is sent
-// after the point read here ("off", or the newer point). One that changes it later sends its own
-// request after this one.
-//
-// leftOn: the agent greeted with a point on. With none here, a tb that was killed or crashed set
-// it, and the agent would keep it for its grace: it is turned off, so this run's flows never see
-// a location they did not set. A greeting without one costs no request.
-//
-// A stopLocation (Close, Release) while this runs sends nothing itself: it leaves the "off" to
-// this, which sends it after the point, once. Before, an "off" from Close after the point
-// reached the agent was followed by this one's own (issue #335 review). This sends until what
-// it sent last is what the driver holds, and Close waits for it before closing the connection.
 func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
 	d.resumeMu.Lock()
 	p := d.locAt.Load()
@@ -114,8 +85,6 @@ func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
 	}
 }
 
-// waitResume waits for a resumeLocation under way to finish sending, or for ctx to end (Close,
-// Release: before the connection closes under it).
 func (d *Driver) waitResume(ctx context.Context) {
 	d.resumeMu.Lock()
 	done := d.resumeDone
@@ -125,17 +94,12 @@ func (d *Driver) waitResume(ctx context.Context) {
 	}
 	select {
 	case <-done:
-	case <-ctx.Done(): // Release's bound (releaseWait) holds even with a resume stuck
+	case <-ctx.Done():
 	}
 }
 
-// resumeHook runs in resumeLocation between reading the point and sending it: tests put a
-// setLocation or a stopLocation there. Not a Close: Close waits for the resume to finish
-// (waitResume), and from inside it would wait for itself.
 var resumeHook atomic.Pointer[func()]
 
-// stopLocation ends the repeats and removes the test providers, so the device reports its
-// own location again.
 func (d *Driver) stopLocation() {
 	d.locMu.Lock()
 	defer d.locMu.Unlock()
@@ -144,12 +108,9 @@ func (d *Driver) stopLocation() {
 	resuming := d.resumeDone != nil
 	d.resumeMu.Unlock()
 	if old == nil || resuming {
-		return // nothing set, or a resumeLocation under way sends the "off" after its point
+		return
 	}
 	if c := d.conn(); c != nil && c.Abandoned() > 0 {
-		// The agent is still running a request a cancelled run gave up on, and runs one at a
-		// time: "off" would wait for it. Release removes the providers with adb, and the agent
-		// ends the repeats itself a grace after this connection closes (issue #202).
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -157,7 +118,6 @@ func (d *Driver) stopLocation() {
 	d.call(ctx, "location", map[string]any{"off": true}, 5*time.Second)
 }
 
-// intExtra is an am start integer extra: --ei when it fits an int32, else --el.
 func intExtra(k string, v int64) []string {
 	if v >= math.MinInt32 && v <= math.MaxInt32 {
 		return []string{"--ei", shellQuote(k), strconv.FormatInt(v, 10)}
@@ -166,13 +126,11 @@ func intExtra(k string, v int64) []string {
 }
 
 func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
-	// Flow names (LANDSCAPE_LEFT) and protocol names (landscapeLeft) map alike; others go lower-cased.
 	key := strings.ToUpper(strings.ReplaceAll(orientation, "_", ""))
 	to := map[string]string{"PORTRAIT": "portrait", "LANDSCAPELEFT": "landscapeLeft", "LANDSCAPERIGHT": "landscapeRight", "UPSIDEDOWN": "upsideDown"}[key]
 	if to == "" {
 		to = strings.ToLower(orientation)
 	}
-	// A cancelled run turns nothing: call bounds the request by a deadline only (issue #115).
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -180,10 +138,6 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 	if err != nil {
 		return err
 	}
-	// The display turns after the request returns: until it has, the agent reports the old
-	// size, and swipes from it would land off a screen that turned. Ask again (every 100 ms,
-	// up to rotateWait) until the size has the orientation asked for. A run cancelled during
-	// the wait ends it with the cancellation, not as done (issue #115).
 	tall := map[string]bool{"portrait": true, "upsideDown": true}[to]
 	wide := strings.HasPrefix(to, "landscape")
 	for deadline := time.Now().Add(rotateWait); ; {
@@ -205,7 +159,6 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 	}
 }
 
-// rotateWait bounds the wait for the display to turn after setOrientation.
 var rotateWait = 3 * time.Second
 
 func (d *Driver) refreshSize(ctx context.Context) {
@@ -248,23 +201,11 @@ func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
 	return nil
 }
 
-// originalScales holds, by serial, the animation scales a device had before this process
-// turned them off: a driver opened again on the device (its connection was lost, issue #101)
-// reads them already at 0, and its restore must put these back. A restore drops its entry.
 var (
 	animMu         sync.Mutex
 	originalScales = map[string][]string{}
 )
 
-// DisableAnimations turns the system animation scales off and returns a function that restores them.
-//
-// A second call on the same device before a restore (a driver opened again mid-run) keeps the
-// scales the first one read: its restore puts those back, not the zeros it read (issue #101).
-//
-// Once the scales have been read, restore is returned with any error, and puts them back: a set
-// whose answer did not come (a cancelled run gives up on it, issue #202) may still have been
-// applied, and setting the old values again is harmless if it was not. Only a failed read
-// returns a no-op restore.
 func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err error) {
 	keys := []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"}
 	var get []string
@@ -309,13 +250,9 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 	for _, k := range keys {
 		set = append(set, "settings put global "+k+" 0")
 	}
-	// A run cancelled before the write changed nothing.
 	if err := ctx.Err(); err != nil {
 		return func() {}, err
 	}
-	// The write runs to its answer even when the run is cancelled meanwhile, bounded by
-	// animationSetWait: a write given up on part way would go on on the device, and a restore
-	// run then could be overtaken by a "0" put after it (issue #202).
 	setCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), animationSetWait)
 	_, err = d.shOK(setCtx, strings.Join(set, "; "))
 	cancel()
@@ -325,19 +262,13 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 	if err := ctx.Err(); err != nil {
 		return restore, err
 	}
-	// The agent treats frames drawn on a never-still screen differently with animations off.
 	d.call(ctx, "animations", map[string]any{"on": false}, 5*time.Second)
 	return restore, nil
 }
 
-// animationSetWait bounds DisableAnimations' write of the scales (three `settings put`).
 const animationSetWait = 5 * time.Second
 
-// restoreSettings runs a cleanup shell command with adb, which does not wait behind the agent:
-// the agent runs one request at a time, and one a cancelled run gave up on can hold it for up
-// to a minute (issue #202). Through the agent when adb fails.
 func (d *Driver) restoreSettings(cmd string) {
-	// Each try has its own bound: an adb that hangs does not leave the agent an expired one.
 	try := func(run func(context.Context) error) bool {
 		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -349,7 +280,6 @@ func (d *Driver) restoreSettings(cmd string) {
 	try(func(c context.Context) error { _, _, err := d.Sh(c, cmd); return err })
 }
 
-// raw JSON helper for diagnostics
 func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.RawMessage, error) {
 	m, err := d.call(ctx, op, p, 30*time.Second)
 	if err != nil {
@@ -358,7 +288,6 @@ func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.Raw
 	return m.Raw, nil
 }
 
-// SetDarkMode switches the system's night mode (`cmd uimode night`), which apps follow.
 func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
 	v := "no"
 	if on {
@@ -368,7 +297,6 @@ func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
 	return err
 }
 
-// DarkMode reads the system's night mode: "Night mode: yes" when dark.
 func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
 	out, err := d.shOK(ctx, "cmd uimode night")
 	if err != nil {

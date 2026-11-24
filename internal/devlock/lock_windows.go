@@ -21,12 +21,8 @@ const (
 	errorLockViolation      = syscall.Errno(33)
 )
 
-// Windows locks are mandatory: a locked byte range cannot be read by anyone else. So the
-// lock is on one byte far past the owner record, and Holder can still read who holds it.
 func lockRange() *syscall.Overlapped { return &syscall.Overlapped{OffsetHigh: 0x7fffffff} }
 
-// lockFile takes an exclusive lock on f without waiting. held is true when another open file
-// (another process, or another TryAcquire in this one) has it.
 func lockFile(f *os.File) (held bool, err error) {
 	r, _, e := procLockFileEx.Call(f.Fd(), lockfileExclusiveLock|lockfileFailImmediately, 0, 1, 0,
 		uintptr(unsafe.Pointer(lockRange())))

@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// TestMain makes the package hermetic: no real adb, xcrun or Chrome can be found. The
-// tests never call a real platform opener; this is the safety net if one ever did.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "tb-connect-test")
 	if err != nil {
@@ -32,10 +30,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// stubDriver is a Driver whose methods are never called here (Open only hands it back).
 type stubDriver struct{ driver.Driver }
 
-// withOpener swaps a platform's opener for the test.
 func withOpener(t *testing.T, p device.Platform, open func(context.Context, device.Info) (driver.Driver, error)) {
 	t.Helper()
 	old, had := openers[p]
@@ -49,7 +45,6 @@ func withOpener(t *testing.T, p device.Platform, open func(context.Context, devi
 	})
 }
 
-// Android, iOS and the web each have an opener.
 func TestEveryPlatformHasAnOpener(t *testing.T) {
 	for _, p := range []device.Platform{device.Android, device.IOS, device.Web} {
 		if openers[p] == nil {
@@ -61,7 +56,6 @@ func TestEveryPlatformHasAnOpener(t *testing.T) {
 	}
 }
 
-// Open hands the device to its platform's opener and returns what it opened.
 func TestOpenDispatchesByPlatform(t *testing.T) {
 	type key struct{}
 	for _, p := range []device.Platform{device.Android, device.IOS, device.Web} {
@@ -89,7 +83,6 @@ func TestOpenDispatchesByPlatform(t *testing.T) {
 	}
 }
 
-// An opener's error comes back as is.
 func TestOpenPassesErrors(t *testing.T) {
 	boom := errors.New("agent did not start")
 	withOpener(t, device.Android, func(context.Context, device.Info) (driver.Driver, error) { return nil, boom })
@@ -99,7 +92,6 @@ func TestOpenPassesErrors(t *testing.T) {
 	}
 }
 
-// A platform without an opener is reported as unsupported.
 func TestOpenUnsupported(t *testing.T) {
 	for _, p := range []device.Platform{"symbian", ""} {
 		drv, err := Open(context.Background(), device.Info{Platform: p, Serial: "x"})
@@ -109,7 +101,6 @@ func TestOpenUnsupported(t *testing.T) {
 	}
 }
 
-// Linking connect wires device.WebAvailable to the web driver's Chrome lookup (TB_CHROME first).
 func TestWebAvailableUsesChrome(t *testing.T) {
 	t.Setenv("TB_CHROME", "/opt/some/chrome")
 	if !device.WebAvailable() {
@@ -117,8 +108,6 @@ func TestWebAvailableUsesChrome(t *testing.T) {
 	}
 }
 
-// Each platform's opener reaches its driver, which fails cleanly here: TestMain leaves no adb,
-// xcrun or Chrome to find (nothing hangs, nothing panics).
 func TestOpenersFailWithoutTools(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -131,7 +120,6 @@ func TestOpenersFailWithoutTools(t *testing.T) {
 	}
 }
 
-// Override swaps a platform's opener until restore, which puts the old one back (or none).
 func TestOverride(t *testing.T) {
 	fake := errors.New("fake opener")
 	restore := Override(device.Web, func(context.Context, device.Info) (driver.Driver, error) { return nil, fake })

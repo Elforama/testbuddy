@@ -13,15 +13,12 @@ import (
 	"time"
 )
 
-// encoderCall is one run of the (fake) encoder: its args, and the image sequence it was given
-// (one entry per 1/25 s tick), read while the files still exist.
 type encoderCall struct {
 	args  []string
-	ticks []string // each tick's frame contents, in order
-	dir   string   // the temp folder the frames are in
+	ticks []string
+	dir   string
 }
 
-// shown collapses the ticks to the frames shown, in order, each with how many ticks it lasted.
 func (c encoderCall) shown() (frames []string, ticks []int) {
 	for _, f := range c.ticks {
 		if n := len(frames); n > 0 && frames[n-1] == f {
@@ -33,8 +30,6 @@ func (c encoderCall) shown() (frames []string, ticks []int) {
 	return frames, ticks
 }
 
-// fakeEncoder replaces ffmpeg: it records each call and, unless fail says otherwise, writes
-// the output file.
 type fakeEncoder struct {
 	mu    sync.Mutex
 	calls []encoderCall
@@ -82,7 +77,6 @@ func (e *fakeEncoder) all() []encoderCall {
 	return append([]encoderCall(nil), e.calls...)
 }
 
-// recordingPage is a fake page that answers the recording commands.
 func recordingPage(t *testing.T) (*fakeCDP, *Driver) {
 	page := newFakeCDP(t)
 	page.on("Page.captureScreenshot", func(cdpMsg) any {
@@ -96,10 +90,6 @@ func screencastFrame(page *fakeCDP, id int, data string) {
 		"metadata": map[string]any{"timestamp": float64(time.Now().UnixNano()) / 1e9}, "sessionId": id}, "")
 }
 
-// A recording starts with a screenshot (the video begins at once, even on an idle page),
-// then the screencast's frames, each acknowledged; stopping encodes them, each frame shown
-// until the next arrived and the last until the stop, so the video lasts as long as the
-// recording did.
 func TestRecordingFramesAndTiming(t *testing.T) {
 	enc := useFakeEncoder(t)
 	page, d := recordingPage(t)
@@ -144,13 +134,11 @@ func TestRecordingFramesAndTiming(t *testing.T) {
 	if got := strings.Join(frames, ","); got != "first,one,two" {
 		t.Fatalf("frames shown = %s", got)
 	}
-	// Each frame shows for its ~150 ms or more: 25 ticks a second.
 	for i, n := range ticks {
 		if n < 3 || n > 15 {
 			t.Errorf("%s shows for %d ticks, want about 4", frames[i], n)
 		}
 	}
-	// The video lasts as long as the recording: ticks / 25.
 	if got := float64(len(c.ticks)) / videoFPS; got < elapsed-0.25 || got > elapsed+0.05 {
 		t.Errorf("the video lasts %.2f s, the recording %.2f s", got, elapsed)
 	}
@@ -172,7 +160,6 @@ func TestRecordingFramesAndTiming(t *testing.T) {
 	}
 }
 
-// Without libx264 the video is encoded with mpeg4.
 func TestRecordingFallsBackToMPEG4(t *testing.T) {
 	enc := useFakeEncoder(t)
 	enc.fail = func(args []string) error {
@@ -195,7 +182,6 @@ func TestRecordingFallsBackToMPEG4(t *testing.T) {
 	}
 }
 
-// Without ffmpeg, recording fails at once and says why; nothing starts.
 func TestRecordingNeedsFFmpeg(t *testing.T) {
 	useFakeEncoder(t)
 	ffmpegPath = func() (string, error) { return "", errors.New("not found") }
@@ -209,7 +195,6 @@ func TestRecordingNeedsFFmpeg(t *testing.T) {
 	}
 }
 
-// One recording at a time; stopping with none is fine; a failed start leaves none behind.
 func TestRecordingStartStopRules(t *testing.T) {
 	useFakeEncoder(t)
 	page, d := recordingPage(t)
@@ -239,8 +224,6 @@ func TestRecordingStartStopRules(t *testing.T) {
 	}
 }
 
-// Closing the driver mid-recording discards it: no encoding, no frames left on disk, and
-// frames arriving afterwards are ignored.
 func TestCloseDiscardsARecording(t *testing.T) {
 	enc := useFakeEncoder(t)
 	page, d := recordingPage(t)
@@ -261,7 +244,6 @@ func TestCloseDiscardsARecording(t *testing.T) {
 	}
 }
 
-// Frames from another session (a frame's target) are not the page's screencast.
 func TestOnlyThePagesFramesAreRecorded(t *testing.T) {
 	enc := useFakeEncoder(t)
 	page, d := recordingPage(t)
@@ -271,7 +253,7 @@ func TestOnlyThePagesFramesAreRecorded(t *testing.T) {
 	page.event("Page.screencastFrame", map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("x")), "sessionId": 3}, "frame-session")
 	screencastFrame(page, 4, "page")
 	eventually(t, "the page frame's ack", func() bool { return len(page.calls("Page.screencastFrameAck")) >= 1 })
-	time.Sleep(100 * time.Millisecond) // "page" shows for a few ticks
+	time.Sleep(100 * time.Millisecond)
 	if err := d.StopRecording(ctxT(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -280,8 +262,6 @@ func TestOnlyThePagesFramesAreRecorded(t *testing.T) {
 	}
 }
 
-// RecordingStarted is when the video's first frame arrived (the frame StartRecording takes),
-// kept after the stop: the runner reads it then (tb test --annotate).
 func TestRecordingStartedIsTheFirstFrame(t *testing.T) {
 	useFakeEncoder(t)
 	_, d := recordingPage(t)

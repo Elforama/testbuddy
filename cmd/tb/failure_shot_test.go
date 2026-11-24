@@ -14,8 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// stuckShotApp is the fake app on a device whose screenshot never comes back (it waits until
-// its context ends), and whose screen listing honours its context, as the web driver's does.
 type stuckShotApp struct{ *fakeApp }
 
 func (a stuckShotApp) Screenshot(ctx context.Context, s float64, fm string) ([]byte, error) {
@@ -30,9 +28,6 @@ func (a stuckShotApp) Screen(ctx context.Context) (*ui.Screen, error) {
 	return a.fakeApp.Screen(ctx)
 }
 
-// Issue #163: a failure report's screenshot that never returns must not hide the failure. The
-// error is written first; the screenshot gives up after its own bound and the screen listing
-// still gets its own time (it used to share the screenshot's, which the stalled call used up).
 func TestSaveFailureWithAStuckScreenshot(t *testing.T) {
 	old := failureArtifactTimeout
 	failureArtifactTimeout = 300 * time.Millisecond

@@ -1,10 +1,3 @@
-// Package a11y checks app source code for UI that tb cannot detect or tap.
-//
-// tb reads apps only through what the platform exposes for accessibility: Android
-// accessibility nodes, iOS XCUITest snapshots, and a walk of the web page's DOM. Code that
-// hides elements from that tree, or leaves an interactive element with nothing to find it
-// by (no text, id or description), makes flows fail or fall back to tapping by position.
-// These checks are static (no device) so they can run locally and in CI.
 package a11y
 
 import (
@@ -17,7 +10,6 @@ import (
 	"strings"
 )
 
-// Severity: Error is an element tb cannot see or select; Warning is a likely problem.
 type Severity string
 
 const (
@@ -25,14 +17,12 @@ const (
 	Warning Severity = "warning"
 )
 
-// Element is the element a finding is about, in tb look's terms.
 type Element struct {
-	Kind  string `json:"kind"`            // Button, ImageButton, IconButton, ...
-	Label string `json:"label,omitempty"` // its text or description, when the code sets one
-	ID    string `json:"id,omitempty"`    // its id / testTag / testID / identifier
+	Kind  string `json:"kind"`
+	Label string `json:"label,omitempty"`
+	ID    string `json:"id,omitempty"`
 }
 
-// Line is the element as tb look would show it: Kind "label" #id.
 func (e Element) Line() string {
 	var b strings.Builder
 	b.WriteString(e.Kind)
@@ -45,8 +35,6 @@ func (e Element) Line() string {
 	return b.String()
 }
 
-// Finding is one element tb cannot (or likely cannot) detect or tap. Why, and the fix, are
-// its rule's (see Rules).
 type Finding struct {
 	File     string   `json:"file"`
 	Line     int      `json:"line"`
@@ -54,11 +42,10 @@ type Finding struct {
 	Severity Severity `json:"severity"`
 	Element  Element  `json:"element"`
 
-	fix    *fix   // how --fix adds the missing selector; nil when it cannot
-	manual string // why it is left for a person, when the rule's own fix does not say
+	fix    *fix
+	manual string
 }
 
-// Rule is one check: what is wrong with the elements it finds, and how to fix them.
 type Rule struct {
 	ID       string   `json:"-"`
 	Severity Severity `json:"severity"`
@@ -67,7 +54,6 @@ type Rule struct {
 	Fix      string   `json:"fix"`
 }
 
-// Rules lists every check.
 var Rules = []Rule{
 	{"android-no-selector", Error, "Android views",
 		"image button or clickable image with no id or contentDescription: tb can tap it only by position",
@@ -110,7 +96,6 @@ var Rules = []Rule{
 		`add tooltip: "…" (it becomes the button's label)`},
 }
 
-// RuleByID returns the rule with this id.
 func RuleByID(id string) (Rule, bool) {
 	for _, r := range Rules {
 		if r.ID == id {
@@ -127,23 +112,16 @@ func ruleSeverity(id string) Severity {
 	return Warning
 }
 
-// Options control a check.
 type Options struct {
-	// Root is searched for project-wide settings (Compose's testTagsAsResourceId). Empty: the
-	// checked paths themselves.
-	Root string
-	// Lines keeps, for each file in it, only the findings on those lines (1-based): the
-	// lines a change added. Files not in it keep all their findings.
+	Root  string
 	Lines map[string]map[int]bool
 }
 
-// Result is a check's outcome.
 type Result struct {
 	Files    int       `json:"files"`
 	Findings []Finding `json:"findings"`
 }
 
-// Used lists the rules the findings refer to, in Rules order: the legend.
 func (r *Result) Used() []Rule {
 	seen := map[string]bool{}
 	for _, f := range r.Findings {
@@ -158,7 +136,6 @@ func (r *Result) Used() []Rule {
 	return out
 }
 
-// Errors counts findings of severity Error.
 func (r *Result) Errors() int {
 	n := 0
 	for _, f := range r.Findings {
@@ -169,7 +146,6 @@ func (r *Result) Errors() int {
 	return n
 }
 
-// Check checks the given files and folders (folders are walked for source files).
 func Check(paths []string, opt Options) (*Result, error) {
 	files, err := SourceFiles(paths)
 	if err != nil {
@@ -178,8 +154,6 @@ func Check(paths []string, opt Options) (*Result, error) {
 	return CheckFiles(files, paths, opt)
 }
 
-// CheckFiles checks exactly these files. roots is where to look for project-wide settings
-// when opt.Root is empty.
 func CheckFiles(files, roots []string, opt Options) (*Result, error) {
 	proj := &project{}
 	searchRoots := roots
@@ -220,7 +194,6 @@ func CheckFiles(files, roots []string, opt Options) (*Result, error) {
 
 type checker func(f *file, p *project)
 
-// checkerFor picks the checks for a file by its extension (and content, for .js/.tsx).
 func checkerFor(path, src string) checker {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -249,7 +222,6 @@ func checkerFor(path, src string) checker {
 	return nil
 }
 
-// skipDirs are never walked: build output, dependencies, tooling.
 var skipDirs = map[string]bool{
 	"node_modules": true, "build": true, "dist": true, "out": true, "Pods": true, "DerivedData": true,
 	"vendor": true, "target": true, "__tests__": true, "androidTest": true, "test": true, "tests": true,
@@ -258,13 +230,10 @@ var skipDirs = map[string]bool{
 
 var testFile = regexp.MustCompile(`(\.test\.|\.spec\.|Tests?\.(swift|kt|dart)$|_test\.dart$)`)
 
-// SourceFiles expands folders into the files the checks read. Files named directly are
-// always kept (unless no check applies to them).
 func SourceFiles(paths []string) ([]string, error) {
 	return sourceFiles(paths, wantedFile)
 }
 
-// sourceFiles expands folders into the files in them that want keeps.
 func sourceFiles(paths []string, want func(name string) bool) ([]string, error) {
 	var out []string
 	for _, p := range paths {
@@ -313,8 +282,6 @@ func wantedFile(name string) bool {
 	return false
 }
 
-// Wanted reports whether a folder walk would check this file: a source file, not a test,
-// and not inside build output, dependencies or a hidden folder.
 func Wanted(path string) bool {
 	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
 	for _, d := range parts[:len(parts)-1] {
@@ -325,25 +292,16 @@ func Wanted(path string) bool {
 	return wantedFile(parts[len(parts)-1])
 }
 
-// project holds project-wide facts some checks need.
 type project struct {
-	testTagsExposed bool // some Kotlin file sets testTagsAsResourceId = true
-	// What loops and list callbacks repeat, by name, wherever they are (issue #147): the
-	// components of JavaScript, JSX, Vue and Svelte; Compose's composables; Android's row
-	// layouts, which adapters inflate.
+	testTagsExposed            bool
 	jsRows, ktRows, layoutRows rows
-	pages                      map[string]jsPage // the checked JavaScript files load read, by path
+	pages                      map[string]jsPage
 }
 
 var testTagsAsResourceID = regexp.MustCompile(`testTagsAsResourceId\s*=\s*true`)
 
-// rowFileLimit: a JavaScript file larger than this (a bundle, minified or not) is not
-// read for rows unless it is checked: it defines no row a person would fix.
 const rowFileLimit = 1 << 20
 
-// load reads the project under roots for what the checks of the files to check need: the
-// rows of the kinds of files among them, and, for Compose, testTagsAsResourceId. Kinds none
-// of them is are not read: a one-file check reads only what that file's check needs.
 func (p *project) load(roots, check []string) {
 	p.jsRows, p.ktRows, p.layoutRows = rows{}, rows{}, rows{}
 	p.pages = map[string]jsPage{}
@@ -363,7 +321,6 @@ func (p *project) load(roots, check []string) {
 	if !needJS && !needKt && !needLayouts {
 		return
 	}
-	// Java too: its adapters inflate row layouts.
 	files, _ := sourceFiles(roots, func(name string) bool {
 		return wantedFile(name) || (needLayouts && strings.HasSuffix(name, ".java") && !testFile.MatchString(name))
 	})
@@ -430,7 +387,6 @@ func (p *project) load(roots, check []string) {
 	p.ktRows.spread(kt)
 }
 
-// absPath is path made absolute, to know a file by whichever path names it.
 func absPath(path string) string {
 	if a, err := filepath.Abs(path); err == nil {
 		return a
@@ -438,7 +394,6 @@ func absPath(path string) string {
 	return path
 }
 
-// page is the source at path read as a page, as load read it when it was the same source.
 func (p *project) page(path, src string) jsPage {
 	if pg, ok := p.pages[absPath(path)]; ok && pg.src == src {
 		return pg
@@ -446,11 +401,10 @@ func (p *project) page(path, src string) jsPage {
 	return readJSPage(path, src)
 }
 
-// file is one source file being checked.
 type file struct {
 	path     string
 	src      string
-	starts   []int // offset of each line's start
+	starts   []int
 	lines    []string
 	findings []Finding
 }
@@ -466,7 +420,6 @@ func newFile(path, src string) *file {
 	return f
 }
 
-// line is the 1-based line of a byte offset.
 func (f *file) line(off int) int {
 	return sort.Search(len(f.starts), func(i int) bool { return f.starts[i] > off })
 }
@@ -476,14 +429,12 @@ func (f *file) add(off int, rule string, el Element) {
 		Severity: ruleSeverity(rule), Element: el})
 }
 
-// addFix adds a finding that fx fixes.
 func (f *file) addFix(off int, rule string, el Element, fx *fix) {
 	f.add(off, rule, el)
 	fx.src = f.src
 	f.findings[len(f.findings)-1].fix = fx
 }
 
-// addManual adds a finding left for a person, saying why.
 func (f *file) addManual(off int, rule string, el Element, why string) {
 	f.add(off, rule, el)
 	f.findings[len(f.findings)-1].manual = why
@@ -491,8 +442,6 @@ func (f *file) addManual(off int, rule string, el Element, why string) {
 
 var ignoreComment = regexp.MustCompile(`tb-a11y-ignore(?::?\s*([\w\-, ]+))?`)
 
-// ignored reports whether a `tb-a11y-ignore` comment on the line or the line before
-// covers the rule. Without rule names it covers every rule.
 func (f *file) ignored(line int, rule string) bool {
 	for _, l := range []int{line, line - 1} {
 		if l < 1 || l > len(f.lines) {
@@ -502,7 +451,6 @@ func (f *file) ignored(line int, rule string) bool {
 		if m == nil {
 			continue
 		}
-		// The end of a comment (--> in HTML) is not a rule name.
 		var names []string
 		for _, n := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' }) {
 			if strings.ContainsFunc(n, func(r rune) bool { return r >= 'a' && r <= 'z' }) {

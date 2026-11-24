@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// latLon evaluates a setLocation's latitude and longitude and checks them with the flow's
-// rule (flow.Latitude, flow.Longitude), before anything is sent to the device (issue #113).
 func (r *Runner) latLon(a, b string) (float64, float64, error) {
 	lat, err := r.coordinate(a, "latitude", 90, flow.Latitude)
 	if err != nil {
@@ -67,7 +65,7 @@ func (r *Runner) travel(ctx context.Context, c *flow.Command) error {
 			if err := r.Drv.SetLocation(ctx, a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f); err != nil {
 				return err
 			}
-			select { // simulated travel time is the command's purpose, not a wait on the app
+			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(step):

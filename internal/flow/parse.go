@@ -17,7 +17,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Error is a flow syntax error with its location.
 type Error struct {
 	File string
 	Line int
@@ -34,8 +33,8 @@ func (e *Error) Error() string {
 type parser struct {
 	file  string
 	dir   string
-	stack []string // files being parsed, for cycle detection
-	multi bool     // the top-level file declares devices
+	stack []string
+	multi bool
 	roles map[string]bool
 }
 
@@ -47,7 +46,6 @@ func (p *parser) errf(n *yaml.Node, format string, args ...any) error {
 	return &Error{File: p.file, Line: line, Msg: fmt.Sprintf(format, args...)}
 }
 
-// ParseFile parses a flow file and every sub-flow it references.
 func ParseFile(path string) (*Flow, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -70,15 +68,12 @@ func parseFile(abs string, stack []string) (*Flow, error) {
 	return p.parse(data)
 }
 
-// ParseBytes parses flow text as if it were the file at path (used for relative paths).
 func ParseBytes(path string, data []byte) (*Flow, error) {
 	abs, _ := filepath.Abs(path)
 	p := &parser{file: abs, dir: filepath.Dir(abs), stack: []string{abs}}
 	return p.parse(data)
 }
 
-// ParseCommands parses a YAML list of commands (or a single command) without a config
-// header, as agents send them to `tb do`. dir resolves relative paths.
 func ParseCommands(dir string, data []byte) ([]*Command, error) {
 	p := &parser{file: filepath.Join(dir, "<commands>"), dir: dir}
 	var doc yaml.Node
@@ -90,7 +85,6 @@ func ParseCommands(dir string, data []byte) ([]*Command, error) {
 	}
 	n := doc.Content[0]
 	if n.Kind != yaml.SequenceNode {
-		// a single command, written without the leading dash
 		n = &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{n}, Line: n.Line}
 	}
 	return p.commands(n)
@@ -145,8 +139,6 @@ func (p *parser) parse(data []byte) (*Flow, error) {
 	f.Commands = cmds
 	return f, nil
 }
-
-// ---- config ----
 
 func (p *parser) config(n *yaml.Node, c *Config) error {
 	c.Ext = map[string]any{}
@@ -298,9 +290,6 @@ func (p *parser) env(v *yaml.Node) ([]KV, error) {
 	return out, nil
 }
 
-// ---- commands ----
-
-// Bare commands accepted as a plain string list item.
 var bareCommands = map[string]bool{
 	"launchApp": true, "stopApp": true, "killApp": true, "clearState": true, "clearKeychain": true,
 	"eraseText": true, "inputRandomText": true, "inputRandomNumber": true, "inputRandomEmail": true,
@@ -311,7 +300,6 @@ var bareCommands = map[string]bool{
 	"clearNetworkMocks": true, "assertDialog": true,
 }
 
-// commandKeys lists every command key; the value is unused.
 var commandKeys = map[string]bool{
 	"tapOn": true, "doubleTapOn": true, "longPressOn": true, "assertVisible": true, "assertNotVisible": true,
 	"assertTrue": true, "extendedWaitUntil": true, "assertScreenshot": true, "assertWithAI": true,
@@ -326,7 +314,6 @@ var commandKeys = map[string]bool{
 	"waitForAnimationToEnd": true, "setLocation": true, "travel": true, "setOrientation": true,
 	"addMedia": true, "setAirplaneMode": true, "toggleAirplaneMode": true, "setDarkMode": true,
 	"toggleDarkMode": true, "assertDarkMode": true, "assertLightMode": true, "action": true,
-	// Test Buddy extensions
 	"signal": true, "waitForSignal": true, "parallel": true, "scrollUntilVisibleIn": true,
 	"mockNetwork": true, "clearNetworkMocks": true, "answerDialogs": true,
 	"assertDialog": true, "drag": true,
@@ -384,7 +371,6 @@ func (p *parser) item(item *yaml.Node) (*Command, error) {
 	}
 }
 
-// roleBlock parses `- alice: [commands]` (or a single command map) in a multi-device flow.
 func (p *parser) roleBlock(role string, v *yaml.Node, at *yaml.Node) (*Command, error) {
 	c := &Command{Name: "on", On: role, File: p.file, Line: at.Line}
 	var cmds []*Command
@@ -415,13 +401,10 @@ func suggest(name string) string {
 	return ""
 }
 
-// NearestHeaderKey is the header key (HeaderKeys) name is a near miss of, ignoring case:
-// "tags" for "tgas", "tag" or "Tags". "" when none is close.
 func NearestHeaderKey(name string) string {
 	return nearest(name, slices.Values(HeaderKeys), 2)
 }
 
-// nearest is the key closest to name, ignoring case, at most maxD edits away; "" if none.
 func nearest(name string, keys iter.Seq[string], maxD int) string {
 	best, bestD := "", maxD+1
 	for k := range keys {
@@ -432,8 +415,6 @@ func nearest(name string, keys iter.Seq[string], maxD int) string {
 	return best
 }
 
-// duplicateKeys appends the keys written twice in one map, in n and the nodes under it:
-// YAML keeps the last value and says nothing.
 func duplicateKeys(n *yaml.Node, out []DuplicateKey) []DuplicateKey {
 	if n == nil || n.Kind == yaml.AliasNode {
 		return out
@@ -442,7 +423,7 @@ func duplicateKeys(n *yaml.Node, out []DuplicateKey) []DuplicateKey {
 		seen := map[string]int{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
-			if k.Kind != yaml.ScalarNode || k.Value == "<<" { // merge keys may repeat
+			if k.Kind != yaml.ScalarNode || k.Value == "<<" {
 				continue
 			}
 			if first, ok := seen[k.Value]; ok {
@@ -478,8 +459,6 @@ func levenshtein(a, b string) int {
 	}
 	return prev[len(rb)]
 }
-
-// ---- node helpers ----
 
 func isNull(n *yaml.Node) bool {
 	return n == nil || (n.Kind == yaml.ScalarNode && n.Tag == "!!null")
@@ -552,7 +531,6 @@ func (m *mapView) intPtr(k string) (*int, error) {
 	return &i, err
 }
 
-// strict rejects keys that were not read.
 func (m *mapView) strict(cmd string, ignore ...string) error {
 	ig := map[string]bool{}
 	for _, k := range ignore {

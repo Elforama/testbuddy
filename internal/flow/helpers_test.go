@@ -8,10 +8,8 @@ import (
 	"testing"
 )
 
-// hdr is a minimal single-device config section; commands written after it start on line 3.
 const hdr = "appId: com.example\n---\n"
 
-// writeFiles writes name->content files (slash paths) under a fresh temp dir and returns it.
 func writeFiles(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,7 +25,6 @@ func writeFiles(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// mustParse parses src as a flow file and fails the test on error.
 func mustParse(t *testing.T, src string) *Flow {
 	t.Helper()
 	f, err := parse(t, src)
@@ -37,13 +34,11 @@ func mustParse(t *testing.T, src string) *Flow {
 	return f
 }
 
-// steps parses body as the commands section of a single-device flow.
 func steps(t *testing.T, body string) []*Command {
 	t.Helper()
 	return mustParse(t, hdr+body).Commands
 }
 
-// step parses body (exactly one command) and returns that command.
 func step(t *testing.T, body string) *Command {
 	t.Helper()
 	cs := steps(t, body)
@@ -53,7 +48,6 @@ func step(t *testing.T, body string) *Command {
 	return cs[0]
 }
 
-// asFlowErr requires err to be a *Error and returns it.
 func asFlowErr(t *testing.T, err error) *Error {
 	t.Helper()
 	if err == nil {
@@ -66,7 +60,6 @@ func asFlowErr(t *testing.T, err error) *Error {
 	return fe
 }
 
-// parseErr parses src and returns its *Error, failing when parsing succeeds.
 func parseErr(t *testing.T, src string) *Error {
 	t.Helper()
 	_, err := parse(t, src)
@@ -76,7 +69,6 @@ func parseErr(t *testing.T, src string) *Error {
 	return asFlowErr(t, err)
 }
 
-// errCase is one rejected input: the wanted message substring and line (0 = not checked).
 type errCase struct {
 	name string
 	src  string
@@ -84,7 +76,6 @@ type errCase struct {
 	line int
 }
 
-// runErrCases parses prefix+src for every case and checks the error's message and line.
 func runErrCases(t *testing.T, prefix string, cases []errCase) {
 	t.Helper()
 	for _, tc := range cases {

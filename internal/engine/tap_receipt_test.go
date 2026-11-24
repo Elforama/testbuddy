@@ -10,8 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// receiptDriver answers each guarded tap on its button with the next of its receipts (the
-// last one again once they run out), as the iOS agent reports a tap's delivery.
 type receiptDriver struct {
 	*fakeDriver
 	receipts []driver.ActionResult
@@ -27,47 +25,35 @@ func (d *receiptDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 	return res, nil
 }
 
-// Issue #134: a tap's trace line said only what the screen did ("the screen changed (sent in
-// 208 ms, waited 0 ms)"), not the iOS agent's delivery receipt. A touch that reached the app
-// and ran no action (#131) could not be told from one that did without the agent's log. Each
-// touch's line now says whether it was targeted (it went down on the target and lifted),
-// clicked (the target reported its action), cancelled, or withheld.
 func TestTapTraceSaysHowTheTouchWasDelivered(t *testing.T) {
 	clicked := true
 	targeted := driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}
 	cancelled := driver.ActionResult{Guarded: true, Probed: true, Cancelled: true, Settle: driver.Changed}
 	for _, tc := range []struct {
 		name     string
-		plat     string // "ios" when empty
+		plat     string
 		ci       bool
 		receipts []driver.ActionResult
 		fail     bool
-		lines    []string // in order
+		lines    []string
 	}{
 		{name: "targeted", receipts: []driver.ActionResult{targeted},
 			lines: []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms; touch targeted\)$`}},
 		{name: "targeted and clicked",
 			receipts: []driver.ActionResult{{Guarded: true, Probed: true, Targeted: true, Clicked: &clicked, Settle: driver.Changed}},
 			lines:    []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms; touch targeted, clicked\)$`}},
-		// The agent's touch field: the touch lifted where the probe did not find the target, or
-		// the probe sent no receipt in time.
 		{name: "lifted, not on the target",
 			receipts: []driver.ActionResult{{Guarded: true, Probed: true, Touch: "ended", Settle: driver.NoChange}},
 			lines:    []string{`tap at \(\d+, \d+\): nothing changed \(sent in \d+ ms, waited \d+ ms; touch lifted, not seen on the target\)$`}},
 		{name: "no receipt",
 			receipts: []driver.ActionResult{{Guarded: true, Probed: true, Touch: "none", Settle: driver.Changed}},
 			lines:    []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms; no touch receipt\)$`}},
-		// A control that reported its action on a touch that then ended cancelled did act.
 		{name: "clicked, then cancelled",
 			receipts: []driver.ActionResult{{Guarded: true, Probed: true, Touch: "cancelled", Clicked: &clicked, Settle: driver.Changed}},
 			lines:    []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms; touch cancelled, clicked\)$`}},
-		// An older agent sends no touch: an untargeted touch's ending is unknown, so the line
-		// says nothing of it.
 		{name: "an older agent, not targeted",
 			receipts: []driver.ActionResult{{Guarded: true, Probed: true, Settle: driver.Changed}},
 			lines:    []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms\)$`}},
-		// Android reports clicked on every action, and a click can come after the reply: its
-		// lines keep the old wording.
 		{name: "android", plat: "android",
 			receipts: []driver.ActionResult{{Clicked: new(bool), Settle: driver.Changed}},
 			lines:    []string{`tap at \(\d+, \d+\): the screen changed \(sent in \d+ ms, waited \d+ ms\)$`}},

@@ -74,18 +74,10 @@ func (p *parser) swipe(c *Command, m *mapView, v *yaml.Node) error {
 	return nil
 }
 
-// DefaultDragHold is how long a drag's finger rests where it goes down, in ms, when the flow
-// gives no hold: past UIKit's long press (0.5 s), which lifts a row for drag and drop or a
-// reorder (issue #330).
 const DefaultDragHold = 800
 
-// DefaultDragDuration is how long a drag's move takes, in ms, when the flow gives none.
 const DefaultDragDuration = 1000
 
-// drag parses the Test Buddy extension `drag` (issue #330): press and hold, then move. The
-// finger goes down on from (a selector) or start (a point), stays still for hold ms, moves to
-// to (a selector) or end (a point) over duration ms, and lifts there. Points are written as
-// swipe's start and end.
 func (p *parser) drag(c *Command, m *mapView, v *yaml.Node) error {
 	if err := m.commandOptions(c); err != nil {
 		return err
@@ -125,7 +117,7 @@ func (p *parser) drag(c *Command, m *mapView, v *yaml.Node) error {
 				return err
 			}
 			if sm != nil {
-				sm.get("optional") // the selector's own (Selector.Optional), as swipe's from
+				sm.get("optional")
 				if err := sm.strict(e.sel); err != nil {
 					return err
 				}

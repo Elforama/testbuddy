@@ -21,7 +21,6 @@ class HomeActivity : Activity() {
     private var nextTick = 0L
     private var lastItem = 0
 
-    /** "Live: N", N += 1 every 100 ms for as long as Home exists. */
     private val tick = object : Runnable {
         override fun run() {
             ticks++
@@ -79,7 +78,6 @@ class HomeActivity : Activity() {
         super.onDestroy()
     }
 
-    /** Appends [count] rows before the Load more footer, which stays the last child. */
     private fun addRows(count: Int) {
         val inflater = layoutInflater
         repeat(count) {

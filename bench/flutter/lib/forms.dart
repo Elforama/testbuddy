@@ -477,8 +477,6 @@ class _FormsState extends State<Forms> {
             onChanged: digits,
           ),
         ),
-        // One text connection owns the code so pasting or typing a batch does
-        // not switch input connections halfway through. Show its six slots below.
         Row(
           children: [
             for (int i = 0; i < 6; i++)

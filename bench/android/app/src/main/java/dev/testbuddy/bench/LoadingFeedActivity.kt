@@ -12,12 +12,6 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 
-/**
- * A feed's skeleton placeholders, three cards of gray blocks, with a light band sweeping across
- * them every [SWEEP_MS], forever. It is drawn on each frame from the clock, as a looping
- * animated image or a hand-made shimmer is: the device's animator duration scale (0 on test
- * devices) does not stop it, and it sends no accessibility event.
- */
 class ShimmerView(context: Context) : View(context) {
     private val block = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BASE }
     private val band = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -59,13 +53,6 @@ class ShimmerView(context: Context) : View(context) {
     }
 }
 
-/**
- * Android's Native screen, "Loading feed": a home feed whose posts never come in, with
- * [ShimmerView] (`feed_shimmer`) over most of the screen, between a still header line and a
- * still tab bar with a "Post" button (`feed_post`). `feed_details_open` "Show details" slides a
- * details panel (`feed_details`) in from the right over the whole screen, 300 ms after the tap,
- * for [SLIDE_MS] (issue #83).
- */
 class LoadingFeedActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,7 +82,7 @@ class LoadingFeedActivity : ScenarioActivity() {
             text(text = "Home", size = 16f, bold = true)
             text(text = "Search", size = 16f)
             text(text = "Profile", size = 16f)
-            put(View(context), w = 0, h = 1, weight = 1f) // a spacer (a plain View's WRAP takes all)
+            put(View(context), w = 0, h = 1, weight = 1f)
             button(R.id.feed_post, "Post") {}
         }
         root.addView(details, FrameLayout.LayoutParams(MATCH, MATCH))

@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// console prints a run as it happens: one line per finished command, indented by depth,
-// with its time. With several devices at once, lines carry the device in brackets.
 type console struct {
 	mu     sync.Mutex
 	w      io.Writer
@@ -77,8 +75,6 @@ func (c *console) reporter(flowName, device string) engine.Reporter {
 			return
 		}
 		if e.Hint != "" {
-			// Depth is the step's own depth plus one (said while it runs): under the step, where
-			// its error would go.
 			c.printf("%s%s    %s\n", tag, strings.Repeat("  ", e.Depth), c.paint("2", "hint: "+e.Hint))
 			return
 		}
@@ -134,8 +130,6 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 	}
 }
 
-// printScreen shows what was on screen when an element was not found, plus similar
-// elements: often all an agent needs to fix the selector.
 func (c *console) printScreen(s *ui.Screen, query string) {
 	l := look.Build(s, look.NewRefs())
 	if sim := l.Similar(query); len(sim) > 0 && query != "" {

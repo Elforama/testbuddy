@@ -1,5 +1,3 @@
-// Scenario 11, Native toolkits: the same mini screen built with SwiftUI (List), UIKit (a
-// UITableView in a UIViewController) and WKWebView (a local HTML page).
 import SwiftUI
 import UIKit
 import WebKit
@@ -32,14 +30,6 @@ enum Toolkit: String, CaseIterable, Hashable {
     }
 }
 
-/// A tap whose reaction shows at once, then a device event (tb issue #286): a count of taps, a
-/// count of returns to the foreground, and the device's orientation. testmanagerd confirms a
-/// tap ~215 ms after it starts; tb answers it once the app reports its touches completed
-/// (~20 ms), and a step that reads the screen can follow in ~100 ms. A Home press or a
-/// rotation sent before that confirmation was refused by XCTest ("only one gesture can be
-/// performed at a time"), and the step passed. The control draws no pressed state, so nothing
-/// on screen moves after its count changes (a bordered button fades for ~200 ms, which tb waits
-/// out before the next step).
 private struct TapThenAway: View {
     @State private var taps = 0
     @State private var returns = 0
@@ -105,8 +95,6 @@ private struct RotationReadout: View {
     }
 }
 
-/// A card that is itself a button, with a button inside it (tb issue #39): each has its own id
-/// and action, and the inner one is a Button inside the card's Button in the accessibility tree.
 private struct NestedButtons: View {
     @State private var opened = 0
     @State private var added = 0
@@ -125,7 +113,7 @@ private struct NestedButtons: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 12).stroke(.secondary))
-                .contentShape(Rectangle()) // the whole card takes a tap, not only its texts
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("nb_card")
@@ -138,8 +126,6 @@ private struct NestedButtons: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 }
-
-// MARK: SwiftUI
 
 private struct SwiftUIMini: View {
     @State private var taps = 0
@@ -176,8 +162,6 @@ private struct SwiftUIMini: View {
     }
 }
 
-// MARK: UIKit
-
 private struct UIKitMini: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -201,7 +185,6 @@ private struct UIKitMiniRepresentable: UIViewControllerRepresentable {
     }
 }
 
-/// A plain UIKit screen: a stack of controls over a UITableView of 30 rows.
 final class UIKitMiniController: UIViewController, UITableViewDataSource {
     var back: (() -> Void)?
     private var taps = 0
@@ -303,8 +286,6 @@ private extension UIFont {
     }
 }
 
-// MARK: WKWebView
-
 private struct WebMini: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -314,7 +295,6 @@ private struct WebMini: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 
-    /// The mini screen as a local page (no network): ids are the elements' `id`s.
     static let html: String = {
         let rows = (1...30).map { "<li id=\"tk_row_\($0)\">Toolkit row \($0)</li>" }.joined(separator: "\n")
         return """

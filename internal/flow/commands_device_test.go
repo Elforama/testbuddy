@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// ---- app lifecycle ----
-
-// TestLaunchAppForms pins launchApp's bare, scalar and full map forms.
 func TestLaunchAppForms(t *testing.T) {
 	c := step(t, "- launchApp\n")
 	if c.AppID != "" || c.ClearState || c.ClearKeychain || c.StopApp != nil || c.Permissions != nil || c.Arguments != nil {
@@ -58,7 +55,6 @@ func TestLaunchAppForms(t *testing.T) {
 	}
 }
 
-// TestLaunchAppURL pins that a web launchApp's url overrides its appId.
 func TestLaunchAppURL(t *testing.T) {
 	if c := step(t, "- launchApp: {url: https://e.com, appId: com.x}\n"); c.AppID != "https://e.com" {
 		t.Errorf("url wins: %q", c.AppID)
@@ -68,7 +64,6 @@ func TestLaunchAppURL(t *testing.T) {
 	}
 }
 
-// TestLaunchAppErrors pins launchApp's rejections.
 func TestLaunchAppErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"clearState not a bool", "- launchApp: {clearState: maybe}\n", "expected true or false", 3},
@@ -81,7 +76,6 @@ func TestLaunchAppErrors(t *testing.T) {
 	})
 }
 
-// TestStopKillClear pins stopApp/killApp/clearState forms.
 func TestStopKillClear(t *testing.T) {
 	for _, name := range []string{"stopApp", "killApp", "clearState"} {
 		t.Run(name, func(t *testing.T) {
@@ -103,7 +97,6 @@ func TestStopKillClear(t *testing.T) {
 	}
 }
 
-// TestSetPermissions pins setPermissions's map form.
 func TestSetPermissions(t *testing.T) {
 	c := step(t, "- setPermissions:\n    appId: com.x\n    permissions:\n      location: allow\n      camera: deny\n")
 	if c.AppID != "com.x" || !reflect.DeepEqual(c.Permissions, []KV{{"location", "allow"}, {"camera", "deny"}}) {
@@ -125,7 +118,6 @@ func TestSetPermissions(t *testing.T) {
 	})
 }
 
-// TestOpenLink pins openLink's scalar and map forms.
 func TestOpenLink(t *testing.T) {
 	if c := step(t, "- openLink: https://example.com/a?b=c\n"); c.Text != "https://example.com/a?b=c" || c.AutoVerify || c.Browser {
 		t.Errorf("scalar: %+v", c)
@@ -141,9 +133,6 @@ func TestOpenLink(t *testing.T) {
 	})
 }
 
-// ---- screenshots and recordings ----
-
-// TestScreenshotCommands pins takeScreenshot/startRecording/assertScreenshot fields.
 func TestScreenshotCommands(t *testing.T) {
 	if c := step(t, "- takeScreenshot: home\n"); c.Text != "home" || c.CropOn != nil || c.Threshold != "" || c.Mutating() {
 		t.Errorf("takeScreenshot scalar: %+v", c)
@@ -170,7 +159,6 @@ func TestScreenshotCommands(t *testing.T) {
 	})
 }
 
-// TestWaitForAnimationToEnd pins its bare and {timeout} forms.
 func TestWaitForAnimationToEnd(t *testing.T) {
 	if c := step(t, "- waitForAnimationToEnd\n"); c.Timeout != "" {
 		t.Errorf("bare: %q", c.Timeout)
@@ -184,9 +172,6 @@ func TestWaitForAnimationToEnd(t *testing.T) {
 	})
 }
 
-// ---- location ----
-
-// TestSetLocation pins setLocation's fields (kept as raw strings for ${...}).
 func TestSetLocation(t *testing.T) {
 	c := step(t, "- setLocation:\n    latitude: 52.3676\n    longitude: ${LON}\n    label: Amsterdam\n")
 	if c.Latitude != "52.3676" || c.Longitude != "${LON}" || c.Label != "Amsterdam" {
@@ -197,8 +182,6 @@ func TestSetLocation(t *testing.T) {
 		{"no longitude", "- setLocation: {latitude: 1}\n", "setLocation needs latitude and longitude", 3},
 		{"no latitude", "- setLocation: {longitude: 1}\n", "setLocation needs latitude and longitude", 3},
 		{"unknown key", "- setLocation: {latitude: 1, longitude: 2, altitude: 3}\n", `"altitude" is not an option of setLocation`, 3},
-		// issue #113: a literal latitude or longitude that is not a finite number in range is
-		// caught by tb check, instead of being sent to the device.
 		{"latitude text", "- setLocation:\n    latitude: north\n    longitude: 2\n", `invalid latitude "north": expected a number from -90 to 90`, 4},
 		{"latitude NaN", "- setLocation:\n    latitude: NaN\n    longitude: 2\n", `invalid latitude "NaN"`, 4},
 		{"latitude Inf", "- setLocation:\n    latitude: Inf\n    longitude: 2\n", `invalid latitude "Inf"`, 4},
@@ -208,10 +191,8 @@ func TestSetLocation(t *testing.T) {
 		{"longitude -Inf", "- setLocation:\n    latitude: 1\n    longitude: -Infinity\n", `invalid longitude "-Infinity"`, 5},
 		{"longitude above 180", "- setLocation:\n    latitude: 1\n    longitude: 180.5\n", `invalid longitude "180.5"`, 5},
 		{"longitude below -180", "- setLocation:\n    latitude: 1\n    longitude: -200\n", `invalid longitude "-200"`, 5},
-		// A literal is checked even when the other value is only known at run time.
 		{"bad literal beside ${...}", "- setLocation:\n    latitude: ${LAT}\n    longitude: 999\n", `invalid longitude "999"`, 5},
 	})
-	// issue #113: the edges of the ranges, and 0, are valid.
 	for _, ll := range [][2]string{{"90", "180"}, {"-90", "-180"}, {"0", "0"}, {"-0", "-0"}, {"90.0", "-180.0"}} {
 		if c := step(t, "- setLocation: {latitude: "+ll[0]+", longitude: "+ll[1]+"}\n"); c.Latitude != ll[0] || c.Longitude != ll[1] {
 			t.Errorf("%v: %+v", ll, c)
@@ -219,13 +200,11 @@ func TestSetLocation(t *testing.T) {
 	}
 }
 
-// TestTravel pins travel's points and speed.
 func TestTravel(t *testing.T) {
 	c := step(t, "- travel:\n    points:\n      - \"52.37, 4.89\"\n      - \"-33.86,151.21\"\n    speed: 7.5\n")
 	if !reflect.DeepEqual(c.Points, [][2]float64{{52.37, 4.89}, {-33.86, 151.21}}) || c.TravelSpeed != "7.5" {
 		t.Errorf("%+v %v", c.Points, c.TravelSpeed)
 	}
-	// issue #113: the edges of the ranges, and 0, are valid points.
 	if c := step(t, "- travel: {points: [\"90,180\", \"-90,-180\", \"0,0\", \" -0 , 180.0 \"]}\n"); !reflect.DeepEqual(c.Points, [][2]float64{{90, 180}, {-90, -180}, {0, 0}, {0, 180}}) {
 		t.Errorf("edge points: %v", c.Points)
 	}
@@ -242,15 +221,11 @@ func TestTravel(t *testing.T) {
 		{"point without comma", "- travel:\n    points: [\"1,2\", \"12\"]\n", `a travel point is "latitude,longitude"`, 4},
 		{"point not numeric", "- travel: {points: [\"a,b\"]}\n", `a travel point is "latitude,longitude"`, 3},
 		{"speed not a number", "- travel:\n    points: [\"1,2\"]\n    speed: fast\n", `invalid speed "fast": expected metres per second, a number above 0`, 5},
-		// issue #44: a literal speed that is not a finite number above 0 is caught by tb check.
-		// At 0 the wait between points was endless (arm64) or skipped (amd64); below 0 it was skipped.
 		{"speed 0", "- travel:\n    points: [\"1,2\"]\n    speed: 0\n", `invalid speed "0"`, 5},
 		{"speed negative", "- travel:\n    points: [\"1,2\"]\n    speed: -3\n", `invalid speed "-3"`, 5},
 		{"speed empty", "- travel:\n    points: [\"1,2\"]\n    speed: ''\n", `invalid speed ""`, 5},
 		{"speed NaN", "- travel:\n    points: [\"1,2\"]\n    speed: NaN\n", `invalid speed "NaN"`, 5},
 		{"speed Inf", "- travel:\n    points: [\"1,2\"]\n    speed: .inf\n", `invalid speed ".inf"`, 5},
-		// issue #113: a point's latitude or longitude that is not a finite number in range is
-		// caught by tb check: NaN made the distance and the wait NaN and was sent to the device.
 		{"point latitude NaN", "- travel:\n    points: [\"1,2\", \"NaN,2\"]\n", `invalid latitude "NaN": expected a number from -90 to 90`, 4},
 		{"point longitude NaN", "- travel: {points: [\"1, nan\"]}\n", `invalid longitude "nan": expected a number from -180 to 180`, 3},
 		{"point latitude Inf", "- travel: {points: [\"Inf,2\"]}\n", `invalid latitude "Inf"`, 3},
@@ -263,9 +238,6 @@ func TestTravel(t *testing.T) {
 	})
 }
 
-// ---- device settings ----
-
-// TestSetOrientation pins accepted orientation spellings, ${...} and its map form.
 func TestSetOrientation(t *testing.T) {
 	for _, o := range []string{"PORTRAIT", "portrait", "LANDSCAPE_LEFT", "landscapeLeft", "LANDSCAPE_RIGHT",
 		"landscape_right", "UPSIDE_DOWN", "upsideDown", "${ORIENTATION}"} {
@@ -284,7 +256,6 @@ func TestSetOrientation(t *testing.T) {
 	})
 }
 
-// TestToggleModes pins setAirplaneMode/setDarkMode values.
 func TestToggleModes(t *testing.T) {
 	for _, name := range []string{"setAirplaneMode", "setDarkMode"} {
 		t.Run(name, func(t *testing.T) {
@@ -308,7 +279,6 @@ func TestToggleModes(t *testing.T) {
 	}
 }
 
-// TestAddMedia pins addMedia's list and map forms; files must exist and become absolute.
 func TestAddMedia(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"pic.png": "x", "media/clip.mp4": "y"})
 	main := filepath.Join(dir, "main.yaml")
@@ -337,9 +307,6 @@ func TestAddMedia(t *testing.T) {
 	}
 }
 
-// ---- scripts and AI ----
-
-// TestEvalScript pins evalScript's scalar and map forms.
 func TestEvalScript(t *testing.T) {
 	if c := step(t, "- evalScript: ${output.n = 1}\n"); c.Text != "${output.n = 1}" {
 		t.Errorf("scalar: %+v", c)
@@ -350,7 +317,6 @@ func TestEvalScript(t *testing.T) {
 	}
 }
 
-// TestAICommands pins the AI steps: optional by default, and their text fields.
 func TestAICommands(t *testing.T) {
 	if c := step(t, "- assertWithAI: the cart is empty\n"); c.Text != "the cart is empty" || !c.Optional {
 		t.Errorf("assertWithAI scalar: %+v", c)
@@ -371,7 +337,6 @@ func TestAICommands(t *testing.T) {
 	}
 }
 
-// TestListValuesRejected pins that commands taking a text or a map reject a list value.
 func TestListValuesRejected(t *testing.T) {
 	for _, name := range []string{"openLink", "takeScreenshot", "startRecording", "assertScreenshot", "setClipboard",
 		"eraseText", "launchApp", "stopApp", "killApp", "clearState", "evalScript", "assertWithAI", "extractTextWithAI"} {

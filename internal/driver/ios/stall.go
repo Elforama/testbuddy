@@ -10,44 +10,21 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// Issue #237: on a busy CI runner the whole simulator (SpringBoard, the app, testmanagerd) can
-// be starved for tens of seconds. Screen reads are where it shows: one is given up on by the
-// agent (the app did not answer accessibility for 30 s), and the one asked once more can wait
-// long too. A step that fails meanwhile used to say only "No visible element found"; the driver
-// keeps these stalls so the step can name them (driver.StallReporter).
-
-// stallRead is how long a screen read must take to count as the simulator being slow to answer.
-// Reads take 0.05-0.5 s, and up to ~5 s on a busy CI runner.
 var stallRead = 10 * time.Second
 
-// stallRetryShown: a read asked once more after one given up on that takes this long is shown
-// in the stall's signs ("the next read took 3.1 s").
 var stallRetryShown = 2 * time.Second
 
-// maxStalls is how many stalls the driver remembers: enough for any one step.
 const maxStalls = 16
 
 type stall struct {
-	start, end time.Time
-	givenUp    bool // the agent gave up on a read with its full time: it stopped answering
-	mainHeld   bool // ...and said it waited for the app's main thread
-	// How long the app's main thread held the read (issue #255; 0: not known), from heldAfter
-	// past start on: a read given up on while waiting for it counts whole, plus the reply's
-	// mainWaitMs (that of the read asked once more, after it, if there was one).
+	start, end          time.Time
+	givenUp             bool
+	mainHeld            bool
 	mainWait, heldAfter time.Duration
-	// The read was given up on while waiting for the main thread and its reply sent no
-	// mainWaitMs (an older agent, or a prompt read asked once more): its held time is only
-	// shown beside another stall's mainWaitMs, else the sign is the plain one, as before #255.
-	untimed bool
-	retry   time.Duration // how long the read asked once more after it took (0: none)
+	untimed             bool
+	retry               time.Duration
 }
 
-// noteStall records a screen read that began at start, if the simulator did not answer it in
-// time. givenUp is the agent's reason for a read it gave up on ("" if it answered), full whether
-// that read had its whole time (a read cut short by the run's deadline proves nothing), retry
-// how long the read asked once more after it took (0 if none), and m the reply the read got
-// (nil if none), whose mainWaitMs says how long it waited for the app's main thread (issue
-// #255; an older agent does not send it). That wait is only a sign: it changes no timing.
 func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry time.Duration, m *wire.Msg) {
 	end := time.Now()
 	s := stall{start: start, end: end, givenUp: givenUp != "" && full, retry: retry}
@@ -58,9 +35,9 @@ func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry tim
 	wait := mainWait(m)
 	s.untimed = s.mainHeld && wait == 0
 	switch {
-	case s.mainHeld: // never reached the main thread: held for the whole read given up on
+	case s.mainHeld:
 		s.mainWait = end.Sub(start) - retry + wait
-	case s.givenUp: // given up on in the snapshot: only the read asked once more waited, after it
+	case s.givenUp:
 		s.mainWait, s.heldAfter = wait, end.Sub(start)-retry
 	default:
 		s.mainWait = wait
@@ -74,8 +51,6 @@ func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry tim
 	d.mu.Unlock()
 }
 
-// mainWait is the time a tree reply says its read waited for the app's main thread
-// (mainWaitMs, issue #255): 0 if it does not say (an older agent, or a wait under 1 s).
 func mainWait(m *wire.Msg) time.Duration {
 	if m == nil {
 		return 0
@@ -96,7 +71,6 @@ func stallVerb(stopped bool) string {
 	return "was slow to answer"
 }
 
-// stallSigns says what showed the stalls: plain facts, as the agent reported them.
 func stallSigns(ss []stall) []string {
 	timeouts, mainHeld, timed, slow := 0, false, false, 0
 	var retry, slowFor, mainWait time.Duration
@@ -120,7 +94,7 @@ func stallSigns(ss []stall) []string {
 		signs = append(signs, fmt.Sprintf("%d accessibility timeouts", timeouts))
 	}
 	switch {
-	case timed: // the agent said how long (issue #255)
+	case timed:
 		signs = append(signs, fmt.Sprintf("app main thread held for %.1f s", mainWait.Seconds()))
 	case mainHeld:
 		signs = append(signs, "app main thread held")
@@ -137,15 +111,12 @@ func stallSigns(ss []stall) []string {
 	return signs
 }
 
-// StallSince is the time the simulator did not answer, or answered slowly, from t on
-// (driver.StallReporter): overlapping stalls count once.
 func (d *Driver) StallSince(t time.Time) driver.Stall {
 	d.mu.Lock()
 	var ss []stall
 	for _, s := range d.stalls {
 		if s.end.After(t) {
 			if s.start.Before(t) {
-				// The held time before t is not counted either (issue #255).
 				cut := t.Sub(s.start)
 				if cut > s.heldAfter {
 					s.mainWait = max(0, s.mainWait-(cut-s.heldAfter))
@@ -161,7 +132,7 @@ func (d *Driver) StallSince(t time.Time) driver.Stall {
 	d.mu.Unlock()
 	out := driver.Stall{Device: "the simulator"}
 	sort.Slice(ss, func(i, j int) bool { return ss[i].start.Before(ss[j].start) })
-	var to time.Time // the end of what is counted so far
+	var to time.Time
 	for _, s := range ss {
 		from := s.start
 		if from.Before(to) {

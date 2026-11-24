@@ -2,8 +2,6 @@ package a11y
 
 import "testing"
 
-// The legend lists the rules findings refer to, once each, in Rules order; Errors counts
-// findings of severity error.
 func TestResultUsedAndErrors(t *testing.T) {
 	first, second := Rules[0], Rules[1]
 	r := &Result{Findings: []Finding{
@@ -30,7 +28,6 @@ func TestResultUsedAndErrors(t *testing.T) {
 	}
 }
 
-// A rule's severity comes from Rules; an unknown rule counts as a warning.
 func TestRuleSeverity(t *testing.T) {
 	for _, r := range Rules {
 		if got := ruleSeverity(r.ID); got != r.Severity {
@@ -42,8 +39,6 @@ func TestRuleSeverity(t *testing.T) {
 	}
 }
 
-// skipLiteral steps over comments and strings (so their contents are not read as code), and
-// stays put elsewhere; an unterminated one runs to the end.
 func TestSkipLiteral(t *testing.T) {
 	for _, c := range []struct {
 		src  string
@@ -68,7 +63,6 @@ func TestSkipLiteral(t *testing.T) {
 	}
 }
 
-// literal reads a plain string literal; anything else (a variable, a call, an escape) is "".
 func TestLiteral(t *testing.T) {
 	for in, want := range map[string]string{`"Save"`: "Save", `  "Save"  `: "Save", `""`: "", `name`: "",
 		`"a\"b"`: "", `stringResource(R.string.x)`: "", `"Save" + x`: "Save"} {
@@ -78,8 +72,6 @@ func TestLiteral(t *testing.T) {
 	}
 }
 
-// tagString reads an attribute's text: plain, or a string literal in braces; an expression
-// or a template with ${} is unknown ("").
 func TestTagString(t *testing.T) {
 	tg := &tag{attrs: map[string]string{
 		"plain": "Save", "dq": `{"Save"}`, "sq": `{'Save'}`, "bt": "{`Save`}", "tpl": "{`Hi ${name}`}",
@@ -93,7 +85,6 @@ func TestTagString(t *testing.T) {
 	}
 }
 
-// lineAt is the rest of the line from an offset.
 func TestLineAt(t *testing.T) {
 	src := "first\nsecond line\nthird"
 	if got := lineAt(src, 6); got != "second line" {
@@ -104,8 +95,6 @@ func TestLineAt(t *testing.T) {
 	}
 }
 
-// webHasText: text tb reads inside an element. Icons and images do not count; a component
-// counts unless named an icon; an aria-label or title on a child counts.
 func TestWebHasText(t *testing.T) {
 	mk := func(name string, kids ...*tag) *tag {
 		t := &tag{name: name, attrs: map[string]string{}}

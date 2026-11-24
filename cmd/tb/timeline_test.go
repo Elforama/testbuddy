@@ -15,9 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/orchestrate"
 )
 
-// Without --timeline nothing is recorded or written; with it, each flow's timeline.html is
-// written in its debug folder when it ends, with the run's devices and error, and fed the
-// flow's trace.
 func TestFlowTimelines(t *testing.T) {
 	dir := t.TempDir()
 	if tl := newFlowTimelines(false).open(dir, nil); tl != nil {
@@ -55,9 +52,6 @@ func TestFlowTimelines(t *testing.T) {
 	}
 }
 
-// Issue #65: a timeline keeps its screenshots in a temp file until its page is written.
-// The file is gone once the flow's timeline is closed, and closeAll removes those of
-// flows that never reported their end (the run ends however it ends).
 func TestFlowTimelinesRemoveTempFiles(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)

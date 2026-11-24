@@ -11,17 +11,8 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// stallContainers run other steps: a failure inside one was decided at the step that failed, and
-// the container's own time includes its passing steps, whose stalls are not this failure's.
 var stallContainers = map[string]bool{"runFlow": true, "repeat": true, "retry": true}
 
-// nameStall puts first in a failed step's message that its device stopped answering, or was
-// slow to answer, for a good part of the step (issue #237): a scrollUntilVisible on a CI
-// simulator starved for ~45 s failed with "No visible element found ... (after 3 swipes)", as if
-// the element were not there. The step's own message is kept after it: the element may really
-// be missing. Only a step that failed to find or assert something is named so, once, by the
-// step that failed (never by a container around it), and only for a stall of StallFloor or more
-// that took at least a quarter of the step; one whose device answered as usual is left as it was.
 func (r *Runner) nameStall(c *flow.Command, err error, start time.Time) error {
 	if err == nil || !isFlowError(err) {
 		return err
@@ -48,7 +39,7 @@ func (r *Runner) nameStall(c *flow.Command, err error, start time.Time) error {
 	}
 	took := time.Since(start)
 	st := sr.StallSince(start)
-	var extra time.Duration // the CI-mode time the step was given for a stall (issue #243)
+	var extra time.Duration
 	if r.step != nil {
 		extra = r.step.extra
 	}
@@ -82,23 +73,11 @@ func stallVerb(st driver.Stall) string {
 	return "was slow to answer"
 }
 
-// stepClock is the running step's start, and the time stallGrace gave it (0: none yet).
 type stepClock struct {
 	start time.Time
 	extra time.Duration
 }
 
-// stallGrace is a CI allowance (package ci; issue #243), asked by a find, scroll or assert wait
-// that began at waitStart and whose deadline has passed. On a starved CI runner the whole
-// simulator can stop answering for tens of seconds (issue #237: ~45 s in a 20 s
-// scrollUntilVisible), and the step's time runs out while nothing could have answered. When the
-// device stalled for StallFloor (10 s) or more during this wait (stalls before it began, earlier
-// in the step, cost it nothing), the wait's deadline moves to the stalled time from now, capped
-// at the wait's own timeout, once per step. So an element that is really missing still fails:
-// the step runs at most min(stall, timeout) longer, plus the overrun of the read in flight when
-// the deadline passed, and its failure names the stall and the extra time (nameStall). It
-// reports whether it moved the deadline. Outside CI, or with no such stall, the wait ends at its
-// deadline as before. A step inside runFlow, repeat or retry counts on its own (runCommand).
 func (r *Runner) stallGrace(deadline *time.Time, timeout time.Duration, waitStart time.Time) bool {
 	if !ci.On() || r.step == nil || r.step.extra > 0 || timeout <= 0 {
 		return false

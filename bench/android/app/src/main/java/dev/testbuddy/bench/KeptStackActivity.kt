@@ -6,17 +6,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
-/**
- * Android's Native screen, "Kept stack" (issue #320): a stack that keeps its previous screen
- * mounted under the one pushed on top, as a JavaScript stack navigator does. In one frame, the
- * pushed screen is the frame's first child, raised by translationZ (drawn last, on top), and
- * the previous screen its second child, a little lower (so Android lists it after the pushed
- * one), drawn under it. Both draw a solid background, a title and a button at the same place.
- *
- * The pushed screen: `tk_stack_top_title` "Pushed screen", `tk_stack_status` "Opened N times",
- * `tk_stack_pop` "Pop" (hides it). The previous screen: `tk_stack_prev_title` "Previous
- * screen", `tk_stack_prev_open` "Open again" (shows the pushed screen again, N + 1).
- */
 class KeptStackActivity : ScenarioActivity() {
     private var opened = 1
 
@@ -38,7 +27,6 @@ class KeptStackActivity : ScenarioActivity() {
         }
     }
 
-    /** A full-size screen in [frame]: a solid background, a title, and a scrolling body. */
     private fun page(frame: FrameLayout, titleId: Int, title: String): Pair<View, LinearLayout> {
         val screen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

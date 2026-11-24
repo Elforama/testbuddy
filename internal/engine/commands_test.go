@@ -13,7 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// launchApp: stop first, grant all, no arguments, unless told otherwise.
 func TestLaunchAppDefaults(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- launchApp"))
@@ -30,7 +29,6 @@ func TestLaunchAppDefaults(t *testing.T) {
 	}
 }
 
-// launchApp's options are evaluated and passed on; clearKeychain runs before the launch.
 func TestLaunchAppOptions(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	src := `appId: app
@@ -73,7 +71,6 @@ env:
 	}
 }
 
-// Two launch arguments that evaluate to one name are an error.
 func TestLaunchAppDuplicateArgument(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	res := runWith(t, f, quick, "- launchApp:\n    arguments:\n      \"${'a'}\": 1\n      a: 2")
@@ -83,7 +80,6 @@ func TestLaunchAppDuplicateArgument(t *testing.T) {
 	}
 }
 
-// A launch the device fails is a flow failure (an optional launch warns).
 func TestLaunchAppErrors(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("LaunchApp", errors.New("not installed"))
@@ -101,7 +97,6 @@ func TestLaunchAppErrors(t *testing.T) {
 	}
 }
 
-// Bad ${...} in launchApp's fields fail it before anything runs.
 func TestLaunchAppJSErrors(t *testing.T) {
 	for _, cmd := range []string{
 		"- launchApp: {appId: '${(}'}",
@@ -117,7 +112,6 @@ func TestLaunchAppJSErrors(t *testing.T) {
 	}
 }
 
-// launchApp's permissions decide how the iOS notifications alert is answered.
 func TestLaunchAppNotificationsAnswer(t *testing.T) {
 	for _, tc := range []struct{ perms, want string }{
 		{"", "allow"},
@@ -143,7 +137,6 @@ func TestLaunchAppNotificationsAnswer(t *testing.T) {
 	}
 }
 
-// A flow with an empty appId cannot launch, stop or clear an app.
 func TestNoAppID(t *testing.T) {
 	for _, cmd := range []string{"launchApp", "stopApp", "killApp", "clearState", "setPermissions: {permissions: {all: allow}}"} {
 		f := &fakeDriver{screen: static()}
@@ -152,8 +145,6 @@ func TestNoAppID(t *testing.T) {
 	}
 }
 
-// stopApp, killApp and clearState act on the flow's app or the one named; clearState also
-// resets the app's permissions.
 func TestAppLifecycle(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- stopApp\n- stopApp: other\n- killApp\n- killApp: {appId: k}\n- clearState\n- clearState: c"))
@@ -171,7 +162,6 @@ func TestAppLifecycle(t *testing.T) {
 	}
 }
 
-// Errors from stopApp, killApp and clearState fail the command; a failed clear sets nothing.
 func TestAppLifecycleErrors(t *testing.T) {
 	for _, m := range []string{"StopApp", "KillApp", "ClearState"} {
 		f := &fakeDriver{screen: static()}
@@ -187,7 +177,6 @@ func TestAppLifecycleErrors(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- clearState"), "denied")
 }
 
-// clearKeychain and setPermissions go straight to the device.
 func TestKeychainAndPermissions(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- clearKeychain\n- setPermissions: {permissions: {camera: \"${'allow'}\", contacts: deny}}\n- setPermissions: {appId: other, permissions: {all: unset}}"))
@@ -204,7 +193,6 @@ func TestKeychainAndPermissions(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- setPermissions: {permissions: {camera: '${(}'}}"), "JavaScript error")
 }
 
-// openLink opens the evaluated link for the flow's app, then waits up to 3 s to settle.
 func TestOpenLink(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- openLink: https://a.test/x\n- openLink: {link: \"${'app://' + 'y'}\", autoVerify: true, browser: true}"))
@@ -223,14 +211,11 @@ func TestOpenLink(t *testing.T) {
 	}
 }
 
-// issue #115 review: openLink had setOrientation's pattern. A run cancelled while the screen
-// settles after the link fails the step with the context's error; it used to pass, and a
-// one-step flow with it.
 func TestOpenLinkCancelled(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	f.onWait = cancel // the run is stopped while the screen settles after the link opens
+	f.onWait = cancel
 	fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- openLink: https://a.test/x"))
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +229,6 @@ func TestOpenLinkCancelled(t *testing.T) {
 	}
 }
 
-// setOrientation accepts any spelling of the four orientations, evaluated, then settles.
 func TestSetOrientation(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"PORTRAIT", "PORTRAIT"},
@@ -265,7 +249,6 @@ func TestSetOrientation(t *testing.T) {
 	}
 }
 
-// An orientation that evaluates to nothing known fails, even an optional one.
 func TestSetOrientationInvalid(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	res := runWith(t, f, quick, "- setOrientation: {orientation: \"${'sideways'}\", optional: true}")
@@ -279,13 +262,11 @@ func TestSetOrientationInvalid(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- setOrientation: '${(}'"), "JavaScript error")
 }
 
-// issue #115: a run cancelled while setOrientation settles fails the step with the context's
-// error: it used to pass (the settle's end was not checked), so the step read as done.
 func TestSetOrientationCancelled(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	f.onWait = cancel // the run is stopped while the screen settles after the turn
+	f.onWait = cancel
 	fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- setOrientation: LANDSCAPE_LEFT"))
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +280,6 @@ func TestSetOrientationCancelled(t *testing.T) {
 	}
 }
 
-// addMedia sends the flow's media files (resolved next to the flow).
 func TestAddMedia(t *testing.T) {
 	dir := t.TempDir()
 	a := writeFile(t, dir, "a.png", "png")
@@ -314,7 +294,6 @@ func TestAddMedia(t *testing.T) {
 	mustFail(t, runSrc(t, f2, quick, dir, "appId: app\n---\n- addMedia: [a.png]"), "full")
 }
 
-// setAirplaneMode and toggleAirplaneMode go to the device.
 func TestAirplaneMode(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- setAirplaneMode: enabled\n- setAirplaneMode: {value: disabled}\n- toggleAirplaneMode"))
@@ -332,7 +311,6 @@ func TestAirplaneMode(t *testing.T) {
 	}
 }
 
-// Dark mode commands work on drivers that can read and set it.
 func TestDarkMode(t *testing.T) {
 	d := &darkFake{fakeDriver: &fakeDriver{screen: static()}}
 	mustPass(t, runWith(t, d, quick, "- assertLightMode\n- setDarkMode: enabled\n- assertDarkMode\n- toggleDarkMode\n- assertLightMode\n- toggleDarkMode\n- assertDarkMode\n- setDarkMode: disabled\n- assertLightMode"))
@@ -346,7 +324,6 @@ func TestDarkMode(t *testing.T) {
 	}
 }
 
-// On a driver without dark mode support the commands fail as unsupported (optional: warn).
 func TestDarkModeUnsupported(t *testing.T) {
 	for _, cmd := range []string{"setDarkMode: enabled", "toggleDarkMode", "assertDarkMode", "assertLightMode"} {
 		mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- "+cmd), "is not supported on android")
@@ -358,8 +335,6 @@ func TestDarkModeUnsupported(t *testing.T) {
 	}
 }
 
-// The AI commands need a cloud service tb does not have: they are optional by default (a
-// warning), and fail when made required.
 func TestAICommandsUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
@@ -378,7 +353,6 @@ func TestAICommandsUnsupported(t *testing.T) {
 	}
 }
 
-// waitForAnimationToEnd waits for the UI to settle (15 s at most unless told) and never fails.
 func TestWaitForAnimationToEnd(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
@@ -400,8 +374,6 @@ func TestWaitForAnimationToEnd(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- waitForAnimationToEnd: {timeout: '${(}'}"), "JavaScript error")
 }
 
-// startRecording records to the artifacts folder; stopRecording stops it; one left running
-// is stopped when the flow ends.
 func TestRecording(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -420,7 +392,6 @@ func TestRecording(t *testing.T) {
 	if n := len(f2.called("StopRecording")); n != 1 {
 		t.Errorf("a recording left running: %d stops at the end, want 1", n)
 	}
-	// Also when the flow fails after it started.
 	f3 := &fakeDriver{screen: static()}
 	mustFail(t, runWith(t, f3, o, "- startRecording: r\n- assertVisible: Nope"), "Nope")
 	if n := len(f3.called("StopRecording")); n != 1 {
@@ -428,7 +399,6 @@ func TestRecording(t *testing.T) {
 	}
 }
 
-// A recording that fails to start is not stopped later.
 func TestRecordingErrors(t *testing.T) {
 	o := quick
 	o.ArtifactsDir = t.TempDir()
@@ -444,7 +414,6 @@ func TestRecordingErrors(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, o, "- startRecording: dir/"), "invalid path")
 }
 
-// Commands only multi-device flows run fail elsewhere; unknown ones are not implemented.
 func TestCommandsOutsideTheirContext(t *testing.T) {
 	r := New(&fakeDriver{screen: static()}, quick)
 	for _, tc := range []struct {
@@ -461,7 +430,6 @@ func TestCommandsOutsideTheirContext(t *testing.T) {
 			t.Errorf("%s: err %v, want %q", tc.c.Name, err, tc.want)
 		}
 	}
-	// signal without other devices is a no-op.
 	if err := r.RunCommands(context.Background(), []*flow.Command{{Name: "signal", Signal: "go"}}, "app", nil); err != nil {
 		t.Errorf("signal: %v", err)
 	}

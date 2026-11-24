@@ -1,14 +1,5 @@
 package engine
 
-// Trace: a flow run's step-by-step log, written as it happens. It records what tb did and
-// why, so a failed run can be understood afterwards without running it again: each command
-// as it starts and ends, the element each lookup found (or what it saw when it found none),
-// where each tap went and what the device said it did, every wait and what it waited for,
-// covers and overlays, dialogs answered, and how scrolls went.
-//
-// `tb test` writes it to log.txt in each flow's debug folder; TB_DEBUG=1 also prints it to
-// stderr as it goes.
-
 import (
 	"fmt"
 	"io"
@@ -22,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Trace is safe for concurrent use: a multi-device flow's devices share one, each line
-// tagged with its device's role.
 type Trace struct {
 	mu    sync.Mutex
 	w     io.Writer
@@ -31,8 +20,6 @@ type Trace struct {
 	tee   func(role string, depth int, msg string)
 }
 
-// Tee also hands each line (but a command's own start and end lines) to fn: the timeline
-// files them under the command running at the time.
 func (t *Trace) Tee(fn func(role string, depth int, msg string)) {
 	if t != nil {
 		t.mu.Lock()
@@ -41,15 +28,12 @@ func (t *Trace) Tee(fn func(role string, depth int, msg string)) {
 	}
 }
 
-// NewTrace writes lines to w, timed from now.
 func NewTrace(w io.Writer) *Trace { return &Trace{w: w, start: time.Now()} }
 
-// Printf writes one line: seconds since the start, the role (if any), indentation by depth.
 func (t *Trace) Printf(role string, depth int, format string, a ...any) {
 	t.print(true, role, depth, format, a...)
 }
 
-// command writes a command's own start or end line, which the timeline shows as the step.
 func (t *Trace) command(role string, depth int, format string, a ...any) {
 	t.print(false, role, depth, format, a...)
 }
@@ -65,7 +49,6 @@ func (t *Trace) print(tee bool, role string, depth int, format string, a ...any)
 		b.WriteString("[" + role + "] ")
 	}
 	b.WriteString(strings.Repeat("  ", max(depth, 0)))
-	// A message over several lines keeps the prefix's indentation.
 	b.WriteString(strings.ReplaceAll(strings.TrimRight(msg, "\n"), "\n", "\n"+strings.Repeat(" ", 10+2*max(depth, 0))))
 	b.WriteByte('\n')
 	t.mu.Lock()
@@ -77,8 +60,6 @@ func (t *Trace) print(tee bool, role string, depth int, format string, a ...any)
 	}
 }
 
-// tracef adds a line to the run's trace, at the current command's depth. Without a trace
-// (tb do, tb look), TB_DEBUG=1 prints it to stderr.
 func (r *Runner) tracef(format string, a ...any) {
 	if r.opts.Trace == nil {
 		if debug {
@@ -89,8 +70,6 @@ func (r *Runner) tracef(format string, a ...any) {
 	r.opts.Trace.Printf(r.opts.Role, r.depth, format, a...)
 }
 
-// traceNotes adds what the driver did on its own during the command (web: a JavaScript
-// dialog it answered) to the trace.
 func (r *Runner) traceNotes() {
 	if n, ok := r.Drv.(driver.Noter); ok {
 		for _, note := range n.Notes() {
@@ -99,14 +78,12 @@ func (r *Runner) traceNotes() {
 	}
 }
 
-// traceWait notes a wait that took long enough to matter (50 ms or more).
 func (r *Runner) traceWait(start time.Time, what string) {
 	if time.Since(start) >= 50*time.Millisecond {
 		r.tracef("waited %s %s", since(start), what)
 	}
 }
 
-// similarDesc lists what on s looks like the text a lookup wanted, for the trace.
 func similarDesc(s *ui.Screen, query string) string {
 	if s == nil || query == "" {
 		return ""
@@ -119,7 +96,6 @@ func similarDesc(s *ui.Screen, query string) string {
 	return strings.Join(parts, "; ")
 }
 
-// nodeDesc names a node for the trace: its kind, text, id and bounds.
 func nodeDesc(n *ui.Node) string {
 	if n == nil {
 		return "nothing"
@@ -142,7 +118,6 @@ func nodeDesc(n *ui.Node) string {
 	return b.String()
 }
 
-// actionDesc says what the device reported an action did.
 func actionDesc(res driver.ActionResult) string {
 	var what string
 	switch res.Settle {
@@ -165,35 +140,28 @@ func actionDesc(res driver.ActionResult) string {
 	return fmt.Sprintf("%s (sent in %d ms, waited %d ms%s)", what, res.InjectMs, res.SettleMs, held)
 }
 
-// deliveryDesc says what the device reported about the touch itself (issue #134), "" when it
-// reported nothing: the iOS agent's receipt for a tap on a named target (docs/protocol.md,
-// "iOS targeted input"). An older agent's guarded, probed tap that was not targeted sends no
-// touch: whether it lifted off the target or went unreported is unknown, so it says nothing.
 func deliveryDesc(res driver.ActionResult) string {
 	var parts []string
 	switch {
 	case res.Withheld != "":
-		parts = append(parts, "touch withheld at "+res.Withheld) // it did not reach the app
+		parts = append(parts, "touch withheld at "+res.Withheld)
 	case res.Cancelled || res.Touch == "cancelled":
-		parts = append(parts, "touch cancelled") // it reached the app and was taken back before it lifted
+		parts = append(parts, "touch cancelled")
 	case res.Targeted:
-		parts = append(parts, "touch targeted") // it went down on the target's live frame and lifted
+		parts = append(parts, "touch targeted")
 	case res.Touch == "ended":
-		parts = append(parts, "touch lifted, not seen on the target") // the probe did not find the target at the point
+		parts = append(parts, "touch lifted, not seen on the target")
 	case res.Touch == "none":
-		parts = append(parts, "no touch receipt") // the probe did not report the touch's end in time
+		parts = append(parts, "no touch receipt")
 	case res.Reached:
-		parts = append(parts, "touch reached the target") // issue #324: it went to the watched button's own view, or one inside it
+		parts = append(parts, "touch reached the target")
 	case res.Guarded && !res.Probed:
-		parts = append(parts, "no probe") // the app runs without the probe: no receipt
+		parts = append(parts, "no probe")
 	}
-	// Only the iOS receipt's click: Android reports clicked on every action, and a click can
-	// come after its reply, so its "no click" would often be wrong.
 	if res.Guarded && res.Clicked != nil && *res.Clicked {
 		parts = append(parts, "clicked")
 	}
 	return strings.Join(parts, ", ")
 }
 
-// since is a duration for the trace, in ms.
 func since(t time.Time) string { return fmt.Sprintf("%d ms", time.Since(t).Milliseconds()) }

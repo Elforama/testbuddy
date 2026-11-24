@@ -1,14 +1,5 @@
 package engine
 
-// The run's timeline (Options.Timeline, `tb test --timeline`): each command's start and end,
-// a screenshot of the screen each command left, and where each gesture went.
-//
-// A tap returns as soon as the screen starts reacting, so a screenshot taken right away
-// would still show the screen the tap acted on. The screenshot waits for the screen to
-// settle first, at most timelineSettle. That only adds waiting: tb never acts sooner or on
-// another screen because of it, and no screenshot is taken between finding a target and
-// acting on it. Recording a timeline makes a run slower, not different in what it does.
-
 import (
 	"context"
 	"time"
@@ -18,22 +9,16 @@ import (
 )
 
 const (
-	// timelineScale and timelineFormat keep a timeline's screenshots small enough to embed.
 	timelineScale  = 0.5
 	timelineFormat = "jpeg"
-	// timelineSettle is the longest a screenshot waits for the screen to settle (a screen
-	// that never does, a ticker, is shown as it is then).
 	timelineSettle = time.Second
 )
 
-// timelineStart takes the screenshot the first command's "before" shows.
 func (r *Runner) timelineStart(ctx context.Context) {
 	r.shotDone = false
 	r.timelineShot(ctx)
 }
 
-// timelineEnd records a command's end, with a screenshot of the screen it left when it is a
-// step of its own (not a group of commands) and the screen changed since the last one.
 func (r *Runner) timelineEnd(ctx context.Context, step int, c *flow.Command, desc string, status Status, err error) {
 	tl := r.opts.Timeline
 	if tl == nil {
@@ -49,14 +34,11 @@ func (r *Runner) timelineEnd(ctx context.Context, step int, c *flow.Command, des
 	tl.End(step, desc, string(status), msg)
 }
 
-// timelineShot screenshots the device once its screen settles, unless nothing changed since
-// the last screenshot.
 func (r *Runner) timelineShot(ctx context.Context) {
 	tl := r.opts.Timeline
 	if tl == nil {
 		return
 	}
-	// A failed command's context may be done; its screen is still wanted.
 	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -78,8 +60,6 @@ func (r *Runner) timelineShot(ctx context.Context) {
 	r.shotSeq, r.shotDone = seq, true
 }
 
-// mark records where a gesture went, in the device's coordinates, for the timeline.
-// In annotate mode the recording shows it too (annotate.go).
 func (r *Runner) mark(kind string, pts ...[2]int) {
 	if r.opts.Timeline == nil && !r.opts.Annotate {
 		return

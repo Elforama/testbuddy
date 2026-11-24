@@ -37,8 +37,6 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 	if app == "" || validPkg(app) != nil {
 		return
 	}
-	// Match one visible WebView in the flow's app with one attached DevTools page.
-	// Keep the native tree when the mapping would be ambiguous.
 	var window *ui.Window
 	var container *ui.Node
 	var insertAt int
@@ -68,13 +66,11 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 	defer cancel()
 	width, nodes, err := d.webViewNodes(ctx, app)
 	if err != nil {
-		// The native tree stays; the trace says why (issue #350): a page script the socket
-		// would not take (issue #335) showed only as missing nodes.
 		d.noteOncePerStep("WebView page not read: " + webViewReason(err))
 		return
 	}
 	if width <= 0 {
-		return // no debuggable page, or not one page: the normal case, nothing to say
+		return
 	}
 	bounds := container.Bounds
 	scale := float64(bounds.W()) / float64(width)
@@ -91,9 +87,6 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 	window.Nodes = slices.Insert(window.Nodes, insertAt, nodes...)
 }
 
-// webViewNodes reads the page in app's WebView over its DevTools socket. No error and no width:
-// nothing to read (the app not running, no debuggable page, several pages), which is not
-// news. An error: the page was there to read and could not be (issue #350).
 func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node, error) {
 	out, code, err := d.Sh(ctx, "pidof "+app)
 	if err != nil {
@@ -101,11 +94,8 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node,
 	}
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(out))
 	if code != 0 || parseErr != nil || pid <= 0 {
-		return 0, nil, nil // the app is not running
+		return 0, nil, nil
 	}
-	// No DevTools socket for the pid: the app does not enable WebView debugging, the normal
-	// case; nothing to forward or ask (issue #350 review). The name is matched whole: pid 4242
-	// is not 42420's socket. adb would accept a forward to a socket that is not there.
 	_, code, err = d.Sh(ctx, "grep -q '@webview_devtools_remote_"+strconv.Itoa(pid)+"$' /proc/net/unix")
 	if err != nil {
 		return 0, nil, fmt.Errorf("listing its sockets: %w", err)
@@ -130,7 +120,7 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node,
 	req.Close = true
 	resp, err := webViewHTTP.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("its DevTools socket did not answer: %w", err) // it is listed
+		return 0, nil, fmt.Errorf("its DevTools socket did not answer: %w", err)
 	}
 	defer resp.Body.Close()
 	var pages []struct {
@@ -150,7 +140,7 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node,
 			continue
 		}
 		if socket != nil {
-			return 0, nil, nil // several pages: which one is in the WebView is not known
+			return 0, nil, nil
 		}
 		socket = &url.URL{Scheme: "ws", Host: host, Path: u.Path}
 	}
@@ -167,13 +157,8 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node,
 	return width, nodes, nil
 }
 
-// loopbackAddr is a forward's local address, or a connection's pair of them.
 var loopbackAddr = regexp.MustCompile(`(127\.0\.0\.1|\[::1\]|localhost):\d+(->(127\.0\.0\.1|\[::1\]|localhost):\d+)?`)
 
-// webViewReason is err as the trace says it: without the forward's URL, host or port, which
-// change with each read's forward (adb forward tcp:0), so one cause makes one note per step
-// (issue #350 review). A *url.Error gives its operation and cause, a *net.OpError its
-// operation and the system's error; any address left is named "the forward".
 func webViewReason(err error) string {
 	msg := err.Error()
 	var ue *url.Error

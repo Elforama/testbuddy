@@ -12,16 +12,12 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// Issue #46: type and erase tell the agent how long the host waits for their answer, so the
-// agent answers first (with an error saying what it waited for) instead of the host timing
-// out blind.
 func TestTypingSendsTheReplyLimit(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)
 	if _, err := d.TypeText(context.Background(), "hello", driver.ActionOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	// 5 s timeout + 40 ms a byte + 15 s: the limit call() waits for the reply.
 	if got := num(t, r.last("type"), "replyMs"); got != 20200 {
 		t.Errorf("type replyMs = %v, want 20200 (%v)", got, r.last("type"))
 	}
@@ -31,7 +27,6 @@ func TestTypingSendsTheReplyLimit(t *testing.T) {
 	if got := num(t, r.last("erase"), "replyMs"); got < 20060 {
 		t.Errorf("erase replyMs = %v, want at least 20060 (%v)", got, r.last("erase"))
 	}
-	// A context that ends sooner shortens the wait, and the agent is told so.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if _, err := d.TypeText(ctx, "hello", driver.ActionOpts{}); err != nil {
@@ -48,8 +43,6 @@ func TestTypingSendsTheReplyLimit(t *testing.T) {
 	}
 }
 
-// Type and erase tell the agent CI mode ("ci": true), which decides there how a field is given
-// the focus back; outside CI they send nothing for it, as before.
 func TestTypingSendsCIMode(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -72,10 +65,6 @@ func TestTypingSendsCIMode(t *testing.T) {
 	}
 }
 
-// Issue #301: erasing reads the field back and repairs it once, one DEL record at a time, and
-// its reply limit (replyMs, which the agent answers before) covers the agent's worst case: the
-// DELs, the field read up to 3 caps (300 ms; 1 s in CI mode), a repair DEL a character erased,
-// each confirmed (~300 ms) and waited for up to the cap, and 3 caps of reading after.
 func TestEraseReplyLimitCoversARepair(t *testing.T) {
 	for _, c := range []struct {
 		mode string
@@ -88,7 +77,6 @@ func TestEraseReplyLimitCoversARepair(t *testing.T) {
 			if _, err := d.EraseText(context.Background(), 50, driver.ActionOpts{}); err != nil {
 				t.Fatal(err)
 			}
-			// #301 review: the down arrows before the DELs and before the repair, 100 lines each time.
 			worst := 5*time.Second + 50*20*time.Millisecond + 50*(300*time.Millisecond+c.cap) + 6*c.cap + 2*100*300*time.Millisecond
 			if got := time.Duration(num(t, r.last("erase"), "replyMs")) * time.Millisecond; got < worst {
 				t.Errorf("erase replyMs %v for 50 characters, the agent can take %v (%v)", got, worst, r.last("erase"))
@@ -97,10 +85,6 @@ func TestEraseReplyLimitCoversARepair(t *testing.T) {
 	}
 }
 
-// Issue #46: an agent that gave up before sending any key (the app did not answer
-// accessibility in time) says so with "transient"; in CI mode the host asks once more, as a
-// new request. Outside CI the agent's error fails the step, as nothing was typed. Keys that may
-// have gone are never sent again: such an error is not transient.
 func TestTypingAsksAgainOnlyWhenNoKeyWasSent(t *testing.T) {
 	notStarted := map[string]any{"ok": false, "transient": true,
 		"error": "typing did not start: the app did not answer accessibility for 16.0 s (checking which field has keyboard focus); no keys were sent"}

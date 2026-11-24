@@ -28,7 +28,6 @@ func (p *parser) kvs(n *yaml.Node) ([]KV, error) {
 	return out, nil
 }
 
-// typedScalar keeps a YAML scalar's type (launch arguments are typed intent extras).
 func typedScalar(n *yaml.Node) any {
 	if n.Kind != yaml.ScalarNode {
 		var x any
@@ -66,7 +65,6 @@ func validKey(k string) bool {
 	return false
 }
 
-// normalizeOrientation maps any spelling (landscapeLeft, LANDSCAPE_LEFT) to the enum name, or "".
 func normalizeOrientation(s string) string {
 	k := strings.ToUpper(strings.ReplaceAll(s, "_", ""))
 	switch k {
@@ -82,7 +80,6 @@ func normalizeOrientation(s string) string {
 	return ""
 }
 
-// NormalizeOrientation is exported for the engine (run-time values).
 func NormalizeOrientation(s string) string { return normalizeOrientation(s) }
 
 var _ = filepath.Join

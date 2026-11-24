@@ -18,13 +18,9 @@ import (
 )
 
 var (
-	// answerWait bounds the wait for the watchdog's answer; one that does not answer in time is
-	// ended and the process started directly.
 	answerWait = 10 * time.Second
-	// onGoneWait bounds each stop command the watchdog runs once tb is gone.
 	onGoneWait = 10 * time.Second
-	// grace is how long the interrupted process has to finish its file before it is killed.
-	grace = 10 * time.Second
+	grace      = 10 * time.Second
 )
 
 func init() {
@@ -33,12 +29,8 @@ func init() {
 	}
 }
 
-// watchdogPath is the executable to start as the watchdog, or "" to start processes directly.
-// Tests replace it.
 var watchdogPath = func() string { return SelfPath }
 
-// startWatchdog starts argv under a watchdog. It returns nil and no error when the watchdog
-// cannot be started or does not answer: the caller then starts argv directly.
 func startWatchdog(argv []string, onGone [][]string) (*Proc, error) {
 	self := watchdogPath()
 	if self == "" {
@@ -83,8 +75,6 @@ func startWatchdog(argv []string, onGone [][]string) (*Proc, error) {
 		}
 	case <-time.After(answerWait):
 	}
-	// Not a watchdog of this protocol: end it (its group: it has not been reaped, so the group
-	// is its own) and start the process directly.
 	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	cmd.Process.Kill()
 	cmd.Wait()
@@ -93,36 +83,23 @@ func startWatchdog(argv []string, onGone [][]string) (*Proc, error) {
 	return nil, nil
 }
 
-// Interrupt sends the process SIGINT (tethered: the watchdog passes it on).
 func (p *Proc) Interrupt() error { return p.cmd.Process.Signal(os.Interrupt) }
 
-// Kill ends the process at once (tethered: the watchdog and the process, its group).
 func (p *Proc) Kill() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// The group's id is the watchdog's pid. Until Wait reaps the watchdog, nothing else can have
-	// that pid, nor (POSIX) that group id while the group has members left. Once reaped, an
-	// empty group's id could in principle be taken again, so Kill no longer sends to it. The
-	// one window left is a Kill racing a Wait that has reaped but not yet set waited: the pid
-	// would have to be reused, and made a group leader, within those few instructions, which
-	// would take the system's whole pid space to wrap around first.
 	if p.Tethered && !p.waited {
 		syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 	}
 	p.cmd.Process.Kill()
 }
 
-// runWatchdog starts argv and waits for it to exit (its exit code is the watchdog's), passing
-// SIGINT on to it. When its stdin closes (tb gone), or on SIGTERM or SIGHUP, it runs the onGone
-// commands (JSON in spec), interrupts argv and kills it after grace.
 func runWatchdog(spec string, argv []string) int {
-	// A write to a pipe tb no longer reads (the answer, with tb gone) must fail, not end the
-	// watchdog with the process left running.
 	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
 	sigs := make(chan os.Signal, 4)
-	signal.Notify(sigs, syscall.SIGINT) // how tb stops the process: always heard
+	signal.Notify(sigs, syscall.SIGINT)
 	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGHUP} {
-		if !signal.Ignored(s) { // one ignored when tb started (nohup) stays ignored
+		if !signal.Ignored(s) {
 			signal.Notify(sigs, s)
 		}
 	}
@@ -131,21 +108,15 @@ func runWatchdog(spec string, argv []string) int {
 		fmt.Fprintln(os.Stderr, "tb watchdog:", err)
 		return 2
 	}
-	var penv []string // not nil: nil would hand the process env too
+	var penv []string
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, env+"=") {
 			penv = append(penv, e)
 		}
 	}
-	// The answer comes first, before the process can say anything on the same pipe.
 	if _, err := fmt.Fprintln(os.Stdout, ready); err != nil {
-		return 1 // tb is gone already: nothing started
+		return 1
 	}
-	// The process writes into a pipe of the watchdog's own, which relay copies to tb. It must not
-	// write into tb's pipe itself: once tb is gone, its next write would raise SIGPIPE, and simctl
-	// says "Recording completed" on SIGINT before it writes the file out, so it would die with
-	// the file unfinished (issue #52 review). relay keeps reading after tb is gone and drops the
-	// rest.
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -168,7 +139,7 @@ func runWatchdog(spec string, argv []string) int {
 	exited := make(chan int, 1)
 	go func() {
 		code := exitCode(cmd.Wait())
-		select { // its last words reach tb, unless something it started still holds the pipe
+		select {
 		case <-relayed:
 		case <-time.After(time.Second):
 		}
@@ -191,9 +162,6 @@ func runWatchdog(spec string, argv []string) int {
 			cancel()
 		}
 		if len(onGone) > 0 {
-			// Told to stop, the process gets to end on its own first: adb shell interrupted
-			// at once ends the device's screenrecord before it has written its file out
-			// (issue #52, found on an emulator).
 			select {
 			case code := <-exited:
 				return code
@@ -225,8 +193,6 @@ func runWatchdog(spec string, argv []string) int {
 	}
 }
 
-// relay copies r to w until r ends. After the first failed write (tb gone), it reads on and
-// drops the rest, so the writer never meets a closed pipe.
 func relay(w io.Writer, r io.Reader) {
 	buf := make([]byte, 32*1024)
 	ok := true
@@ -243,8 +209,6 @@ func relay(w io.Writer, r io.Reader) {
 	}
 }
 
-// exitCode is the watchdog's exit code for the process's end: its own, or 1 when a signal
-// ended it.
 func exitCode(err error) int {
 	var ee *exec.ExitError
 	switch {

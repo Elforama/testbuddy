@@ -1,4 +1,3 @@
-// http against the Buddy Bench web server (bench/web): BENCH is its address, from -e.
 var page = http.get(BENCH);
 var missing = http.get(BENCH + 'no-such-page');
 var logged = http.post(BENCH + 'log', {

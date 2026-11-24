@@ -8,13 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// dragRoom is where an up-and-down drag of a list goes (issue #372): the list (box), what shows
-// of it (room: within view, above an Android keyboard, below a bar drawn over its top edge and a
-// section header pinned there, above one over its bottom edge), where a drag may not start
-// (blocked: what else is drawn over the list and takes touches, a list of its own in it, a web
-// view or a map: a drag there is a tap on it, or scrolls it instead), and how far toward the
-// room's edges a drag's ends go (lo, hi: inset 10% from them, off the screen's top 6% and bottom
-// 10%, the system's edge gestures).
 type dragRoom struct {
 	box     *ui.Node
 	room    ui.Rect
@@ -23,8 +16,6 @@ type dragRoom struct {
 	lo, hi  int
 }
 
-// listRoom is the dragRoom of the list under (x, y); false when there is none, or it shows less
-// than a fifth of the screen.
 func listRoom(s *ui.Screen, view ui.Rect, x, y int, own string) (dragRoom, bool) {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	box := verticalListAt(s, x, y, own)
@@ -35,8 +26,6 @@ func listRoom(s *ui.Screen, view ui.Rect, x, y int, own string) (dragRoom, bool)
 	if room.H()*5 < screen.H() {
 		return dragRoom{}, false
 	}
-	// A bar along an edge (half the list's width or more) leaves less of it to see; anything
-	// else drawn over it is only kept clear of where a drag starts.
 	var blocked []ui.Rect
 	for _, c := range coversOverList(s, box, room) {
 		switch {
@@ -61,7 +50,6 @@ func listRoom(s *ui.Screen, view ui.Rect, x, y int, own string) (dragRoom, bool)
 		lo: max(room.T+inset, screen.H()*6/100), hi: min(room.B-inset, screen.H()*9/10)}, true
 }
 
-// clear: a drag may start at (px, py), a margin away from what is blocked.
 func (r dragRoom) clear(px, py int) bool {
 	for _, c := range r.blocked {
 		if px >= c.L-r.margin && px < c.R+r.margin && py >= c.T-r.margin && py < c.B+r.margin {
@@ -71,10 +59,6 @@ func (r dragRoom) clear(px, py int) bool {
 	return true
 }
 
-// start places a drag of travel from about sy, moving the finger by sign (-1 up the screen, +1
-// down): in a column of the room where both its ends are clear, else where its start is, else
-// with its start moved past what blocks it toward its end (and its travel shortened to stay
-// within lo-hi). ok is false when no start is clear. x is the column to try first.
 func (r dragRoom) start(x, sy, travel, sign int) (sx, sy2, travel2 int, ok bool) {
 	xs := []int{r.room.CX(), r.room.L + r.room.W()/4, r.room.L + r.room.W()*3/4}
 	if x > r.room.L && x < r.room.R {
@@ -112,25 +96,6 @@ func (r dragRoom) start(x, sy, travel, sign int) (sx, sy2, travel2 int, ok bool)
 	return sx, sy, travel, r.clear(sx, sy) && travel > 0
 }
 
-// longDrag sizes an up-or-down scrollUntilVisible drag to the list it scrolls (issue #372): the
-// list under (x, y), the drag's start as placed so far. The drag runs across its room (dragRoom)
-// from near one edge to near the other, so one drag moves close to a whole list of content,
-// where the drag from the screen's middle moved 40% of the screen whatever the list's size.
-//
-// It never steps over content: the travel stays below the room's height less the tallest row
-// that shows (one at most half the room tall: a taller one is brought in whole by the partial
-// drag, as before) and a margin, so every row is whole in at least one read, if the drag lands
-// alone. Two drags can land in one update (an app a frame or two behind): that goes unseen
-// unless the list can tell, so only there is the long drag sent as it is: an Android
-// collection that numbers its rows (the gap check sees a skip) and the web (its drags are an
-// instant scrollBy). Anywhere else it needs at least two rows to check it by (dragGuard, when
-// guarded: the caller has not seen a check fail), and stops short of carrying the second of
-// them out of the room; without them it stays under half the room (the cap placeVertical
-// keeps for collections). The content still stops where the finger lifts: the drag's own shape
-// (ActionOpts.Drag) is not changed, only its length.
-//
-// ok is false, for the caller to drag as it did (y to ey), when there is no such list, it shows
-// less than a fifth of the screen, or the long drag would be no longer than that one.
 func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, own string, guarded bool) (sx, sy, tx, ty int, g *dragGuard, ok bool) {
 	r, found := listRoom(s, view, x, y, own)
 	if !found {
@@ -160,7 +125,7 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, own string, 
 	if travel <= base {
 		return 0, 0, 0, 0, nil, false
 	}
-	sign, from := -1, r.hi // a drag up the screen, from near the room's bottom
+	sign, from := -1, r.hi
 	if !down {
 		sign, from = 1, r.lo
 	}
@@ -177,30 +142,19 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, own string, 
 	return sx, sy, sx, sy + sign*travel, g, true
 }
 
-// dragGuard checks a long drag that the list could not show a skip of (longDrag, issue #372)
-// by its anchors: rows whole in the room in the read before it, by label and id, each the only
-// one so named on screen (a label repeated, or a sticky header, says nothing of where the list
-// went). The drag counts when the next read that shows the list moved has two of them again,
-// each the only one so named, its edge (the one the content moves away from: the other may be
-// cut at the list's edge) in the room, moved the drag's way by at least half the drag (less, at
-// a list's end, once the app has settled: less cannot skip) and at most the room less its
-// height and a margin (so the rows between showed), and both moved alike
-// (a label repeated about once a screen can match one by chance, not two moving together).
-// Else the content may have moved by two drags at once, and the rows in between never showed.
 type dragGuard struct {
 	anchors map[string]ui.Rect
-	down    bool // the content moves up the screen (scrolling DOWN)
+	down    bool
 	room    ui.Rect
 	margin  int
-	x       int // the drag: (x, sy) to (x, ty)
+	x       int
 	sy, ty  int
 	travel  int
-	waited  bool // a read that did not confirm it was followed by a wait for the app to settle
-	back    bool // a drag back after a drag that failed its check
-	tries   int  // drags back sent for that drag
+	waited  bool
+	back    bool
+	tries   int
 }
 
-// anchorKey names a row across reads: its label and id ("" when it has no label).
 func anchorKey(n *ui.Node) string {
 	if l := n.Label(); l != "" {
 		return l + "#" + n.ID
@@ -208,7 +162,6 @@ func anchorKey(n *ui.Node) string {
 	return ""
 }
 
-// keyCounts counts the nodes on screen by anchorKey.
 func keyCounts(s *ui.Screen) map[string]int {
 	counts := map[string]int{}
 	for _, n := range s.Nodes {
@@ -219,8 +172,6 @@ func keyCounts(s *ui.Screen) map[string]int {
 	return counts
 }
 
-// listAnchors is what in box shows whole within room and is the only node so named on screen,
-// by anchorKey, with its bounds.
 func listAnchors(s *ui.Screen, box *ui.Node, room ui.Rect) map[string]ui.Rect {
 	counts := keyCounts(s)
 	anchors := map[string]ui.Rect{}
@@ -234,9 +185,6 @@ func listAnchors(s *ui.Screen, box *ui.Node, room ui.Rect) map[string]ui.Rect {
 	return anchors
 }
 
-// anchorReach is the longest drag that keeps the edge of the second anchor nearest the room's
-// far side in the room (a margin in): the edge the content moves away from, as confirmed
-// measures. 0 with fewer than two anchors.
 func anchorReach(anchors map[string]ui.Rect, room ui.Rect, down bool, margin int) int {
 	var edges []int
 	for _, a := range anchors {
@@ -253,9 +201,6 @@ func anchorReach(anchors map[string]ui.Rect, room ui.Rect, down bool, margin int
 	return edges[1] - margin
 }
 
-// confirmed: s shows the drag landed as one (dragGuard), moving the content by shift. A drag
-// back with fewer than two anchors cannot be checked: that it moved the list is all there is to
-// go by.
 func (g *dragGuard) confirmed(s *ui.Screen) (shift int, ok bool) {
 	if g.back && len(g.anchors) < 2 {
 		return g.travel, true
@@ -272,9 +217,6 @@ func (g *dragGuard) confirmed(s *ui.Screen) (shift int, ok bool) {
 		if !g.down {
 			edge, moved = n.Bounds.T, n.Bounds.T-was.T
 		}
-		// Less than half the drag: a list at its end, or an app still showing the drag. Once
-		// the app has settled (waited), taken for the end; the caller keeps the next drag short
-		// enough that the rest, landing with it, skips nothing (shortCap).
 		if edge < g.room.T || edge > g.room.B || moved < 0 || (moved*2 < g.travel && !g.waited) ||
 			moved > g.room.H()-was.H()-g.margin {
 			continue
@@ -290,10 +232,6 @@ func (g *dragGuard) confirmed(s *ui.Screen) (shift int, ok bool) {
 	return 0, false
 }
 
-// shortCap is the longest next drag of the list at (x, y) after one that moved the content
-// missing short of its length (a list at its end, or an app still behind): should the rest
-// land with that drag, the two together still leave every row whole in some read (the room
-// less its tallest row and a margin).
 func shortCap(s *ui.Screen, view ui.Rect, x, y int, own string, missing int) int {
 	room, margin, tallest := view, minDrag(ui.Rect{R: s.Width, B: s.Height}), 0
 	if r, ok := listRoom(s, view, x, y, own); ok {
@@ -302,8 +240,6 @@ func shortCap(s *ui.Screen, view ui.Rect, x, y int, own string, missing int) int
 	return max(margin, room.H()-missing-tallest-margin)
 }
 
-// tallestRow is the height of the tallest node in box that shows in room and is at most half
-// its height (a taller one is brought in whole by the partial drag).
 func tallestRow(box *ui.Node, room ui.Rect) int {
 	tallest := 0
 	box.Walk(func(d *ui.Node) bool {
@@ -315,16 +251,12 @@ func tallestRow(box *ui.Node, room ui.Rect) int {
 	return tallest
 }
 
-// dragBack is the drag back after g failed its check: from where g ended to where it began; or,
-// g being a drag back that failed its own, that drag once more. It goes across the room r of the
-// list as s shows it, starting clear (dragRoom.start), checked by the anchors s shows; nil when
-// no start is clear.
 func (g *dragGuard) dragBack(s *ui.Screen, r dragRoom) *dragGuard {
 	down, from, tries := !g.down, g.ty, 1
 	if g.back {
 		down, from, tries = g.down, g.sy, g.tries+1
 	}
-	sign := 1 // the finger moves down the screen: the content too
+	sign := 1
 	if down {
 		sign = -1
 	}
@@ -336,10 +268,6 @@ func (g *dragGuard) dragBack(s *ui.Screen, r dragRoom) *dragGuard {
 		x: x, sy: sy, ty: sy + sign*travel, travel: travel, back: true, tries: tries}
 }
 
-// pinnedHeader is a row of box near the top of its room drawn over other rows (a sticky
-// section header): of the rows (box's children, half its width or more) whose top is within the
-// room's top tenth, the one overlapping the most others (ties: the one reaching lowest), or nil.
-// What it is drawn over does not show.
 func pinnedHeader(box *ui.Node, room ui.Rect) *ui.Node {
 	wide := func(n *ui.Node) bool { return !n.Bounds.Empty() && n.Bounds.W()*2 >= room.W() }
 	var best *ui.Node
@@ -362,15 +290,13 @@ func pinnedHeader(box *ui.Node, room ui.Rect) *ui.Node {
 	return best
 }
 
-// ownScrollers are the parts of room where a drag would move something in box other than box:
-// a list of its own that scrolls up and down, a web view, a map.
 func ownScrollers(box *ui.Node, room ui.Rect) []ui.Rect {
 	var out []ui.Rect
 	box.Walk(func(d *ui.Node) bool {
 		if d == box {
 			return true
 		}
-		screen := ui.Rect{R: 1 << 30, B: 1 << 30} // its own shape, wherever it is
+		screen := ui.Rect{R: 1 << 30, B: 1 << 30}
 		c := d.Class
 		if (d.Scrollable && !sidewaysShaped(d, screen)) || strings.Contains(c, "WebView") || strings.Contains(c, "MapView") || c == "Map" {
 			if r := d.Bounds.Intersect(room); !r.Empty() {
@@ -383,11 +309,6 @@ func ownScrollers(box *ui.Node, room ui.Rect) []ui.Rect {
 	return out
 }
 
-// verticalListAt is the list an up-and-down drag at (x, y) scrolls: the innermost scrolling node
-// there that is not a sideways list (a shelf in a page: an up-and-down drag there moves the
-// page), or the list holding it when it shows less than half as much (a list of its own in a
-// row), or nil. Never past the list named own (listKey): the one the scroll chose to drag,
-// as the list holding the element (ownList, placeVertical: a short list in a scrolling page).
 func verticalListAt(s *ui.Screen, x, y int, own string) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	vertical := func(n *ui.Node) bool {
@@ -410,12 +331,6 @@ func verticalListAt(s *ui.Screen, x, y int, own string) *ui.Node {
 	return best
 }
 
-// coversOverList is what is drawn over the list box that a touch there would reach instead of
-// it, cut to room: on the web, what the browser's hit test found over the list or its rows;
-// elsewhere, a window above the list's (smaller than half the screen: a bar, a keyboard, a
-// popup), and in its own window a node outside the list, drawn over it (by the drawing order
-// where reported, else listed after it, or an iOS bar) that takes touches. A node as large as
-// half the screen is a layout around the screen, not a cover (as occlusion.At has it).
 func coversOverList(s *ui.Screen, box *ui.Node, room ui.Rect) []ui.Rect {
 	var out []ui.Rect
 	add := func(r ui.Rect) {
@@ -466,8 +381,6 @@ func coversOverList(s *ui.Screen, box *ui.Node, room ui.Rect) []ui.Rect {
 	return out
 }
 
-// takesTouchesAnywhere: c, or a node in it, handles touches (occlusion.TakesTouches, at any
-// point). A bar counts whole, not only its buttons: what it is drawn over does not show.
 func takesTouchesAnywhere(platform string, c *ui.Node) bool {
 	found := false
 	c.Walk(func(d *ui.Node) bool {

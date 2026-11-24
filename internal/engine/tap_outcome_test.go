@@ -6,8 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// AND-003: local result evidence must not use a newly inserted label, an
-// ambiguous/reused ID, another window, or another interactive control.
 func TestAdjacentTapResultRequiresExistingUnambiguousLabel(t *testing.T) {
 	for _, kind := range []string{"changed", "unchanged", "new", "duplicate", "interactive", "other window", "not adjacent"} {
 		t.Run(kind, func(t *testing.T) {

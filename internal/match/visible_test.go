@@ -6,8 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// VisibleShare is the fraction of a rectangle on screen; a rectangle with exactly one zero
-// dimension counts as fully visible, a zero-size or inverted one as not visible.
 func TestVisibleShare(t *testing.T) {
 	scr := rect(0, 0, 1000, 2000)
 	cases := []struct {
@@ -42,16 +40,14 @@ func TestVisibleShare(t *testing.T) {
 	}
 }
 
-// Visible keeps nodes at least 10% on screen, and any node with a kept descendant, in
-// pre-order.
 func TestVisiblePrunesOffScreen(t *testing.T) {
-	scroller := &ui.Node{Depth: 1, Text: "list", Bounds: rect(0, 0, 1000, 5000)} // 40% visible
+	scroller := &ui.Node{Depth: 1, Text: "list", Bounds: rect(0, 0, 1000, 5000)}
 	onRow := leaf(2, "on", rect(0, 100, 1000, 200))
 	offRow := leaf(2, "off", rect(0, 3000, 1000, 3100))
-	tenth := leaf(2, "tenth", rect(0, 1910, 100, 2810))   // exactly 10%
-	sliver := leaf(2, "sliver", rect(0, 1920, 100, 2820)) // under 10%
+	tenth := leaf(2, "tenth", rect(0, 1910, 100, 2810))
+	sliver := leaf(2, "sliver", rect(0, 1920, 100, 2820))
 	offParent := &ui.Node{Depth: 1, Text: "offParent", Bounds: rect(0, 4000, 1000, 6000)}
-	visibleKid := leaf(2, "kid", rect(0, 0, 50, 50)) // drawn outside its parent
+	visibleKid := leaf(2, "kid", rect(0, 0, 50, 50))
 	hiddenKid := leaf(2, "hiddenKid", rect(0, 4100, 50, 4150))
 	s := mkScreen(root(), scroller, onRow, offRow, tenth, sliver, offParent, visibleKid, hiddenKid)
 
@@ -62,7 +58,6 @@ func TestVisiblePrunesOffScreen(t *testing.T) {
 	}
 }
 
-// When nothing qualifies (e.g. an unknown screen size), every node is a candidate.
 func TestVisibleFallsBackToAllNodes(t *testing.T) {
 	s := mkScreen(leaf(0, "a", rect(0, 3000, 100, 3100)), leaf(1, "b", rect(0, 4000, 100, 4100)))
 	if got := Visible(s); len(got) != 2 {
@@ -78,7 +73,6 @@ func TestVisibleFallsBackToAllNodes(t *testing.T) {
 	}
 }
 
-// Visible looks at every window, keeping their order.
 func TestVisibleAcrossWindows(t *testing.T) {
 	s := &ui.Screen{Width: 1000, Height: 2000, Windows: []*ui.Window{
 		{Type: "keyboard", Nodes: []*ui.Node{leaf(0, "key", rect(0, 1500, 100, 1600)), leaf(0, "offkey", rect(0, 2500, 100, 2600))}},
@@ -90,7 +84,6 @@ func TestVisibleAcrossWindows(t *testing.T) {
 	}
 }
 
-// Find works across windows: a keyboard window's nodes are candidates like the app's.
 func TestFindAcrossWindows(t *testing.T) {
 	done := leaf(0, "Done", rect(800, 1500, 1000, 1600))
 	done.Clickable = true

@@ -9,10 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// The driver keeps each JavaScript dialog it answered, with what it said and how tb answered
-// it (assertDialog, issue #91): Notes hands each note out once, for the trace, while Dialogs
-// lists those since a mark, the same to every caller. A frame's dialog (its own session) is
-// kept with the frame's address.
 func TestDialogsKept(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)
@@ -47,7 +43,6 @@ func TestDialogsKept(t *testing.T) {
 		{Type: "beforeunload", URL: "http://x/", Answer: "left the page"},
 	}
 	ds, next := d.Dialogs(0)
-	// Each keeps the line the trace got for it (tb do and tb look print it).
 	notes := d.Notes()
 	for i := range ds {
 		if i >= len(notes) || ds[i].Note != notes[i] {
@@ -64,13 +59,11 @@ func TestDialogsKept(t *testing.T) {
 	if ds, again := d.Dialogs(next); len(ds) != 0 || again != next {
 		t.Errorf("Dialogs since the last = %+v, %d", ds, again)
 	}
-	// Reading the trace's notes hands nothing out of the log.
 	if ds, _ := d.Dialogs(0); len(ds) != len(all) {
 		t.Errorf("Dialogs after Notes: %d, want %d", len(ds), len(all))
 	}
 }
 
-// Only the last dialogLogMax dialogs are kept; a mark from before them lists what is left.
 func TestDialogsKeptBounded(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)

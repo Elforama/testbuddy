@@ -8,37 +8,32 @@ import (
 	"strings"
 )
 
-// fix is how a finding can be fixed in its source: by inserting a selector (an id, testID,
-// data-testid or testTag) named after what the element does.
 type fix struct {
-	src    string                   // the file's source when it was checked
-	off    int                      // where the text goes
-	wrap   int                      // where a "(" goes that the inserted text closes; 0 for none
-	base   string                   // what the element does ("close"), in any case; "" when nothing says
-	role   string                   // what it is: button, field, link, ...
-	sep    string                   // "_" for Android resource names, "-" otherwise
-	insert func(name string) string // the text inserted at off
-	added  func(name string) string // the selector added, as the report shows it
-	imprt  string                   // an import the inserted code needs (Compose's testTag)
+	src    string
+	off    int
+	wrap   int
+	base   string
+	role   string
+	sep    string
+	insert func(name string) string
+	added  func(name string) string
+	imprt  string
 }
 
-// FixReport is what Fix changed (or, in a dry run, would change), and what it left for a person.
 type FixReport struct {
 	DryRun bool
 	Fixed  []Fixed
 	Left   []Left
 }
 
-// Fixed is one element given a selector. Line is where it is after the fix.
 type Fixed struct {
 	File    string
 	Line    int
 	Rule    string
 	Element Element
-	Added   string // the selector added: android:id="@+id/close_button", testID="close-button", ...
+	Added   string
 }
 
-// Left is a finding Fix does not change, and why.
 type Left struct {
 	File    string
 	Line    int
@@ -47,10 +42,6 @@ type Left struct {
 	Reason  string
 }
 
-// Fix adds the missing selector to every finding of res that can be fixed in its source, and
-// writes the files (unless dryRun). Names come from what the element does (its handler, its
-// icon, its link, its image) and are unique in the file. Other findings are left, with why.
-// Nothing is written when a file changed since it was checked.
 func Fix(res *Result, dryRun bool) (*FixReport, error) {
 	rep := &FixReport{DryRun: dryRun}
 	type change struct {
@@ -137,7 +128,6 @@ func Fix(res *Result, dryRun bool) (*FixReport, error) {
 	return rep, nil
 }
 
-// leftReason says why a finding has no automatic fix.
 func leftReason(f Finding) string {
 	if f.manual != "" {
 		return f.manual
@@ -152,8 +142,6 @@ func leftReason(f Finding) string {
 var selectorName = regexp.MustCompile(`(?i)\b(?:id|testid|data-testid|data-test|data-cy|testtag|accessibilityidentifier)` +
 	`\s*[=(:]\s*\{?\s*["']([\w\-]+)["']|@\+?id/(\w+)`)
 
-// takenNames are the ids in the source (ids, testIDs, data-testids, testTags): a new name
-// must not reuse one.
 func takenNames(src string) map[string]bool {
 	taken := map[string]bool{}
 	for _, m := range selectorName.FindAllStringSubmatch(src, -1) {
@@ -162,8 +150,6 @@ func takenNames(src string) map[string]bool {
 	return taken
 }
 
-// uniqueName is the fix's name with its role, made unique in the file (close-button,
-// close-button-2, ...), and marks it taken.
 func uniqueName(fx *fix, taken map[string]bool) string {
 	norm := kebab
 	if fx.sep == "_" {
@@ -178,7 +164,6 @@ func uniqueName(fx *fix, taken map[string]bool) string {
 	return try
 }
 
-// withRole ends a name with its role: close + button = close-button.
 func withRole(base, role, sep string) string {
 	switch {
 	case base == "":
@@ -189,7 +174,6 @@ func withRole(base, role, sep string) string {
 	return base + sep + role
 }
 
-// imported reports whether a Kotlin file imports name (directly or with its package's *).
 func imported(src, name string) bool {
 	pkg := name[:strings.LastIndexByte(name, '.')]
 	re := regexp.MustCompile(`(?m)^\s*import\s+(` + regexp.QuoteMeta(name) + `|` + regexp.QuoteMeta(pkg) + `\.\*)\s*$`)
@@ -198,8 +182,6 @@ func imported(src, name string) bool {
 
 var importLine = regexp.MustCompile(`(?m)^\s*(import|package)\s.*$`)
 
-// importAt is where an import line goes (after the last import, else the package line, else
-// at the top) and the text to insert there.
 func importAt(src, name string) (int, string) {
 	line := "import " + name
 	ms := importLine.FindAllStringIndex(src, -1)
@@ -214,20 +196,15 @@ func importAt(src, name string) (int, string) {
 }
 
 var (
-	callName  = regexp.MustCompile(`([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(`)
-	identPath = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$`)
-	// jsKeywords are never a handler's name.
+	callName   = regexp.MustCompile(`([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(`)
+	identPath  = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$`)
 	jsKeywords = map[string]bool{"function": true, "if": true, "return": true, "async": true, "await": true,
 		"new": true, "typeof": true, "void": true, "while": true, "for": true, "switch": true, "catch": true}
-	// genericNames say nothing about what an element does.
 	genericNames = map[string]bool{"press": true, "click": true, "tap": true, "pressed": true, "clicked": true,
 		"tapped": true, "longpress": true, "change": true, "event": true, "handler": true, "callback": true,
 		"noop": true, "fn": true, "it": true, "true": true, "false": true, "null": true, "undefined": true}
 )
 
-// handlerName is what a click handler says the element does: `{handleClose}`,
-// `{() => onDelete(id)}`, `closeDialog()`, `{ viewModel.save() }` give close, delete,
-// closeDialog and save. "" when it says nothing.
 func handlerName(v string) string {
 	v = strings.TrimSpace(v)
 	if strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}") {
@@ -262,8 +239,6 @@ func handlerName(v string) string {
 	return strings.ToLower(name[:1]) + name[1:]
 }
 
-// kebab turns any name into lower-case words joined by "-": openSettings, ic_close and
-// HTTPServer give open-settings, ic-close and http-server. Letters outside ASCII are dropped.
 func kebab(s string) string {
 	var words []string
 	var cur []byte
@@ -283,7 +258,6 @@ func kebab(s string) string {
 		}
 		if upper(c) && len(cur) > 0 {
 			prev := cur[len(cur)-1]
-			// fooBar, and the last capital of HTTPServer
 			if lower(prev) || (i+1 < len(s) && s[i+1] >= 'a' && s[i+1] <= 'z' && upper(prev)) {
 				flush()
 			}
@@ -294,11 +268,8 @@ func kebab(s string) string {
 	return strings.Join(words, "-")
 }
 
-// snake is kebab with "_": an Android resource name.
 func snake(s string) string { return strings.ReplaceAll(kebab(s), "-", "_") }
 
-// resourceName is an image resource's name without its kind prefix: @drawable/ic_close and
-// R.drawable.ic_close give close.
 func resourceName(v string) string {
 	v = strings.TrimSpace(v)
 	if i := strings.LastIndexAny(v, "/."); i >= 0 {
@@ -312,7 +283,6 @@ func resourceName(v string) string {
 	return v
 }
 
-// hrefName is the last part of a link's path: /settings/ gives settings, #top gives top.
 func hrefName(v string) string {
 	v = strings.TrimSpace(v)
 	if strings.ContainsAny(v, "{}$") {
@@ -336,7 +306,6 @@ func hrefName(v string) string {
 	return v
 }
 
-// iconName is the name of an icon inside t: <Icon name="close"/> gives close, <CloseIcon/> Close.
 func iconName(t *tag) string {
 	found := ""
 	t.walk(func(d *tag) bool {
@@ -361,7 +330,6 @@ func iconName(t *tag) string {
 	return found
 }
 
-// tagNameEnd is the offset just past the name of the tag whose '<' is at off.
 func tagNameEnd(src string, off int) int {
 	i := off + 1
 	for i < len(src) && isNameChar(src[i]) {
@@ -370,7 +338,6 @@ func tagNameEnd(src string, off int) int {
 	return i
 }
 
-// attrFix is a fix that inserts ` attr="NAME"` (with format giving the value) after a tag's name.
 func attrFix(src string, off int, attr, format, base, role, sep string) *fix {
 	value := func(name string) string { return attr + `="` + fmt.Sprintf(format, name) + `"` }
 	return &fix{off: tagNameEnd(src, off), base: base, role: role, sep: sep,

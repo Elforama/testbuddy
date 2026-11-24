@@ -1,15 +1,9 @@
-// Flutter's scroll physics can turn the ordinary end of a drag into a fling. Ask the
-// in-process adapter about the point first. A missing bridge, a native child or an
-// unresponsive process always uses the platform gesture.
 import XCTest
 import notify
 
 enum FlutterAdapter {
     private static let requests = NSLock()
 
-    // XCTest flattens a Flutter list into an empty scroll view followed by its rows.
-    // Only restore that edge inside a confirmed Flutter surface, and only when every
-    // sibling fits the viewport. Nested lists are handled by the same preorder walk.
     static func isListGroup(_ children: [XCUIElementSnapshot], pid: Int32, window: CGRect) -> Bool {
         guard children.count > 1, let list = children.first, list.elementType == .scrollView,
               list.children.isEmpty, !list.frame.isEmpty else { return false }

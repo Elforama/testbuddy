@@ -13,7 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// do runs commands, prints a line per command, then what changed; passing commands are recorded.
 func TestDoRunsAndRecords(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -44,7 +43,6 @@ func TestDoRunsAndRecords(t *testing.T) {
 	}
 }
 
-// After the first do, do prints only what changed.
 func TestDoPrintsDiff(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -62,8 +60,6 @@ func TestDoPrintsDiff(t *testing.T) {
 	}
 }
 
-// A failing command is marked FAILED with its error and similar elements, exits 1, and is
-// not recorded; the commands before it are.
 func TestDoFailure(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -96,7 +92,6 @@ func TestDoFailure(t *testing.T) {
 	}
 }
 
-// Optional (warned) and skipped commands are marked and still recorded.
 func TestDoWarnedAndSkipped(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -115,7 +110,6 @@ func TestDoWarnedAndSkipped(t *testing.T) {
 	}
 }
 
-// @refs from the last look become selectors, both when run and when recorded.
 func TestDoResolvesRefs(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -134,7 +128,6 @@ func TestDoResolvesRefs(t *testing.T) {
 	}
 }
 
-// A ref with no listed screen, or not on it, is refused with exit 2 before anything runs.
 func TestDoBadRefs(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -154,7 +147,6 @@ func TestDoBadRefs(t *testing.T) {
 	}
 }
 
-// Command YAML that does not parse is refused with exit 2.
 func TestDoParseError(t *testing.T) {
 	s := New()
 	addDev(s, newFake("e", "E", device.Android), "")
@@ -168,7 +160,6 @@ func TestDoParseError(t *testing.T) {
 	}
 }
 
-// The app for launchApp & co is --app (remembered), else the open app, else the foreground app.
 func TestDoAppID(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -183,7 +174,6 @@ func TestDoAppID(t *testing.T) {
 	if d.AppID != "com.given" {
 		t.Errorf("AppID %q", d.AppID)
 	}
-	// no app known and no foreground: launchApp fails, and do says so
 	f2 := newFake("e2", "E2", device.Android)
 	f2.fgErr = errBoom
 	s2 := New()
@@ -194,7 +184,6 @@ func TestDoAppID(t *testing.T) {
 	}
 }
 
-// -e values reach the commands.
 func TestDoEnv(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -205,7 +194,6 @@ func TestDoEnv(t *testing.T) {
 	}
 }
 
-// do still reports results when the screen cannot be read afterwards (no diff).
 func TestDoScreenUnreadable(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -217,7 +205,6 @@ func TestDoScreenUnreadable(t *testing.T) {
 	}
 }
 
-// Commands for one device run one `do` at a time.
 func TestDoSerializedPerDevice(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -248,8 +235,6 @@ func TestDoSerializedPerDevice(t *testing.T) {
 	}
 }
 
-// splitItems cuts command YAML into one snippet per top-level item; a single command
-// without a dash becomes one item.
 func TestSplitItems(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -270,7 +255,6 @@ func TestSplitItems(t *testing.T) {
 	}
 }
 
-// An indented command list (valid YAML that `tb do -` passes through) is recorded item by item.
 func TestSplitItemsIndentedList(t *testing.T) {
 	got, _ := splitItems("  - tapOn: A\n  - back\n")
 	if len(got) != 2 {
@@ -278,8 +262,6 @@ func TestSplitItemsIndentedList(t *testing.T) {
 	}
 }
 
-// Text before the first list item (a comment, a blank line) does not shift which YAML is
-// recorded for which command.
 func TestDoRecordsWithLeadingComment(t *testing.T) {
 	s := New()
 	addDev(s, newFake("e", "E", device.Android), "")
@@ -289,7 +271,6 @@ func TestDoRecordsWithLeadingComment(t *testing.T) {
 	}
 }
 
-// fmtDur prints milliseconds under a second, else tenths of seconds.
 func TestFmtDur(t *testing.T) {
 	for d, want := range map[time.Duration]string{0: "0ms", 12 * time.Millisecond: "12ms", 999 * time.Millisecond: "999ms", time.Second: "1.0s", 2345 * time.Millisecond: "2.3s"} {
 		if got := fmtDur(d); got != want {
@@ -298,7 +279,6 @@ func TestFmtDur(t *testing.T) {
 	}
 }
 
-// fail builds an exit response with a formatted message.
 func TestFail(t *testing.T) {
 	r := fail(3, "x=%d %s", 7, "y")
 	if r.OK || r.Exit != 3 || r.Text != "x=7 y" {
@@ -306,8 +286,6 @@ func TestFail(t *testing.T) {
 	}
 }
 
-// issue #213: `tb do "- back"` on iOS (and the MCP run tool, which goes through do) says
-// that back did nothing, in the text and in the step's JSON, instead of a bare "ok".
 func TestDoIOSBackSaysItDoesNothing(t *testing.T) {
 	s := New()
 	f := newFake("SIM-1", "iPhone 17", device.IOS)

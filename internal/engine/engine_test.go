@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// An element that appears later is found when the device reports the change, with no
-// reads in between (no polling).
 func TestFindWaitsOnEvents(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -41,7 +39,6 @@ func TestFindWaitsOnEvents(t *testing.T) {
 	}
 }
 
-// assertNotVisible passes on a screen whose ticker never stops changing.
 func TestAbsentOnRestlessScreen(t *testing.T) {
 	f := &fakeDriver{}
 	var tick atomic.Int64
@@ -57,7 +54,7 @@ func TestAbsentOnRestlessScreen(t *testing.T) {
 				return
 			case <-time.After(50 * time.Millisecond):
 				tick.Add(1)
-				f.change(false) // restless: changes keep coming, never "settled"
+				f.change(false)
 			}
 		}
 	}()
@@ -70,7 +67,6 @@ func TestAbsentOnRestlessScreen(t *testing.T) {
 	}
 }
 
-// A tap on a never-still screen happens at once, at the element's centre.
 func TestTapWhileTicking(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = func() []*ui.Node {
@@ -102,7 +98,6 @@ func TestTapWhileTicking(t *testing.T) {
 	}
 }
 
-// Optional lookups that fail are warnings; the flow continues.
 func TestOptionalWarns(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -116,8 +111,6 @@ func TestOptionalWarns(t *testing.T) {
 	}
 }
 
-// list is a scrolling list of n rows, 50 px each, moved up by the offset; a drag moves it by
-// the drag's length (no fling), up to the list's end.
 func (f *fakeDriver) list(n int) *atomic.Int64 {
 	var off atomic.Int64
 	f.screen = func() []*ui.Node {
@@ -126,7 +119,7 @@ func (f *fakeDriver) list(n int) *atomic.Int64 {
 		for i := 0; i < n; i++ {
 			top := 100 + i*50 - int(off.Load())
 			if top+50 <= 0 || top >= 800 {
-				continue // off screen: a recycled row
+				continue
 			}
 			row := f.node(fmt.Sprintf("Item %d", i), "", top)
 			row.Depth = 1
@@ -145,8 +138,6 @@ func (f *fakeDriver) list(n int) *atomic.Int64 {
 	return &off
 }
 
-// scrollUntilVisible drags without flinging and drags again right after each read, with no
-// settle between drags.
 func TestScrollDragsWithoutWaiting(t *testing.T) {
 	f := &fakeDriver{}
 	f.list(60)
@@ -159,7 +150,6 @@ func TestScrollDragsWithoutWaiting(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Item 40 starts at 2100 px; each drag (across 80% of the list, issue #372) moves 640 px.
 	if len(f.swipes) != 3 {
 		t.Errorf("%d drags, want 3", len(f.swipes))
 	}
@@ -170,8 +160,6 @@ func TestScrollDragsWithoutWaiting(t *testing.T) {
 	}
 }
 
-// At the list's end a drag moves nothing: the next one waits for the screen to change
-// rather than dragging over and over.
 func TestScrollStopsDraggingAtListEnd(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -187,16 +175,14 @@ func TestScrollStopsDraggingAtListEnd(t *testing.T) {
 	}
 }
 
-// A tap returns once the UI starts reacting. An assertion after it runs at once; a command
-// that needs a still screen (typing) waits for the UI to settle first.
 func TestTapDefersSettle(t *testing.T) {
 	for _, tc := range []struct {
 		next  string
 		waits int64
 	}{
-		{"- assertVisible: Done", 1}, // findStable before the tap only
-		{"- inputText: hello", 2},    // and the settle the tap left
-		{"- tapOn: {text: Done}", 3}, // the next tap settles before it looks, then as always
+		{"- assertVisible: Done", 1},
+		{"- inputText: hello", 2},
+		{"- tapOn: {text: Done}", 3},
 	} {
 		f := &fakeDriver{}
 		f.screen = func() []*ui.Node { return []*ui.Node{f.node("Go", "go", 0), f.node("Done", "", 100)} }
@@ -212,8 +198,6 @@ func TestTapDefersSettle(t *testing.T) {
 	}
 }
 
-// A paging list springs back from a drag shorter than a page: after two drags that bring
-// nothing new into view, the swipes fling (classic swipes), which turn the page.
 func TestScrollFlingsWhenDragsDoNotMove(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -228,7 +212,7 @@ func TestScrollFlingsWhenDragsDoNotMove(t *testing.T) {
 		f.mu.Lock()
 		o := f.swipes[len(f.swipes)-1]
 		f.mu.Unlock()
-		if !o.Drag { // only a fling turns the page
+		if !o.Drag {
 			page.Add(1)
 			f.change(true)
 		}
@@ -249,17 +233,15 @@ func TestScrollFlingsWhenDragsDoNotMove(t *testing.T) {
 	}
 }
 
-// A row under a sticky footer is dragged just clear of it, then tapped where it shows.
 func TestTapClearsFooter(t *testing.T) {
 	f := &fakeDriver{}
 	f.list(30)
 	rows := f.screen
 	f.screen = func() []*ui.Node {
-		footer := f.node("Checkout", "footer", 700) // drawn after the list, over its bottom
+		footer := f.node("Checkout", "footer", 700)
 		footer.Bounds = ui.Rect{R: 400, T: 700, B: 800}
 		return append(rows(), footer)
 	}
-	// Item 12's row starts at 700 (100 + 12*50): its middle (725) is under the footer.
 	if _, err := run(t, f, `- tapOn: "Item 12"`); err != nil {
 		t.Fatal(err)
 	}
@@ -273,8 +255,6 @@ func TestTapClearsFooter(t *testing.T) {
 	}
 }
 
-// A button the keyboard half covers, on a screen that does not scroll, is tapped on its part
-// above the keyboard.
 func TestTapAvoidsKeyboard(t *testing.T) {
 	f := &fakeDriver{keyboard: &ui.Rect{T: 600, R: 400, B: 800}}
 	f.screen = func() []*ui.Node {
@@ -292,12 +272,11 @@ func TestTapAvoidsKeyboard(t *testing.T) {
 	}
 }
 
-// A label drawn over the element takes no touches: no cover, the tap goes to the middle.
 func TestTapThroughLabel(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = func() []*ui.Node {
 		b := f.node("Buy", "buy", 100)
-		l := &ui.Node{Text: "50% off", Bounds: ui.Rect{L: 150, T: 110, R: 250, B: 140}} // not clickable
+		l := &ui.Node{Text: "50% off", Bounds: ui.Rect{L: 150, T: 110, R: 250, B: 140}}
 		return []*ui.Node{b, l}
 	}
 	if _, err := run(t, f, `- tapOn: {id: buy}`); err != nil {
@@ -310,12 +289,10 @@ func TestTapThroughLabel(t *testing.T) {
 	}
 }
 
-// Android's "isn't responding" dialog is answered Wait the first time, Close app when it comes
-// back; then the lookup goes on.
 func TestAnswersAndroidErrorDialog(t *testing.T) {
 	f := &fakeDriver{}
 	var shows atomic.Int64
-	shows.Store(2) // shows twice
+	shows.Store(2)
 	f.screen = func() []*ui.Node {
 		if shows.Load() == 0 {
 			return []*ui.Node{f.node("Home", "", 100)}
@@ -336,15 +313,14 @@ func TestAnswersAndroidErrorDialog(t *testing.T) {
 	}
 }
 
-// iOS's notifications alert is answered as launchApp's permissions say.
 func TestAnswersNotificationAlert(t *testing.T) {
 	for _, tc := range []struct {
 		perms string
-		want  int // the y of the button tapped, 0 for none
+		want  int
 	}{
-		{"", 525}, // default: all allowed
-		{":\n    permissions: {notifications: deny}", 425}, // Don't Allow
-		{":\n    permissions: {notifications: unset}", 0},  // left to the flow
+		{"", 525},
+		{":\n    permissions: {notifications: deny}", 425},
+		{":\n    permissions: {notifications: unset}", 0},
 	} {
 		f := &fakeDriver{plat: "ios"}
 		var shown atomic.Bool
@@ -377,7 +353,6 @@ func TestAnswersNotificationAlert(t *testing.T) {
 	}
 }
 
-// A disabled button is tapped once it turns on (on its change event), not before.
 func TestTapWaitsForEnabled(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -399,7 +374,6 @@ func TestTapWaitsForEnabled(t *testing.T) {
 	if d := time.Since(start); d < 250*time.Millisecond || d > 1500*time.Millisecond {
 		t.Errorf("tapped after %s; want right after it turned on (300 ms)", d)
 	}
-	// Asked for as disabled: tapped at once.
 	f2 := &fakeDriver{}
 	f2.screen = func() []*ui.Node { b := f2.node("Save", "save", 100); b.Enabled = false; return []*ui.Node{b} }
 	start = time.Now()
@@ -411,9 +385,6 @@ func TestTapWaitsForEnabled(t *testing.T) {
 	}
 }
 
-// Checks for things that do not show (`runFlow` with `when: visible`) share one optional
-// timeout counted from the last command that acted on the app: a runFlow whose commands only
-// checked the screen did not act, so the next check does not wait the whole timeout again.
 func TestOptionalChecksShareTheTimeout(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 100))}
@@ -427,7 +398,6 @@ func TestOptionalChecksShareTheTimeout(t *testing.T) {
 	if d := time.Since(start); d > 750*time.Millisecond {
 		t.Errorf("three checks took %s, want about one optional timeout (400 ms)", d)
 	}
-	// A command that acts restarts the clock: the check after it waits again.
 	start = time.Now()
 	mustPass(t, runWith(t, f, o, check("Promo")+"- tapOn: Home\n"+check("Survey")))
 	if d := time.Since(start); d < 700*time.Millisecond {
@@ -435,8 +405,6 @@ func TestOptionalChecksShareTheTimeout(t *testing.T) {
 	}
 }
 
-// On the web, a recording that cannot start (no ffmpeg) does not fail the flow: it goes on,
-// with a note saying why, and stopRecording does nothing. One that starts is recorded.
 func TestWebRecordingSkipped(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 100)), plat: "web",

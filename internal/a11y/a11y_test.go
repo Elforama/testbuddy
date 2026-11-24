@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// write puts files (path -> content) in a temp folder and returns it.
 func write(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -23,7 +22,6 @@ func write(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// rulesAt checks dir and returns "rule@line" for every finding, sorted.
 func rulesAt(t *testing.T, dir string) []string {
 	t.Helper()
 	res, err := Check([]string{dir}, Options{})
@@ -60,7 +58,6 @@ func TestAndroidLayout(t *testing.T) {
         android:src="@drawable/add" />
     <TextView android:onClick="open" />
 </LinearLayout>`,
-		// Not a layout folder: ignored.
 		"app/res/values/strings.xml": `<resources xmlns:android="http://schemas.android.com/apk/res/android"><Button/></resources>`,
 	})
 	expect(t, rulesAt(t, dir), "android-no-selector@003", "android-no-id@008", "android-no-selector@010", "android-no-id@012")
@@ -78,7 +75,6 @@ func TestComposeTestTagNeedsResourceID(t *testing.T) {
 		t.Errorf("element %+v, want #login", el)
 	}
 
-	// Set anywhere in the project: fine, even when only Login.kt is checked.
 	dir = write(t, map[string]string{"app/Login.kt": screen,
 		"app/Main.kt": `setContent { Box(Modifier.semantics { testTagsAsResourceId = true }) { App() } }`})
 	res, err := CheckFiles([]string{filepath.Join(dir, "app/Login.kt")}, nil, Options{Root: dir})
@@ -120,7 +116,7 @@ func TestSwift(t *testing.T) {
     }
 }
 class Cell: UITableViewCell { func setup() { contentView.accessibilityElementsHidden = true } }`,
-		"AppTests/HomeTests.swift": `x.accessibilityHidden(true)`, // tests are skipped
+		"AppTests/HomeTests.swift": `x.accessibilityHidden(true)`,
 	})
 	expect(t, rulesAt(t, dir), "ios-hidden@003", "ios-children-ignored@006", "ios-hidden@013")
 }
@@ -209,7 +205,6 @@ Image("c").accessibilityHidden(true)
 	expect(t, rulesAt(t, dir), "ios-hidden@006")
 }
 
-// HTML and JSX comments end in --> and */, which are not rule names.
 func TestIgnoreCommentsInMarkup(t *testing.T) {
 	dir := write(t, map[string]string{"a.html": `<!-- tb-a11y-ignore -->
 <button><svg></svg></button>
@@ -251,9 +246,6 @@ func TestElementLine(t *testing.T) {
 	}
 }
 
-// Issue #147: tag names are case-insensitive in an HTML page, so <BUTTON> and <IMG> are
-// the button and image elements. In JSX, Vue and Svelte a capitalised name is a component,
-// which the web check leaves alone.
 func TestWebUppercaseHTMLTags(t *testing.T) {
 	dir := write(t, map[string]string{
 		"site/index.html": `<!doctype html>
@@ -268,7 +260,6 @@ func TestWebUppercaseHTMLTags(t *testing.T) {
 <BUTTON><SPAN></SPAN></BUTTON>
 <DIV ROLE="BUTTON"><I CLASS="icon"></I></DIV>
 </BODY></HTML>`,
-		// Components, not elements: never web-no-selector.
 		"web/Toolbar.tsx": `export const Toolbar = () => (
   <div>
     <Button onClick={save}><Icon /></Button>
@@ -286,8 +277,6 @@ func TestWebUppercaseHTMLTags(t *testing.T) {
 		"web-no-selector@006", "web-no-selector@010", "web-no-selector@011")
 }
 
-// Issue #147: JSX passed as an attribute (an icon prop, a render prop, FlatList's
-// renderItem) is checked like any other JSX. A component in an attribute stays a component.
 func TestJSXInAttributes(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/Card.tsx": `export const C = () => (
@@ -314,8 +303,6 @@ export const L = ({ items }) => (
 		"web-no-selector@003", "web-no-selector@004")
 }
 
-// Issue #147 review: JSX in an element's attributes is not its content, so a badge, a
-// tooltip or a handler's JSX does not label it. Only children={…} does.
 func TestAttributeJSXIsNotContent(t *testing.T) {
 	dir := write(t, map[string]string{
 		"src/Row.tsx": `import { Pressable, Text } from 'react-native';
@@ -335,7 +322,6 @@ export const R = () => (
 	expect(t, rulesAt(t, dir), "rn-no-selector@004", "rn-no-selector@005", "web-no-selector@003")
 }
 
-// Issue #147 review: JSX after a comment in an attribute is still JSX.
 func TestJSXAfterCommentInAttribute(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/Card.tsx": `export const C = () => (

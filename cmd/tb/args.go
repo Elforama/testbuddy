@@ -10,41 +10,31 @@ import (
 	"github.com/elforama/testbuddy/internal/driver/web"
 )
 
-// args is a small flag parser that accepts flags anywhere among
-// the positional arguments: `tb test flows/ --format junit -e A=1`.
 type args struct {
 	pos   []string
 	vals  map[string][]string
 	bools map[string]bool
-	known map[string]flagKind // canonical flag name -> what it takes
+	known map[string]flagKind
 	alias map[string]string
 }
 
 type flagSpec struct {
-	names []string // first is canonical, e.g. {"env", "e"}
+	names []string
 	kind  flagKind
 }
 
-// flagKind is what a flag takes. Values are checked as they are parsed: a value that is not
-// what the flag takes is bad input, never read as 0, false or a default (issues #62, #151).
 type flagKind int
 
 const (
-	boolFlag     flagKind = iota // no value: --json, or --json=false (true or false only)
-	textFlag                     // any value: --format junit
-	intFlag                      // a whole number, 0 or more: --retries 2
-	floatFlag                    // a number, 0 or more
-	fractionFlag                 // a number from 0 to 1: --scale 0.5
-	sizeFlag                     // a window size, WIDTHxHEIGHT: --screen-size 1280x800
-	// optTimeFlag is a switch that may take a time: --annotate, --annotate=0.5s, or
-	// --annotate 0.5s. Without "=" it takes the next argument only when that looks like a
-	// time (timeLike), so `--annotate flows/` leaves flows/ a positional argument. The flag
-	// reads as on (args.flag) either way; its time, if given, is args.str.
+	boolFlag flagKind = iota
+	textFlag
+	intFlag
+	floatFlag
+	fractionFlag
+	sizeFlag
 	optTimeFlag
 )
 
-// timeLike is what optTimeFlag takes from the next argument: seconds or a duration in
-// seconds or milliseconds (2, 0.5, 0.5s, 500ms, 1m).
 var timeLike = regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m)?$`)
 
 func parseArgs(argv []string, specs ...flagSpec) (*args, error) {
@@ -129,13 +119,12 @@ func (a *args) list(name string) []string {
 	return out
 }
 
-// checkValue checks the value of a number or size flag; a textFlag takes any value.
 func checkValue(kind flagKind, val string) error {
 	var n float64
 	var err error
 	switch kind {
 	case sizeFlag:
-		_, _, err = web.ParseSize(val) // the web driver reads TB_WEB_SIZE with the same rule
+		_, _, err = web.ParseSize(val)
 		return err
 	case intFlag:
 		var i int
@@ -161,7 +150,6 @@ func checkValue(kind flagKind, val string) error {
 	return nil
 }
 
-// num is an intFlag's value, or def when it is not given. parseArgs has checked it.
 func (a *args) num(name string, def int) int {
 	s := a.str(name)
 	if s == "" {
@@ -171,7 +159,6 @@ func (a *args) num(name string, def int) int {
 	return n
 }
 
-// float is a floatFlag's or fractionFlag's value, or def when it is not given. parseArgs has checked it.
 func (a *args) float(name string, def float64) float64 {
 	s := a.str(name)
 	if s == "" {
@@ -183,9 +170,6 @@ func (a *args) float(name string, def float64) float64 {
 
 func (a *args) flag(name string) bool { return a.bools[name] }
 
-// devicePos reads a command's one positional argument as its -d, as `tb open alice` and
-// `tb close all` do. More than one, or one that names another device than -d, is refused:
-// a device the user named is never dropped for a default (issue #249).
 func (a *args) devicePos() error {
 	switch {
 	case len(a.pos) == 0:
@@ -193,7 +177,6 @@ func (a *args) devicePos() error {
 	case len(a.pos) > 1:
 		return fmt.Errorf("unexpected argument %q: name one device", a.pos[1])
 	case a.pos[0] == "":
-		// `tb release "$DEV"` with DEV unset: an empty name is no device, not every one.
 		return fmt.Errorf("empty device name")
 	}
 	if d := a.str("device"); d != "" && d != a.pos[0] {
@@ -204,8 +187,6 @@ func (a *args) devicePos() error {
 	return nil
 }
 
-// noPos refuses positional arguments, for a command that takes none: one left unread would
-// be ignored silently, a device name among them too (issue #249).
 func (a *args) noPos() error {
 	if len(a.pos) > 0 {
 		return fmt.Errorf("unexpected argument %q (a device goes after -d)", a.pos[0])

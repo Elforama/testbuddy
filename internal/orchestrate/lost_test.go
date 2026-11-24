@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// reopener stands in for connect.Open on Android devices: each open makes a fresh fake for
-// the device (or fails with err), and the test can see how many were made.
 type reopener struct {
 	mu     sync.Mutex
 	err    error
@@ -43,7 +41,6 @@ func (o *reopener) Opened() []*fakeDriver {
 	return append([]*fakeDriver(nil), o.opened...)
 }
 
-// lockedBuffer is a trace's writer the test reads once the run is over.
 type lockedBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
@@ -61,7 +58,6 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-// tracedHooks are rec's hooks with one trace per flow, by flow name.
 func tracedHooks(rec *recorder) (Hooks, func(name string) string) {
 	h := rec.hooks()
 	var mu sync.Mutex
@@ -86,9 +82,6 @@ func tracedHooks(rec *recorder) (Hooks, func(name string) string) {
 	}
 }
 
-// Issue #54: a device whose connection died for good during one flow stayed in the pool, so
-// every later flow on it failed at once with the same stale error. The pool must close the
-// dead driver, open the device again for the next flow, and say so in that flow's trace.
 func TestScheduleReopensADeadDriver(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -119,7 +112,6 @@ func TestScheduleReopensADeadDriver(t *testing.T) {
 	}
 }
 
-// The run's output is told when a device was lost and opened again (Hooks.Notice), once.
 func TestScheduleNoticesAReopenedDevice(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -142,8 +134,6 @@ func TestScheduleNoticesAReopenedDevice(t *testing.T) {
 	}
 }
 
-// Issue #54: a retry on the only device that fits must not reuse the driver whose connection
-// died in the attempt before.
 func TestScheduleRetryReopensADeadDriver(t *testing.T) {
 	o := &reopener{}
 	o.install(t)
@@ -161,18 +151,12 @@ func TestScheduleRetryReopensADeadDriver(t *testing.T) {
 	}
 }
 
-// Issue #54: when the device cannot be opened again, it is lost for the run, and the flows
-// left go to the devices still working. Issue #268: the flow that found it lost ran no step
-// there, so it goes to another device too (no retry used); the run's output names the device
-// and both reasons.
 func TestScheduleDeviceLostForGood(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
 	dying, good := newFake("emu", "Pixel", "android"), newFake("good", "Good", "android")
 	dying.dieOnLaunch = true
 	release := make(chan struct{})
-	// Good takes the second flow and holds it until the dead device's next flow has met the
-	// lost connection, so that flow does not go to Good first.
 	good.onType = func(string) {
 		select {
 		case <-release:
@@ -181,7 +165,6 @@ func TestScheduleDeviceLostForGood(t *testing.T) {
 	}
 	rec := newRecorder(t)
 	var once sync.Once
-	// (and if that flow is not moved but fails there, release Good as it ends)
 	rec.onFinish = func(r Result) {
 		if r.Devices[""].Serial == "emu" && r.Job.Flow.Name() != "a" {
 			once.Do(func() { close(release) })
@@ -221,8 +204,6 @@ func TestScheduleDeviceLostForGood(t *testing.T) {
 			onLost++
 		}
 	}
-	// a fails as the connection dies; the flow that met the lost device and the other three
-	// run on Good.
 	if len(res) != 5 || failed != 1 || onLost != 1 {
 		t.Errorf("%d results, %d failed, %d on the lost device, want 5, 1 and 1; results: %v", len(res), failed, onLost, summarize(res))
 	}

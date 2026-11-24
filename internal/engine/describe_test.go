@@ -7,7 +7,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// Describe words every command as the format's reports do.
 func TestDescribe(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "sub.yaml", "appId: app\n---\n- back")
@@ -111,7 +110,6 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
-// describeCondition: the label if any, else each part joined with "and".
 func TestDescribeCondition(t *testing.T) {
 	yes := "${ok}"
 	for _, tc := range []struct {
@@ -133,7 +131,6 @@ func TestDescribeCondition(t *testing.T) {
 	}
 }
 
-// The runner's descriptions: labels (evaluated unless raw), and the flow's appId filled in.
 func TestRunnerDescribe(t *testing.T) {
 	r := New(&fakeDriver{screen: static()}, quick)
 	r.appID = "com.app"
@@ -159,8 +156,6 @@ func TestRunnerDescribe(t *testing.T) {
 	}
 }
 
-// A finished command's reported description shows ${...} values, except for commands whose
-// scripts have side effects, labelled ones, and ones that do not evaluate.
 func TestEvaluatedDesc(t *testing.T) {
 	rec := &recorder{}
 	o := quick
@@ -194,7 +189,6 @@ func TestEvaluatedDesc(t *testing.T) {
 	}
 }
 
-// Small helpers used by the descriptions.
 func TestDescribeHelpers(t *testing.T) {
 	if quoteOr("", "d") != "d" || quoteOr("x", "d") != `"x"` {
 		t.Error("quoteOr")

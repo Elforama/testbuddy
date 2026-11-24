@@ -1,6 +1,3 @@
-// Scenario 14, Keyboard: a field and a button the keyboard covers (the screen does not move
-// for it), a Return chain across three fields, a multiline field, a field that counts its
-// Backspace keys, and an autofocus screen.
 import SwiftUI
 
 struct KeyboardScenario: View {
@@ -60,13 +57,10 @@ struct KeyboardScenario: View {
         .textFieldStyle(.roundedBorder)
         .autocorrectionDisabled()
         .textInputAutocapitalization(.never)
-        // The keyboard covers the bottom of the screen: nothing moves out of its way.
         .ignoresSafeArea(.keyboard)
     }
 }
 
-/// A UITextField whose own `deleteBackward` counts the Backspace keys it gets (SwiftUI's
-/// TextField has no key handler to see them).
 private struct KeyField: UIViewRepresentable {
     let placeholder: String
     @Binding var text: String
@@ -112,11 +106,10 @@ final class CountingField: UITextField {
 
     override func deleteBackward() {
         onBackspace?()
-        super.deleteBackward()  // still deletes as usual
+        super.deleteBackward()
     }
 }
 
-/// A screen whose field has focus (and the keyboard up) as soon as it opens.
 struct AutofocusView: View {
     @State private var text = ""
     @FocusState private var focused: Bool

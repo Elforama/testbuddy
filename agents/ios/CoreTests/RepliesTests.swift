@@ -2,7 +2,6 @@ import Foundation
 import XCTest
 @testable import TBAgentCore
 
-/// A request the host sends again after its connection dropped is answered from its first run.
 final class RepliesTests: XCTestCase {
     private func bytes(_ s: String) -> [UInt8] { Array(s.utf8) }
 

@@ -8,13 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestMutating pins which commands count as device interactions for the lookup-timeout clock.
 func TestMutating(t *testing.T) {
 	readOnly := []string{"assertVisible", "assertNotVisible", "assertTrue", "extendedWaitUntil", "assertScreenshot",
 		"assertWithAI", "assertNoDefectsWithAI", "extractTextWithAI", "copyTextFrom", "setClipboard",
 		"clearKeychain", "setPermissions", "takeScreenshot", "startRecording", "stopRecording",
 		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
-		"runFlow", "repeat", "retry"} // composites: their commands count for themselves
+		"runFlow", "repeat", "retry"}
 	for _, n := range readOnly {
 		if (&Command{Name: n}).Mutating() {
 			t.Errorf("%s should not be mutating", n)
@@ -28,13 +27,11 @@ func TestMutating(t *testing.T) {
 			t.Errorf("%s should be mutating", n)
 		}
 	}
-	// A parsed `action: back` becomes back, which mutates.
 	if c := step(t, "- action: back\n"); !c.Mutating() {
 		t.Error("action: back")
 	}
 }
 
-// TestNormalizeOrientation pins every accepted orientation spelling.
 func TestNormalizeOrientation(t *testing.T) {
 	for in, want := range map[string]string{
 		"PORTRAIT": "PORTRAIT", "portrait": "PORTRAIT", "Portrait": "PORTRAIT",
@@ -49,7 +46,6 @@ func TestNormalizeOrientation(t *testing.T) {
 	}
 }
 
-// TestValidKey pins pressKey's key list: every name in any case, nothing else.
 func TestValidKey(t *testing.T) {
 	for _, k := range keyNames {
 		for _, v := range []string{k, strings.ToLower(k), strings.ToUpper(k), "  " + k + "\t"} {
@@ -65,7 +61,6 @@ func TestValidKey(t *testing.T) {
 	}
 }
 
-// TestLevenshtein pins the edit distance behind "Did you mean" suggestions.
 func TestLevenshtein(t *testing.T) {
 	for _, tc := range []struct {
 		a, b string
@@ -80,7 +75,6 @@ func TestLevenshtein(t *testing.T) {
 	}
 }
 
-// TestSuggest pins suggestions: case-insensitive, only within 3 edits.
 func TestSuggest(t *testing.T) {
 	for in, want := range map[string]string{
 		"tapOnn":       ". Did you mean tapOn?",
@@ -102,7 +96,6 @@ func scalarNode(v string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Value: v, Line: 7}
 }
 
-// TestParseInt pins number parsing: underscores, spaces, floats truncate, errors carry the line.
 func TestParseInt(t *testing.T) {
 	p := &parser{file: "x.yaml"}
 	for in, want := range map[string]int{"42": 42, " 7 ": 7, "1_000": 1000, "2.9": 2, "-3": -3, "1e3": 1000, "0": 0} {
@@ -120,7 +113,6 @@ func TestParseInt(t *testing.T) {
 	}
 }
 
-// TestParseBool pins bool parsing: only true/false, in any case.
 func TestParseBool(t *testing.T) {
 	p := &parser{file: "x.yaml"}
 	for in, want := range map[string]bool{"true": true, "TRUE": true, "True": true, "false": false, "False": false, "FALSE": false} {
@@ -137,7 +129,6 @@ func TestParseBool(t *testing.T) {
 	}
 }
 
-// TestNodeHelpers pins isNull and scalarOr.
 func TestNodeHelpers(t *testing.T) {
 	null := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "~"}
 	str := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "x"}
@@ -150,7 +141,6 @@ func TestNodeHelpers(t *testing.T) {
 	}
 }
 
-// TestBaseNoExt pins the name helper used by Flow.Name.
 func TestBaseNoExt(t *testing.T) {
 	for in, want := range map[string]string{"/a/b/c.yaml": "c", "c.yml": "c", "/a/b.c/d": "d", "x.test.yaml": "x.test"} {
 		if got := baseNoExt(in); got != want {
@@ -159,7 +149,6 @@ func TestBaseNoExt(t *testing.T) {
 	}
 }
 
-// TestOptionalMustBeBool pins that every map form validates `optional`.
 func TestOptionalMustBeBool(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"s.js": "1", "sub.yaml": hdr + "- back\n", "pic.png": "x"})
 	for _, body := range []string{
@@ -197,7 +186,6 @@ func TestOptionalMustBeBool(t *testing.T) {
 	}
 }
 
-// TestMoreValueErrors pins a few remaining bad-value paths.
 func TestMoreValueErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"assertVisible bad selector value", "- assertVisible: {width: x}\n", "expected a number", 3},
@@ -209,7 +197,6 @@ func TestMoreValueErrors(t *testing.T) {
 	})
 }
 
-// TestCommandDefault pins command()'s guard for names the switch does not know.
 func TestCommandDefault(t *testing.T) {
 	p := &parser{file: "x.yaml"}
 	_, err := p.command("nope", nil, scalarNode("nope"))
@@ -218,7 +205,6 @@ func TestCommandDefault(t *testing.T) {
 	}
 }
 
-// TestMapViewHas pins mapView.has.
 func TestMapViewHas(t *testing.T) {
 	var n yaml.Node
 	if err := yaml.Unmarshal([]byte("a: 1\nb: ~\n"), &n); err != nil {

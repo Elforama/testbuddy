@@ -1,18 +1,5 @@
 package annotate
 
-// Keeping the drawings in sync with the video.
-//
-// The runner times captions and touches from when the video began, as the driver reports it
-// (driver.RecordingClock). On the web that is exact: tb takes the frames itself. A phone or
-// simulator records on its own and only says when it started, so its video can begin a few
-// hundred milliseconds off from what tb believes, and a long Android recording in parts can
-// drift further. Off by that much, a ring shows after the screen already moved on.
-//
-// So tb checks against the video itself: every tap is a clapperboard. The screen changes
-// just after tb touches it, so in a video in sync each touch lands shortly before a change
-// of the picture. Changes lists when the picture changes; Offset finds the shift that puts
-// the touches just before them, and says whether enough of them agree to trust it.
-
 import (
 	"context"
 	"errors"
@@ -24,22 +11,14 @@ import (
 )
 
 const (
-	// sceneThreshold is how much of the picture must change for Changes to see it (ffmpeg's
-	// scene score, 0 to 1, on a small copy): a screen that reacts to a tap, not a blinking
-	// cursor.
 	sceneThreshold = 0.01
-	// reactWithin is how soon after a touch its change must come for the touch to count as
-	// matched.
-	reactWithin = 500 * time.Millisecond
-	// searchSpan is the largest shift Offset tries, either way.
-	searchSpan = 3 * time.Second
-	searchStep = 10 * time.Millisecond
+	reactWithin    = 500 * time.Millisecond
+	searchSpan     = 3 * time.Second
+	searchStep     = 10 * time.Millisecond
 )
 
 var ptsRE = regexp.MustCompile(`pts_time:\s*([0-9.]+)`)
 
-// Changes lists when the picture in the video at path changes noticeably, in times from its
-// start.
 func Changes(ctx context.Context, path string) ([]time.Duration, error) {
 	ffmpeg, err := FFmpegPath()
 	if err != nil || ffmpeg == "" {
@@ -60,20 +39,13 @@ func Changes(ctx context.Context, path string) ([]time.Duration, error) {
 	return ts, nil
 }
 
-// Sync is what Offset found.
 type Sync struct {
-	Shift   time.Duration // add to the runner's times to get the video's
-	Matched int           // touches followed by a change within reactWithin at Shift
+	Shift   time.Duration
+	Matched int
 	Touches int
-	OK      bool // enough touches agree to trust Shift
+	OK      bool
 }
 
-// Offset finds the shift that puts the touches (times by the runner's clock, from the
-// video's start) each shortly before a change of the picture: the one that leaves the least
-// time between each touch and the next change. That puts the quickest reaction's touch right
-// on its change, so the shift found is the video's lag plus at most the app's quickest
-// reaction (tens of milliseconds, under a frame or two). Between equal fits it takes the
-// smallest shift. OK when at least two touches, and most of them, are matched.
 func Offset(touches, changes []time.Duration) Sync {
 	s := Sync{Touches: len(touches)}
 	if len(touches) < 2 || len(changes) == 0 {
@@ -86,15 +58,10 @@ func Offset(touches, changes []time.Duration) Sync {
 			bestCost, s.Shift, s.Matched = cost, shift, matched
 		}
 	}
-	// Most touches, three in five, and at least two. A simulator's video can be a second off with
-	// only some touches followed by a clear change (CI: 15 of 24 on iOS), so asking for more
-	// leaves it off. A web video, timed exactly, is never checked (engine.syncToVideo).
 	s.OK = s.Matched >= 2 && s.Matched*10 >= len(touches)*6
 	return s
 }
 
-// fit is how long, in all, the touches wait for their changes at shift (reactWithin for a
-// touch with none in time), and how many have one in time.
 func fit(touches, changes []time.Duration, shift time.Duration) (cost time.Duration, matched int) {
 	for _, t := range touches {
 		at := t + shift
@@ -110,25 +77,13 @@ func fit(touches, changes []time.Duration, shift time.Duration) (cost time.Durat
 	return cost, matched
 }
 
-// The start mark (driver.RecordingMark): right after a recording starts the driver changes the
-// status bar's clock for a moment. Found in the video, it says exactly when the video's time 0
-// was by tb's clock, where touches only suggest it.
 const (
-	// markSearch is how far into the video MarkChanges looks.
-	markSearch = 20 * time.Second
-	// markEarly and markLate bound how far the time between the mark's two changes in the
-	// video may be from how long the driver held it. Each change shows a little after the
-	// driver made it, the clearing later than the showing: in CI (PR #393) a mark held 0.3 s
-	// and more showed for 1.17 s.
-	markEarly = 400 * time.Millisecond
-	markLate  = 1500 * time.Millisecond
-	// markThreshold is the scene score in the status bar's clock that counts as a change: its
-	// digits change, a small part of the whole picture.
+	markSearch    = 20 * time.Second
+	markEarly     = 400 * time.Millisecond
+	markLate      = 1500 * time.Millisecond
 	markThreshold = 0.005
 )
 
-// MarkChanges lists when the status bar's clock (the top left of the picture) changes in the
-// first markSearch of the video at path.
 func MarkChanges(ctx context.Context, path string) ([]time.Duration, error) {
 	ffmpeg, err := FFmpegPath()
 	if err != nil || ffmpeg == "" {
@@ -149,10 +104,6 @@ func MarkChanges(ctx context.Context, path string) ([]time.Duration, error) {
 	return ts, nil
 }
 
-// FindMark finds the start mark among the status bar's changes: the first change followed by
-// another about held later (the mark showing, then cleared). It returns when the mark showed,
-// in the video's time. A video that begins on the mark shows only its clearing, about held
-// in, with no change before: the mark showed at 0.
 func FindMark(changes []time.Duration, held time.Duration) (time.Duration, bool) {
 	if held <= 0 {
 		return 0, false

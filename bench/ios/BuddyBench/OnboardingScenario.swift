@@ -1,5 +1,3 @@
-// Scenario 7, Onboarding and login: a 3-page pager (once per app launch), a sign-in form with
-// validation and a slow submit, and a six-box one-time code.
 import SwiftUI
 import UIKit
 
@@ -129,7 +127,6 @@ private struct SignInForm: View {
             if wrong {
                 error = "Wrong password"
             } else {
-                // Empty the fields first, so iOS doesn't offer to save a password.
                 email = ""
                 password = ""
                 success(address)
@@ -138,8 +135,6 @@ private struct SignInForm: View {
     }
 }
 
-/// Six one-digit boxes. A digit moves to the next box; backspace in an empty box moves back.
-/// Focus moves synchronously (UIKit first responder), so fast typing lands in the right box.
 private struct OTPEntry: View {
     let success: () -> Void
     @State private var digits = Array(repeating: "", count: 6)
@@ -198,7 +193,6 @@ final class OTPFields {
     }
 }
 
-/// A UITextField box: SwiftUI can't see a backspace in an empty field, UIKit can.
 private struct OTPBox: UIViewRepresentable {
     let index: Int
     @Binding var text: String

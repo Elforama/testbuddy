@@ -2,8 +2,6 @@
 
 package ios
 
-// clearState reinstalls the app even when the run is cancelled (issue #49).
-
 import (
 	"bytes"
 	"context"
@@ -19,11 +17,6 @@ import (
 	"time"
 )
 
-// issue #49: a run cancelled (Ctrl-C, a timeout) once clearState has started to uninstall the
-// app still installs it again. Cancelling between the two used to kill `simctl install` (or
-// skip it) and leave the app uninstalled, so every later flow failed "not installed". The
-// uninstall took the location grant with it, so the location cache is forgotten as well, and a
-// cancelled run that waits on the pair says so.
 func TestClearStateCancelledMidReinstallKeepsAppInstalled(t *testing.T) {
 	defer func(v time.Duration, w io.Writer) { reinstallNotice, progressOut = v, w }(reinstallNotice, progressOut)
 	reinstallNotice = 50 * time.Millisecond
@@ -32,11 +25,10 @@ func TestClearStateCancelledMidReinstallKeepsAppInstalled(t *testing.T) {
 			ts := stubTools(t)
 			bundle := makeBundle(t, ts.home)
 			state := t.TempDir()
-			installed := filepath.Join(state, "installed") // the fake simulator has the app
+			installed := filepath.Join(state, "installed")
 			started := filepath.Join(state, "started")
 			goOn := filepath.Join(state, "go")
 			os.WriteFile(installed, nil, 0o644)
-			// The step cancelled in blocks until the test has cancelled the context.
 			block := ": > " + sq(started) + "; while [ ! -e " + sq(goOn) + " ]; do /bin/sleep 0.01; done; "
 			uninstall := "/bin/rm -f " + sq(installed) + "; "
 			install := ""
@@ -59,7 +51,7 @@ func TestClearStateCancelledMidReinstallKeepsAppInstalled(t *testing.T) {
 				for range 2000 {
 					if _, err := os.Stat(started); err == nil {
 						cancel()
-						time.Sleep(150 * time.Millisecond) // the pair outlives the cancellation
+						time.Sleep(150 * time.Millisecond)
 						os.WriteFile(goOn, nil, 0o644)
 						return
 					}
@@ -90,7 +82,6 @@ func TestClearStateCancelledMidReinstallKeepsAppInstalled(t *testing.T) {
 	}
 }
 
-// syncBuffer is a bytes.Buffer safe for a writer and a reader on different goroutines.
 type syncBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
@@ -108,8 +99,6 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// issue #49: the uninstall and install run in a process group of their own, so a Ctrl-C at the
-// terminal (sent to tb's whole group) does not reach them.
 func TestClearStateReinstallOwnSession(t *testing.T) {
 	ts := stubTools(t)
 	bundle := makeBundle(t, ts.home)
@@ -136,14 +125,11 @@ func TestClearStateReinstallOwnSession(t *testing.T) {
 	}
 }
 
-// issue #49: an uninstall that fails after CoreSimulator removed the app installs it back; one
-// that failed with the app still there changes nothing; one whose probe cannot tell keeps the
-// copy and says where (no install over an app that may still hold its data).
 func TestClearStateUninstallFailed(t *testing.T) {
 	const gone = "An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):\nNo such file or directory"
 	for _, c := range []struct {
-		name, probe string // the probe's answer after the failed uninstall ("" = still installed)
-		want        string // the simctl calls' tail
+		name, probe string
+		want        string
 		wantErr     string
 	}{
 		{"app removed", gone, "uninstall get_app_container install privacy", ""},
@@ -186,9 +172,6 @@ func TestClearStateUninstallFailed(t *testing.T) {
 	}
 }
 
-// issue #49: the uncancellable uninstall-and-install has a bound of its own: an install that
-// never ends gives up (naming the kept copy) instead of hanging the run, and what it started
-// goes with it.
 func TestClearStateReinstallBounded(t *testing.T) {
 	defer func(v time.Duration) { reinstallWait = v }(reinstallWait)
 	reinstallWait = 300 * time.Millisecond
@@ -197,7 +180,6 @@ func TestClearStateReinstallBounded(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "child")
 	ts.set("xcrun", []stubRule{
 		{match: app + " app", out: bundle + "\n"},
-		// A child that would hold simctl's output open for 30 s.
 		{match: "simctl install " + testUDID, sh: "/bin/sleep 30 & echo $! >> " + sq(child) + "; wait;"},
 	})
 	start := time.Now()

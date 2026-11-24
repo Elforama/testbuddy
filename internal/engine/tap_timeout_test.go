@@ -9,9 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #278: with no timeout, an optional tap on an absent element still looks for the whole
-// optional budget (7 s), as Maestro's optional lookup does. Fake clock (synctest), default
-// budgets.
 func TestOptionalTapDefaultBudgetUnchanged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeDriver{screen: static(btn("Home", "", 100))}
@@ -28,8 +25,6 @@ func TestOptionalTapDefaultBudgetUnchanged(t *testing.T) {
 	})
 }
 
-// Issue #278: an optional tap with its own timeout gives up on an absent element once that
-// timeout is out, not after 7 s; timeout 0 looks once.
 func TestOptionalTapTimeoutGivesUpOnTime(t *testing.T) {
 	for _, tc := range []struct {
 		timeout  string
@@ -60,8 +55,6 @@ func TestOptionalTapTimeoutGivesUpOnTime(t *testing.T) {
 	}
 }
 
-// Issue #278: an element that appears within the step's timeout (a dialog 300 ms in, timeout
-// 1000) is tapped.
 func TestOptionalTapTimeoutTapsLateElement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &fakeDriver{}
@@ -85,8 +78,6 @@ func TestOptionalTapTimeoutTapsLateElement(t *testing.T) {
 	})
 }
 
-// Issue #278: a ${...} timeout that is not a number of milliseconds, 0 or more, fails the
-// step clearly, optional or not: it is not skipped as an element not found.
 func TestTapTimeoutInvalidValueFails(t *testing.T) {
 	f := &fakeDriver{screen: static(btn("Home", "", 100))}
 	mustFail(t, runWith(t, f, quick, "- tapOn: {id: feed, optional: true, timeout: \"${'-5'}\"}"), `invalid timeout "-5"`)

@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// issue #101 (review): a device opened again mid-run gets its animations turned off again,
-// on a new driver that reads the scales already at 0. That driver's restore must put back the
-// scales the device had before the run (the first read), and tell its own agent so, and the
-// first driver's restore need not run at all. Once restored, a later DisableAnimations reads
-// the device afresh.
 func TestDisableAnimationsAgainRestoresTheOriginals(t *testing.T) {
 	forgetAnimations(t)
 	a := shAgent(t, map[string]shAnswer{"settings get global": {"1\n0.5\n1\n", 0}})
@@ -18,7 +13,6 @@ func TestDisableAnimationsAgainRestoresTheOriginals(t *testing.T) {
 	if _, err := newDriver(t, a).DisableAnimations(ctxT(t)); err != nil {
 		t.Fatal(err)
 	}
-	// the device opened again: a new agent, the scales at 0
 	b := shAgent(t, map[string]shAnswer{"settings get global": {"0\n0\n0\n", 0}})
 	b.on("animations", func(map[string]any) map[string]any { return nil })
 	restore, err := newDriver(t, b).DisableAnimations(ctxT(t))
@@ -34,7 +28,6 @@ func TestDisableAnimationsAgainRestoresTheOriginals(t *testing.T) {
 	if on := b.last("animations")["on"]; on != true {
 		t.Errorf("issue #101: the live agent was told animations on = %v, want true", on)
 	}
-	// restored: the next read is the device's own again
 	c := shAgent(t, map[string]shAnswer{"settings get global": {"0.25\n0.25\n0.25\n", 0}})
 	c.on("animations", func(map[string]any) map[string]any { return nil })
 	restore, err = newDriver(t, c).DisableAnimations(ctxT(t))
@@ -48,7 +41,6 @@ func TestDisableAnimationsAgainRestoresTheOriginals(t *testing.T) {
 	}
 }
 
-// forgetAnimations starts the test with no device's scales kept from an earlier one.
 func forgetAnimations(t *testing.T) {
 	animMu.Lock()
 	originalScales = map[string][]string{}
@@ -60,9 +52,6 @@ func forgetAnimations(t *testing.T) {
 	})
 }
 
-// issue #101 (review): opening an emulator only to read a failed flow's screen
-// (WithoutRestart) does not restart it in CI mode: the screen would be the launcher's, and the
-// run's one restart (issue #217) is left for the next flow's open.
 func TestStuckEmulatorNotRestartedWithoutRestart(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")

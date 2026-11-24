@@ -1,12 +1,4 @@
 #!/bin/bash
-# Checks how tb lists iOS elements that have an accessibility value as well as a label
-# (issue #1): tb look must name them by their label and show the value apart. A flow cannot
-# see the listing (the accessibility-values flow finds these elements by label), so this
-# drives a session instead.
-#
-#   bench/checks/look-values.sh <simulator UDID>      (TB=path/to/tb, default bin/tb)
-#
-# Needs the bench app on the simulator (bench/README.md).
 set -u
 cd "$(dirname "$0")/../.."
 TB=${TB:-bin/tb}
@@ -23,7 +15,6 @@ finish() { "$TB" close -d "$DEV" >/dev/null 2>&1; exit $failed; }
   'scrollUntilVisible: {element: {id: good_push}, centerElement: true}' >/dev/null ||
   { fail "opening the Good accessibility scenario"; finish; }
 
-# The listing names them by their label; a stepper button shows its value apart.
 look=$("$TB" look -d "$DEV")
 for want in \
   'Button "Decrease quantity" #good_qty_minus value="1"' \

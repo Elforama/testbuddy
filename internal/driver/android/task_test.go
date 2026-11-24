@@ -11,30 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// taskDevice runs the driver's shell commands in a host shell, with am, pm, cmd, dumpsys,
-// pidof and sleep stubbed to model one app's task on a device (issue #281), each part a file
-// in a temp dir:
-//
-//   - task: the app's task, one activity per line, bottom to top: "app:saved" (the app's own
-//     activity, with its saved state), "app:new" (a fresh start of it) or "gms" (another app's
-//     activity started into the app's task, like Google Play services' Location Accuracy
-//     dialog). No file: no task.
-//   - pid: the app's process runs. stopped: the package is stopped (force-stopped, none of its
-//     components has run since). front: "task" when the app's task is in front, "none" when
-//     nothing is (a start whose process was killed).
-//   - removing: `pm clear` removes the app's task, and when another app's activity is in it the
-//     removal ends only when that activity is destroyed (asynchronously, in the other app's
-//     process): here after that many `cmd activity stack list` calls. Ending, it kills the
-//     app's processes, a process started meanwhile for a new start too (doomed). `cmd
-//     activity stack remove` removes the task the same way. `pm clear` stops the package.
-//   - keepTask: `pm clear` keeps the task (a removal that never ends, or an Android that
-//     does not remove tasks with the data). noCmd: `cmd` fails at once (no stack list).
-//   - lists: a line per `cmd activity stack list` call. flags: the last start's flags.
-//
-// `am force-stop` ends the process and removes the app's own activities from the task, not the
-// others'. `am start` with NEW_TASK|CLEAR_TASK (0x10008000) empties the task and starts the app
-// alone in it; with NEW_TASK|RESET_TASK_IF_NEEDED (0x10200000) it brings the task to the front
-// as it is, and starts the app only when the task has nothing in it.
 type taskDevice struct {
 	dir string
 	a   *fakeAgent
@@ -160,10 +136,8 @@ func (f *taskDevice) read(name string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// task is the app's task, its activities bottom to top, separated by spaces.
 func (f *taskDevice) task() string { return strings.Join(strings.Fields(f.read("task")), " ") }
 
-// foreground is the package in front, as the agent reports it.
 func (f *taskDevice) foreground() string {
 	switch {
 	case f.read("front") == "none":
@@ -176,8 +150,6 @@ func (f *taskDevice) foreground() string {
 	return "com.example.app"
 }
 
-// startCmds are the shell commands sent, without the task listings that a failed launch's
-// message reads (issue #281).
 func startCmds(a *fakeAgent) []string {
 	var cmds []string
 	for _, c := range a.shCmds() {
@@ -190,7 +162,6 @@ func startCmds(a *fakeAgent) []string {
 
 func taskDriver(t *testing.T, dev *taskDevice) *Driver { return taskDriverAt(t, dev, 34) }
 
-// taskDriverAt is a driver for the device at API level sdk.
 func taskDriverAt(t *testing.T, dev *taskDevice, sdk int) *Driver {
 	d := newDriver(t, dev.a)
 	d.stateMu.Lock()
@@ -200,17 +171,6 @@ func taskDriverAt(t *testing.T, dev *taskDevice, sdk int) *Driver {
 	return d
 }
 
-// Issue #281: a flow left another app's activity in the app's task (Google Play services'
-// Location Accuracy dialog, which the app started with startResolutionForResult). `am
-// force-stop` ends the app's process and removes its own activities, not that one, and the
-// start then brought the task back with the dialog on top: every later launchApp failed after
-// 20 s, "in front: com.google.android.gms". A launch that stops the app (stopApp, the default,
-// or clearState) starts it in a clean task, and so does any launch of an app that is stopped
-// (nothing of its own can be in its task).
-//
-// clearState: `pm clear` removes the app's task, and with another app's activity in it the
-// removal ends later, killing the app's processes as it ends: a start sent before it ended had
-// its process killed ("in front: unknown" in the issue's run). Clearing ends once the task is gone.
 func TestLaunchAfterStopStartsInACleanTask(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	for _, c := range []struct {
@@ -261,9 +221,6 @@ func TestLaunchAfterStopStartsInACleanTask(t *testing.T) {
 	}
 }
 
-// Issue #281: a launch with stopApp: false resumes the app's task as it is when the app has
-// something in it (it was killed, not stopped: killApp keeps its saved state; or it runs).
-// When it does not come to the front, the error names what is on top of the app's task.
 func TestLaunchWithoutStopResumesTheTask(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	t.Run("killed app restores its saved state", func(t *testing.T) {
@@ -291,8 +248,6 @@ func TestLaunchWithoutStopResumesTheTask(t *testing.T) {
 			t.Errorf("err = %v, want it to say %q", err, want)
 		}
 	})
-	// Before Android 10 a task's line in the list gives its stack's top activity, which may
-	// be another task's: the message names the package in front only.
 	t.Run("before Android 10 the message names the package only", func(t *testing.T) {
 		dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
 		d := taskDriverAt(t, dev, 28)
@@ -303,10 +258,6 @@ func TestLaunchWithoutStopResumesTheTask(t *testing.T) {
 	})
 }
 
-// Issue #281: stopApp leaves no task of the app behind. After `am force-stop`, another app's
-// activity (the dialog) is left in the app's task, on screen: from Android 10 tb removes that
-// task (a root task of its own) and waits for it to go. The next launch, even one that does
-// not stop the app, finds no task.
 func TestStopAppLeavesNoTaskBehind(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
@@ -320,7 +271,6 @@ func TestStopAppLeavesNoTaskBehind(t *testing.T) {
 	if got := dev.foreground(); got == "com.google.android.gms" {
 		t.Errorf("after stopApp %s is in front, want the dialog gone", got)
 	}
-	// Only the app's root task: not the launcher's.
 	for _, c := range dev.a.shCmds() {
 		if strings.Contains(c, "stack remove") && !strings.Contains(c, "stack remove 7;") {
 			t.Errorf("removed another root task: %q", c)
@@ -334,8 +284,6 @@ func TestStopAppLeavesNoTaskBehind(t *testing.T) {
 	}
 }
 
-// Issue #281: before Android 10 a stack holds other apps' tasks, and removing it would remove
-// theirs: stopApp is `am force-stop` alone, the dialog stays, and the next launch clears it.
 func TestStopAppBeforeAndroid10KeepsTheTask(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
@@ -357,19 +305,15 @@ func TestStopAppBeforeAndroid10KeepsTheTask(t *testing.T) {
 	}
 }
 
-// Issue #281: the wait for the app's task to go after `pm clear` is bounded (100 polls, 5 s):
-// where the task stays (a removal that never ends, or an Android that keeps the task), the
-// wait runs out, the trace says so, and the clean start clears the task. Without `cmd` the
-// wait ends at once.
 func TestClearWaitForTheTaskIsBounded(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	for _, c := range []struct {
 		name  string
 		noCmd bool
-		lists int  // stack list calls
-		noted bool // the trace says the task stayed
+		lists int
+		noted bool
 	}{
-		{"task stays", false, 101, true}, // 100 polls of 50 ms, then the last look
+		{"task stays", false, 101, true},
 		{"no cmd", true, 1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -397,8 +341,6 @@ func TestClearWaitForTheTaskIsBounded(t *testing.T) {
 	}
 }
 
-// Issue #281: the trace says how long the wait for a task to go ran, as the device measured
-// it (5 s by its clock, a listing's time included), or the polls without a clock.
 func TestNoteTaskStayed(t *testing.T) {
 	for _, c := range []struct{ out, want string }{
 		{"Success\nTB_TASK_STAYED 5010ms\nStarting: Intent {}", "still listed 5.01s after it was removed"},
@@ -414,10 +356,6 @@ func TestNoteTaskStayed(t *testing.T) {
 	}
 }
 
-// Issue #281: stopApp finds the root tasks to remove in the task list. Real listings, after
-// `am force-stop` with the permission dialog left in the bench app's task (configuration
-// lines left out): Android 11 (API 30) says "Stack id=", Android 16 (API 36) "RootTask id=".
-// Only a root task that holds the app's tasks alone, for the current user, is removed.
 func TestAppRootTasks(t *testing.T) {
 	const api30 = `TB_USER=0
 Stack id=9 bounds=[0,0][1080,2400] displayId=0 userId=0
@@ -436,7 +374,6 @@ RootTask id=963 bounds=[0,0][1080,2400] displayId=0 userId=0
 RootTask id=707 bounds=[0,0][1080,2400] displayId=0 userId=0
   taskId=707: dev.testbuddy.bench/dev.testbuddy.bench.MainActivity bounds=[0,0][1080,2400] userId=0 visible=false topActivity=ComponentInfo{dev.testbuddy.bench/dev.testbuddy.bench.MainActivity}
 `
-	// A stack shared with another app's task (before Android 10), and another user's task.
 	const shared = `TB_USER=0
 Stack id=1 bounds=[0,0][1080,2400] displayId=0 userId=0
   taskId=12: com.example.example/com.example.example.MainActivity bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.google.android.gms/x.Y}
@@ -452,7 +389,6 @@ Stack id=2 bounds=[0,0][1080,2400] displayId=0 userId=10
 		{"API 36", api36, "com.example.example", []string{"963"}},
 		{"shared stack and other user", shared, "com.example.example", nil},
 		{"no task of the app", api36, "com.missing", nil},
-		// get-current-user said nothing: another user's task could be taken for the app's
 		{"current user not known", strings.Replace(api36, "TB_USER=0", "TB_USER=", 1), "com.example.example", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {

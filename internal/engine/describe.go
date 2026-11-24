@@ -47,7 +47,6 @@ func selDesc(s *flow.Selector) string {
 	return strings.Join(parts, ", ")
 }
 
-// describe is the human description of a command, in the format's usual wording.
 func (r *Runner) describe(c *flow.Command) string {
 	if c.Label != "" {
 		if c.LabelRaw {
@@ -69,7 +68,6 @@ func (r *Runner) describe(c *flow.Command) string {
 	return Describe(c)
 }
 
-// Describe describes a command without evaluating anything.
 func Describe(c *flow.Command) string {
 	switch c.Name {
 	case "tapOn":

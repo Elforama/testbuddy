@@ -1,10 +1,3 @@
-// Package web drives a Chrome tab through the Chrome DevTools Protocol, as a Test Buddy
-// device. Web flows (`url:` in the config) run on it.
-//
-// Event-driven like the mobile agents: an in-page script (page.js) pushes a CDP event on
-// every DOM mutation, input, scroll and animation edge; navigation and network events come
-// from CDP itself. The driver turns these into "changed" and "settled" (no change for the
-// quiet window, no navigation or XHR/fetch in flight, no finite CSS animation running).
 package web
 
 import (
@@ -36,44 +29,18 @@ import (
 var pageJS string
 
 const (
-	// No solid change for this long, with nothing else holding the page, is "settled": two
-	// frames. Short page timers and every request the action started are tracked (softCap),
-	// so the window need not wait out the second phase of an update they render (issue #312:
-	// it was 120 ms).
-	quietWindow = 40 * time.Millisecond
-	// After typing or erasing, the page settles on main's 120 ms window instead: a field's
-	// mask or formatter can come through something page.js does not track (a MessageChannel
-	// chain, a requestIdleCallback) 60 ms after the keys, and a copyTextFrom right after
-	// must see it, as it did before issue #312.
+	quietWindow       = 40 * time.Millisecond
 	typingQuietWindow = 120 * time.Millisecond
-	// Pending short timers (page.js counts them) and the XHR/fetch requests started since the
-	// last action or load, third-party ones included, hold "settled" at most this long after
-	// that action or load: a countdown, a poller, a beacon or a long poll delays a settle by
-	// no more than this, however often the page changes (issue #312).
-	softCap = 1500 * time.Millisecond
-	// Past softCap, a short timer set within lateGrace of the end of a request the settle
-	// held for (its answer renders through a timer) still holds it, up to lateCap after the
-	// action: a chain of them cannot hold it longer (issue #312).
-	lateGrace = 150 * time.Millisecond
-	lateCap   = 5 * time.Second
-	// A tap whose reaction is only that its target has the focus (issue #311: focusKept)
-	// settles no sooner than this after it: what its click handler changes through something
-	// page.js does not track (a requestAnimationFrame loop, a worker's reply, a MessageChannel
-	// chain), up to about this late, is still there for the next step. The 500 ms no-change
-	// window covered it before.
-	focusQuietFloor = 150 * time.Millisecond
-	// A running finite animation (a CSS transition or animation; endless ones are not counted)
-	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
-	animGrace    = 4000 * time.Millisecond
-	requestGrace = 2 * time.Second // a first-party XHR/fetch counts as "busy" at most this long
-	loadTimeout  = 30 * time.Second
-	// A main-frame load still running once its DOM is ready (DOMContentLoaded) and the DOM has
-	// been quiet this long stops counting as busy: a stalled image, ad pixel or analytics call
-	// holds the load event back for good (issue #79). See loadGraceNow for CI mode.
-	loadGrace = 2 * time.Second
+	softCap           = 1500 * time.Millisecond
+	lateGrace         = 150 * time.Millisecond
+	lateCap           = 5 * time.Second
+	focusQuietFloor   = 150 * time.Millisecond
+	animGrace         = 4000 * time.Millisecond
+	requestGrace      = 2 * time.Second
+	loadTimeout       = 30 * time.Second
+	loadGrace         = 2 * time.Second
 )
 
-// ChromePath finds Chrome or Chromium (TB_CHROME overrides).
 func ChromePath() string {
 	if p := os.Getenv("TB_CHROME"); p != "" {
 		return p
@@ -87,7 +54,7 @@ func ChromePath() string {
 	case "windows":
 		cands = []string{`C:\Program Files\Google\Chrome\Application\chrome.exe`,
 			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`}
-		if local := os.Getenv("LOCALAPPDATA"); local != "" { // a per-user install
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
 			cands = append(cands, filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"))
 		}
 	}
@@ -104,8 +71,6 @@ func ChromePath() string {
 	return ""
 }
 
-// activePortURL reads the browser's DevTools address from the profile's DevToolsActivePort
-// file (the port, then the browser target's path), or "" until Chrome has written it.
 func activePortURL(profile string) string {
 	b, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
 	if err != nil {
@@ -121,93 +86,77 @@ func activePortURL(profile string) string {
 	return "ws://127.0.0.1:" + lines[0] + lines[1]
 }
 
-// Driver is one browser (its own profile), driving one tab at a time (tabs.go).
 type Driver struct {
-	info   device.Info
-	cmd    *exec.Cmd   // Chrome, or the watchdog that started it (issue #81)
-	exited atomic.Bool // Close saw cmd exit: Kill must not touch its pid
-	// lifeline is the watchdog's stdin (nil without one): closing it, or tb's end, makes the
-	// watchdog kill Chrome's process group and remove the profile.
+	info     device.Info
+	cmd      *exec.Cmd
+	exited   atomic.Bool
 	lifeline io.Closer
-	// waited is closed once the watchdog has exited and been reaped: with one only, waited on
-	// from the start. Chrome started directly is waited on in Close only, so that its pid stays
-	// its own (a zombie) until then and Kill cannot signal another process (issue #81 review).
-	waited  chan struct{}
-	stderr  io.Closer // Chrome's stderr, read from Open on
-	profile string
-	page    *cdp
-	browser *cdp
+	waited   chan struct{}
+	stderr   io.Closer
+	profile  string
+	page     *cdp
+	browser  *cdp
 
-	mu         sync.Mutex
-	cond       *sync.Cond
-	seq        int64     // every change, restless ones included (screen reads key on it)
-	solid      int64     // changes that hold the page unsettled
-	settledSol int64     // the solid count when the page last settled
-	lastEvent  time.Time // the latest solid change
-	lastPush   time.Time
-	anims      int
-	timers     map[string]int  // pending short timers per JS context, "session/contextId" (#312)
-	timerAt    time.Time       // when a pending short timer last ended, or a soft request
-	softReqs   map[string]bool // third-party requests started since softFrom (#312)
-	softFrom   time.Time       // when the last action or main-frame load started (softCap)
-	quietFor   time.Duration   // the last action's quiet window (quietNow); 0: quietWindow
-	reqEndAt   time.Time       // when a request the settle held for last ended (lateGrace)
-	late       bool            // a pending short timer was set by such a request's answer
-	lateQuiet  time.Time       // until when the last such timer's render is waited for
-	quietUntil time.Time       // the page settles no sooner (a tap's focus reaction: focusQuietFloor)
-	loading    bool
-	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
-	docReady   bool        // DOMContentLoaded fired in the current main document (any load)
-	readies    int64       // DOMContentLoaded events seen in the main document
-	stale      bool        // the load is still running but no longer counts (loadBusy)
-	staleT     *time.Timer // fires loadGrace after the DOM was ready and quiet
-	domAt      time.Time   // the latest change from the page itself (not a network event)
-	pageURL    string      // the main frame's URL, for the trace and for what is first-party
-	// Main-frame requests that hold a load from being given up on (holdsLoad): scripts,
-	// stylesheets, fonts and frames, by request id, with when each started.
+	mu          sync.Mutex
+	cond        *sync.Cond
+	seq         int64
+	solid       int64
+	settledSol  int64
+	lastEvent   time.Time
+	lastPush    time.Time
+	anims       int
+	timers      map[string]int
+	timerAt     time.Time
+	softReqs    map[string]bool
+	softFrom    time.Time
+	quietFor    time.Duration
+	reqEndAt    time.Time
+	late        bool
+	lateQuiet   time.Time
+	quietUntil  time.Time
+	loading     bool
+	ready       bool
+	docReady    bool
+	readies     int64
+	stale       bool
+	staleT      *time.Timer
+	domAt       time.Time
+	pageURL     string
 	loadPending map[string]time.Time
 	inflight    map[string]time.Time
 	quiet       *time.Timer
-	loads       int64 // load events seen
+	loads       int64
 	mainFrame   string
-	frames      map[string]*frame // cross-origin iframes by CDP session id
-	cssMap      []int             // main-document node index -> screen node index (last Screen)
-	frameHosts  map[int]int       // screen node index of a cross-origin frame's element -> main-document index of its frame element (last Screen)
+	frames      map[string]*frame
+	cssMap      []int
+	frameHosts  map[int]int
 	subs        map[int]chan driver.Event
 	nextSub     int
 	w, h        int
 	offline     bool
 	closed      bool
-	notes       []string            // what the driver did on its own, for the trace (Notes)
-	dialogs     driver.DialogAnswer // how JavaScript dialogs are answered (answerDialogs, dialogs.go)
-	dialogLog   []driver.Dialog     // the last dialogs answered (Dialogs, dialogs.go)
-	dialogN     int                 // dialogs answered so far; dialogLog holds the last of them
+	notes       []string
+	dialogs     driver.DialogAnswer
+	dialogLog   []driver.Dialog
+	dialogN     int
 
-	// The browser's tabs (tabs.go, issue #78): open ones in the order they opened, the one
-	// driven now, targets already taken care of, and tabs being set up or switched to (the
-	// page counts as loading meanwhile).
-	tabs    []*tab
-	cur     *tab
-	claimed map[string]bool
-	opening int
-	focusN  int
-	tabSeq  int               // tabs attached so far, past the first
-	workers map[string]string // attached workers' sessions -> their tab's session
-	// closingOthers: launchApp is closing the other tabs (closeOtherTabs), which notes that
-	// once instead of each switch.
+	tabs          []*tab
+	cur           *tab
+	claimed       map[string]bool
+	opening       int
+	focusN        int
+	tabSeq        int
+	workers       map[string]string
 	closingOthers bool
 
-	// Network mocks (network.go), under their own lock: requests pause on the read loop.
 	mockMu  sync.Mutex
 	mocks   []driver.NetworkMock
-	fetchOn bool                    // Fetch interception is enabled
-	held    map[string]*heldRequest // paused requests waiting out a mock's delay, by session/id
+	fetchOn bool
+	held    map[string]*heldRequest
 
-	// A screen recording in progress (recording.go), under its own lock: frames arrive on the
-	// read loop.
 	recMu   sync.Mutex
 	rec     *recording
-	lastRec *recording // the last recording started (RecordingStarted)
+	lastRec *recording
 }
 
 var (
@@ -216,14 +165,12 @@ var (
 	_ driver.LostChecker = (*Driver)(nil)
 )
 
-// Lost reports the browser gone (driver.LostChecker): its DevTools connection ended (the
-// browser exited or crashed). The web driver does not reconnect, so this is for good.
 func (d *Driver) Lost() error {
 	d.mu.Lock()
 	closed := d.closed
 	d.mu.Unlock()
 	if closed {
-		return nil // closed on purpose
+		return nil
 	}
 	if err := d.page.lost(); err != nil {
 		return err
@@ -231,19 +178,11 @@ func (d *Driver) Lost() error {
 	return d.browser.lost()
 }
 
-// MinSize and MaxSize bound a window's width and height. Outside them Chrome's screenshots
-// can never come back: headless Chrome gives the page the window's height less 87 pixels, and
-// a page 0 high never draws (200 leaves room for a taller window frame); and it captures
-// nothing wider or higher than 16384 pixels, on some graphics cards less. Chrome on macOS
-// also makes a window at least 500 wide, whatever it is asked for (checkSize says so).
 const (
 	MinSize = 200
 	MaxSize = 10000
 )
 
-// ParseSize reads a window size, WIDTHxHEIGHT such as 1280x800: two whole numbers, each from
-// MinSize to MaxSize. Spaces around the numbers (an env file's trailing newline) and a
-// capital X are fine; anything else is an error, never the default size (issue #151).
 func ParseSize(s string) (w, h int, err error) {
 	ws, hs, ok := strings.Cut(strings.ToLower(s), "x")
 	if ok {
@@ -255,8 +194,6 @@ func ParseSize(s string) (w, h int, err error) {
 	return w, h, nil
 }
 
-// sizePart is one side of a window size, or 0 when it is not a whole number from MinSize to
-// MaxSize (digits only, no sign, once the spaces around it are trimmed).
 func sizePart(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 5 || strings.Trim(s, "0123456789") != "" {
@@ -269,8 +206,6 @@ func sizePart(s string) int {
 	return n
 }
 
-// Open starts a browser for the device. TB_WEB_HEADLESS=1 hides it; TB_WEB_SIZE=WxH sets
-// the window size (default 1280x800).
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	chrome := ChromePath()
 	if chrome == "" {
@@ -287,9 +222,6 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A test browser must not put its own UI over the page: no password manager (it shows a
-	// "change your password" warning for common passwords like "secret", blocking clicks),
-	// no translate bar, no sign-in prompts.
 	os.MkdirAll(filepath.Join(profile, "Default"), 0o755)
 	os.WriteFile(filepath.Join(profile, "Default", "Preferences"), []byte(`{"credentials_enable_service":false,`+
 		`"profile":{"password_manager_enabled":false,"password_manager_leak_detection":false},`+
@@ -314,7 +246,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	}
 	d := &Driver{info: info, cmd: cmd, lifeline: lifeline, stderr: stderr, profile: profile,
 		inflight: map[string]time.Time{}, subs: map[int]chan driver.Event{}, frames: map[string]*frame{}, w: w, h: h}
-	var watchdogExited chan struct{} // nil, never ready, without a watchdog
+	var watchdogExited chan struct{}
 	if lifeline != nil {
 		d.waited = make(chan struct{})
 		watchdogExited = d.waited
@@ -326,13 +258,10 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		return nil, err
 	}
 
-	// Chrome prints "DevTools listening on ws://127.0.0.1:PORT/devtools/browser/ID", and
-	// writes the port and path to DevToolsActivePort in its profile. Either will do: on
-	// Windows the stderr line does not always arrive.
 	wsURL := make(chan string, 2)
 	var stderrMu sync.Mutex
 	var stderrTail []string
-	stderrDone := make(chan struct{}) // Chrome and its helpers closed stderr: gone, or soon
+	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		defer stderr.Close()
@@ -384,15 +313,13 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	select {
 	case browserWS = <-wsURL:
 	case <-stderrDone:
-		// Chrome exited (or closed its stderr) before it opened DevTools: no need to wait
-		// out the 45 s (issue #81 review).
 		select {
 		case browserWS = <-wsURL:
 		default:
 			return fail(said("Chrome exited before it opened its DevTools endpoint"))
 		}
 	case <-watchdogExited:
-		select { // its last words
+		select {
 		case <-stderrDone:
 		case <-time.After(time.Second):
 		}
@@ -406,7 +333,6 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	if d.browser, err = dialCDP(ctx, browserWS, nil); err != nil {
 		return fail(err)
 	}
-	// The page target Chrome opened with about:blank.
 	var pageWS, pageID string
 	for i := 0; i < 50 && pageWS == ""; i++ {
 		resp, err := http.Get("http://" + u.Host + "/json/list")
@@ -426,14 +352,12 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 			}
 		}
 		if pageWS == "" {
-			time.Sleep(20 * time.Millisecond) // browser start-up only
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	if pageWS == "" {
 		return fail(errors.New("Chrome opened no page"))
 	}
-	// The tab is driven through its session on a browser-level connection, so that the driver
-	// can follow the tabs it opens (tabs.go, issue #78).
 	if d.page, err = dialTabs(ctx, browserWS, d.onTabEvent); err != nil {
 		return fail(err)
 	}
@@ -445,8 +369,6 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 			return fail(err)
 		}
 	}
-	// The browser's own target: frames' address changes, and new tabs, each attached paused
-	// until it is set up like this one.
 	for _, step := range []cdpStep{
 		{"Target.setDiscoverTargets", map[string]any{"discover": true}},
 		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
@@ -471,11 +393,6 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	return d, nil
 }
 
-// checkSize notes, for the run's trace, a page wider than the window asked for: Chrome on
-// macOS makes a window at least 500 wide whatever it is asked for, so --screen-size 390x844
-// gives a page 500 wide, which must not go unsaid (issue #151). Only wider counts: the
-// window's own frame makes the page smaller than the window (87 pixels less high, headless
-// on macOS; side borders on Windows), and that is not a size Chrome refused.
 func (d *Driver) checkSize(ctx context.Context, w, h int) {
 	var m struct {
 		Viewport struct {
@@ -523,22 +440,18 @@ func (d *Driver) Close() error {
 	}
 	if d.cmd != nil && d.cmd.Process != nil {
 		waited := d.waited
-		if waited == nil { // Chrome started directly: reaped only from here on
+		if waited == nil {
 			waited = make(chan struct{})
 			go func() { d.cmd.Wait(); close(waited) }()
 		}
 		select {
 		case <-waited:
-			// Chrome exited: end any helper it left (issue #124). The group's id cannot
-			// be reused while the group has members; with none left the kill finds nothing.
-			// A watchdog has done this already. Kill does nothing after this (exited).
 			if d.lifeline == nil {
 				sweepGroup(d.cmd.Process)
 			}
 			d.exited.Store(true)
 		case <-time.After(3 * time.Second):
 			killBrowser(d)
-			// Reaped now, as a rule: a later Kill must not signal its pid (issue #81 review).
 			select {
 			case <-waited:
 				d.exited.Store(true)
@@ -556,19 +469,13 @@ func (d *Driver) Close() error {
 	return nil
 }
 
-// closeStderr stops reading Chrome's stderr: a process that kept it (a crash handler in a
-// group of its own) must not keep the reader and the pipe for good.
 func (d *Driver) closeStderr() {
 	if d.stderr != nil {
 		d.stderr.Close()
 	}
 }
 
-// Kill ends Chrome's processes at once (its helpers too: issue #124) and removes its profile,
-// without the locks or the browser round trips Close waits on: for a daemon stopping when
-// Close did not finish in time.
 func (d *Driver) Kill() {
-	// Once Close has seen Chrome exit, its pid (and group) may be another process's.
 	if d.cmd != nil && d.cmd.Process != nil && !d.exited.Load() {
 		killBrowser(d)
 	}
@@ -578,10 +485,6 @@ func (d *Driver) Kill() {
 	}
 }
 
-// killBrowser kills Chrome and its helper processes. Without a watchdog, it kills Chrome's
-// process group. With one, it closes the watchdog's stdin, as tb's end would, and the watchdog,
-// Chrome's parent, kills Chrome's group (issue #81); a watchdog that has not exited 2 s later is
-// killed itself. Tests count its calls.
 var killBrowser = func(d *Driver) {
 	if d.lifeline == nil {
 		killProcGroup(d.cmd.Process)
@@ -591,7 +494,7 @@ var killBrowser = func(d *Driver) {
 	select {
 	case <-d.waited:
 	case <-time.After(2 * time.Second):
-		d.cmd.Process.Kill() // reaped or not: os.Process does not signal a reaped process
+		d.cmd.Process.Kill()
 		select {
 		case <-d.waited:
 		case <-time.After(time.Second):
@@ -599,10 +502,6 @@ var killBrowser = func(d *Driver) {
 	}
 }
 
-// startBrowser starts Chrome with args, through a watchdog where there is one (issue #81):
-// Chrome's stderr comes through it. The watchdog's stdin is lifeline; nil when Chrome was
-// started directly. stderr is a pipe of tb's own, not cmd's StderrPipe: cmd.Wait, which runs
-// from the start, must not close it before Chrome's last words are read.
 func startBrowser(ctx context.Context, chrome string, args []string, profile string) (cmd *exec.Cmd, stderr io.ReadCloser, lifeline io.WriteCloser, err error) {
 	start := func(cmd *exec.Cmd) (io.ReadCloser, error) {
 		r, w, err := os.Pipe()
@@ -634,11 +533,6 @@ func startBrowser(ctx context.Context, chrome string, args []string, profile str
 			if started {
 				return cmd, stderr, lifeline, nil
 			}
-			// Not a watchdog of this tb (another version at the path, which runs as the
-			// CLI, and exits), or it could not start Chrome: end it and start Chrome
-			// directly, which reports why it cannot start. It started no Chrome: it answers
-			// once it has. One still silent may have started a Chrome that holds the profile
-			// (issue #81 second review): end it and fail, without starting another.
 			lifeline.Close()
 			done := make(chan struct{})
 			go func() { cmd.Wait(); close(done) }()
@@ -653,8 +547,6 @@ func startBrowser(ctx context.Context, chrome string, args []string, profile str
 				return nil, nil, nil, silent
 			}
 		}
-		// Or tb's own executable could not be started again (removed by an upgrade): start
-		// Chrome directly, as before issue #81.
 	}
 	cmd = exec.Command(chrome, args...)
 	cmd.SysProcAttr = ownGroup()
@@ -664,9 +556,6 @@ func startBrowser(ctx context.Context, chrome string, args []string, profile str
 	return cmd, stderr, nil, nil
 }
 
-// watchdogStarted reports whether a watchdog answered, on ready, that it started Chrome
-// (watchdogReady and Chrome's pid). silent is the error when it gave no answer at all (it
-// neither answered nor closed its stdout) within watchdogAnswer, or before ctx ended.
 func watchdogStarted(ctx context.Context, ready io.Reader) (started bool, silent error) {
 	answer := make(chan bool, 1)
 	go func() {
@@ -685,6 +574,4 @@ func watchdogStarted(ctx context.Context, ready io.Reader) (started bool, silent
 	}
 }
 
-// watchdogAnswer bounds the wait for a watchdog's answer: it starts Chrome, which takes
-// milliseconds, before it answers.
 const watchdogAnswer = 10 * time.Second

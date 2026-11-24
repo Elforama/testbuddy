@@ -1,13 +1,3 @@
-// Package js runs the flow format's JavaScript: ${...} expressions, runScript files and
-// evalScript, with these semantics:
-//   - each evaluation runs as (function(){ return eval(src) })() in strict mode;
-//   - before each evaluation, globals other than the permanent ones are deleted and the
-//     current env variables are injected as string globals;
-//   - undeclared names read as undefined (so ${X || 'default'} works);
-//   - output, tb (also as `maestro`, for Maestro flows), json, http, faker,
-//     relativePoint and console persist;
-//   - setTimeout, setInterval, clearTimeout and clearInterval exist: an evaluation runs its
-//     timers after its own code, before it returns (see timers.go).
 package js
 
 import (
@@ -29,31 +19,21 @@ import (
 	"github.com/elforama/testbuddy/internal/legacy"
 )
 
-// Engine is one flow run's JavaScript context. It is safe for concurrent use: multi-device
-// flows share one engine (and so one `output`) across devices.
 type Engine struct {
-	mu        sync.Mutex
-	rt        *goja.Runtime
-	output    *goja.Object
-	tb        *goja.Object // the scripts' `tb` object (platform, copiedText)
-	permanent map[string]bool
-	// Log receives console.log lines from scripts whose Scope has no Log of its own.
-	Log func(string)
-	// log is the running script's Scope.Log. Set and read only while mu is held.
-	log func(string)
-	// ScriptDir is where http multipartForm filePath resolves; set by runScript.
-	ScriptDir string
-	// timers is the running evaluation's pending setTimeout/setInterval callbacks, by id.
-	// Guarded by mu; empty between evaluations.
+	mu                sync.Mutex
+	rt                *goja.Runtime
+	output            *goja.Object
+	tb                *goja.Object
+	permanent         map[string]bool
+	Log               func(string)
+	log               func(string)
+	ScriptDir         string
 	timers            map[int64]*jsTimer
 	timerID, timerSeq int64
 }
 
-// Error is a JavaScript error. It is fatal even for optional commands.
 type Error struct {
-	Msg string
-	// Syntax: the source does not compile, so it fails the same way every time it runs
-	// (a retry does not run it again, as it does after an error thrown while it runs).
+	Msg    string
 	Syntax bool
 }
 
@@ -76,7 +56,6 @@ func New(platform string) *Engine {
 	for _, k := range rt.GlobalObject().Keys() {
 		e.permanent[k] = true
 	}
-	// Builtins are non-enumerable; record them too.
 	for _, k := range []string{"Object", "Function", "Array", "String", "Number", "Boolean", "Symbol", "Math",
 		"JSON", "Date", "RegExp", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError",
 		"URIError", "Promise", "Proxy", "Reflect", "Map", "Set", "WeakMap", "WeakSet", "ArrayBuffer", "DataView",
@@ -91,7 +70,7 @@ func New(platform string) *Engine {
 	e.tb.Set("platform", platform)
 	rt.Set("output", e.output)
 	rt.Set("tb", e.tb)
-	rt.Set(legacy.ScriptObject(), e.tb) // the same object as `maestro`, for Maestro flows
+	rt.Set(legacy.ScriptObject(), e.tb)
 	rt.Set("json", func(s string) (goja.Value, error) {
 		v, err := rt.RunString("JSON.parse")
 		if err != nil {
@@ -109,8 +88,6 @@ func New(platform string) *Engine {
 		for _, a := range call.Arguments {
 			parts = append(parts, Display(a))
 		}
-		// The running script's own log (its device's, in a multi-device flow: devices share
-		// this engine and run scripts at the same time), else the engine's.
 		if out := e.log; out != nil {
 			out(strings.Join(parts, " "))
 		} else if e.Log != nil {
@@ -139,17 +116,13 @@ func ceil(f float64) int {
 	return i
 }
 
-// Scope is what one evaluation sees: the device's env variables, its platform and its
-// clipboard. Multi-device flows share one Engine (one `output`) with a Scope per device.
 type Scope struct {
 	Env        map[string]string
 	Platform   string
 	CopiedText *string
-	// Log receives this evaluation's console.log lines (nil: the engine's Log).
-	Log func(string)
+	Log        func(string)
 }
 
-// Output returns the `output` object exported to Go values (for reports and agents).
 func (e *Engine) Output() map[string]any {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -159,7 +132,6 @@ func (e *Engine) Output() map[string]any {
 	return nil
 }
 
-// prepare deletes leftover globals and injects env as string globals. Caller holds mu.
 func (e *Engine) prepare(sc *Scope) {
 	var env map[string]string
 	if sc != nil {
@@ -200,7 +172,6 @@ func validIdent(s string) bool {
 	return true
 }
 
-// Eval evaluates one expression or script and returns its value.
 func (e *Engine) Eval(src string, sc *Scope) (goja.Value, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -216,7 +187,7 @@ func (e *Engine) evalLocked(src string, sc *Scope) (v goja.Value, err error) {
 	defer func() { e.log = nil }()
 	e.rt.Set("__tb_src", src)
 	e.timers = nil
-	defer func() { e.timers = nil }() // no timer outlives its evaluation
+	defer func() { e.timers = nil }()
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, &Error{Msg: fmt.Sprint(p)}
@@ -228,19 +199,15 @@ func (e *Engine) evalLocked(src string, sc *Scope) (v goja.Value, err error) {
 		if ex, ok := err.(*goja.Exception); ok {
 			msg = ex.Value().String()
 		}
-		// eval reports source that does not compile as a thrown SyntaxError, as JSON.parse
-		// does bad input: compiling the source on its own tells the two apart.
 		_, cerr := goja.Compile("", src, true)
 		return nil, &Error{Msg: msg, Syntax: cerr != nil}
 	}
-	// Timers run now, while e.log is still this scope's.
 	if err := e.drainTimers(); err != nil {
 		return nil, err
 	}
 	return v, nil
 }
 
-// RunScript runs a runScript file's source (its result is ignored).
 func (e *Engine) RunScript(src, dir string, sc *Scope) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -251,9 +218,6 @@ func (e *Engine) RunScript(src, dir string, sc *Scope) error {
 	return err
 }
 
-// Interpolate replaces every ${...} in s with its evaluated value, using the format's rule:
-// the expression runs to the last "}" before the next "$" (it cannot contain "$"), and
-// \${...} is kept literally (without the backslash).
 func (e *Engine) Interpolate(s string, sc *Scope) (string, error) {
 	if !strings.Contains(s, "${") {
 		return s, nil
@@ -267,7 +231,6 @@ func (e *Engine) Interpolate(s string, sc *Scope) (string, error) {
 			break
 		}
 		j += i
-		// the expression: [^$]* greedy up to the last '}' before the next '$'
 		start := j + 2
 		next := strings.IndexByte(s[start:], '$')
 		limit := len(s)
@@ -302,7 +265,6 @@ func (e *Engine) Interpolate(s string, sc *Scope) (string, error) {
 	return b.String(), nil
 }
 
-// Truthy is the format's rule for a condition's `true:` value after interpolation.
 func Truthy(s string) bool {
 	t := strings.TrimSpace(s)
 	if t == "" || strings.EqualFold(t, "false") || t == "undefined" || t == "null" {
@@ -314,8 +276,6 @@ func Truthy(s string) bool {
 	return true
 }
 
-// Display renders a value the way the reference JavaScript engine's toString does: strings raw, objects in
-// display form ({a: 1}, [1, 2]), not JSON.
 func Display(v goja.Value) string {
 	if v == nil || goja.IsUndefined(v) {
 		return "undefined"
@@ -323,7 +283,6 @@ func Display(v goja.Value) string {
 	if goja.IsNull(v) {
 		return "null"
 	}
-	// Functions show their source (goja's toString), not a Go func value.
 	if _, ok := goja.AssertFunction(v); ok {
 		return v.String()
 	}
@@ -374,8 +333,6 @@ func display(x any, depth int) string {
 	}
 	return fmt.Sprint(x)
 }
-
-// ---- http ----
 
 func (e *Engine) httpObject() *goja.Object {
 	rt := e.rt

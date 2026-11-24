@@ -2,12 +2,7 @@ package dev.testbuddy.agent
 
 import java.io.ByteArrayOutputStream
 
-/** `dumpsys input_method --proto` outputs: one captured on a device, others built here. */
 object ImeTrace {
-    /**
-     * API 36 emulator, the single-line Compose field of the bench's Compose toolkit screen
-     * focused: its EditorInfo is inputType=0x8001 imeOptions=0x2000006 (Done), fieldId=-1.
-     */
     val singleLineCompose: ByteArray = hex(
         "09494d4d545241434519ac6f4c83f857e61812fd0409d507697c85c40000123c496e7075744d6574686f644d616e61676572" +
             "536572766963652e6d5072696f7269747944756d7065722364756d70417350726f746f4e6f436865636b1ab3040a4b636f6d" +
@@ -25,11 +20,6 @@ object ImeTrace {
             "0101a00101b00103",
     )
 
-    /**
-     * A trace whose current editor has these settings; [editor] false leaves the editor out
-     * (none focused). Same layout as the device's: magic (field 1), an entry (2) holding the
-     * service's state (3), whose field 7 is the current EditorInfo.
-     */
     fun of(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean = true): ByteArray {
         val service = service(inputType, imeOptions, pkg, editor)
         val entry = ByteArrayOutputStream().apply {
@@ -44,17 +34,9 @@ object ImeTrace {
         }.toByteArray()
     }
 
-    /**
-     * The output of `dumpsys input_method --proto` on Android 12-14 (issue #99 review): the
-     * service's state written straight as InputMethodManagerServiceTraceProto's field 3
-     * (dumpAsProtoNoCheck: `dumpDebug(proto, INPUT_METHOD_MANAGER_SERVICE)`), with no magic
-     * number and no entry around it; those came with Android 15. Built from AOSP's source,
-     * not captured on a device.
-     */
     fun bare(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean = true): ByteArray =
         ByteArrayOutputStream().apply { bytes(3, service(inputType, imeOptions, pkg, editor)) }.toByteArray()
 
-    /** InputMethodManagerServiceProto: its field 7 (cur_attribute) is the current EditorInfo. */
     private fun service(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean): ByteArray {
         val info = ByteArrayOutputStream().apply {
             if (inputType != 0) varint(1, inputType.toLong())

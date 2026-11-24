@@ -17,15 +17,11 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Network mocks in a real browser: a page's fetch() gets the mocked response, in the page and
-// in a cross-origin frame (its own CDP session); a failing mock rejects the fetch; a delay
-// holds the response back. Needs Chrome: runs with TB_BROWSER_TESTS=1.
 func TestMockNetworkInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
 	}
 	t.Setenv("TB_WEB_HEADLESS", "1")
-	// fetchPage fetches path when loaded and shows what came back in #out.
 	fetchPage := func(path, extra string) string {
 		return `<!doctype html><html><body><div id="out">waiting</div>` + extra + `<script>
   const t0 = Date.now();
@@ -34,8 +30,6 @@ func TestMockNetworkInChrome(t *testing.T) {
     .then(s => { document.getElementById('out').textContent = s + ' in ' + (Date.now() - t0) + 'ms'; });
 </script></body></html>`
 	}
-	// The frame is served from another site (localhost, not 127.0.0.1): Chrome runs it in its
-	// own process, attached through its own session.
 	frameSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/frame" {
 			w.Header().Set("Content-Type", "text/html")
@@ -70,7 +64,6 @@ func TestMockNetworkInChrome(t *testing.T) {
 	}
 	defer d.Close()
 
-	// out waits for every #out on the page (and in frames) to stop saying "waiting".
 	out := func(want int) []string {
 		t.Helper()
 		var got []string
@@ -114,7 +107,6 @@ func TestMockNetworkInChrome(t *testing.T) {
 		}
 	}
 
-	// A failing mock rejects the fetch.
 	if err := d.MockNetwork(ctx, driver.NetworkMock{URL: "*/ads/*", Fail: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +117,6 @@ func TestMockNetworkInChrome(t *testing.T) {
 		t.Errorf("failing mock: %q", got[0])
 	}
 
-	// A delay holds the response back.
 	if err := d.MockNetwork(ctx, driver.NetworkMock{URL: "*/api/slow", Status: 200, Body: []byte("late"),
 		Headers: [][2]string{{"Content-Type", "text/plain"}}, Delay: 700 * time.Millisecond}); err != nil {
 		t.Fatal(err)
@@ -139,7 +130,6 @@ func TestMockNetworkInChrome(t *testing.T) {
 		t.Errorf("delayed mock: %q", got[0])
 	}
 
-	// Cleared: requests reach the server again.
 	if err := d.ClearNetworkMocks(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +144,6 @@ func TestMockNetworkInChrome(t *testing.T) {
 	}
 }
 
-// outs lists the texts of the #out elements on screen, page first.
 func outs(s *ui.Screen) []string {
 	var out []string
 	for _, n := range s.Nodes {
@@ -165,11 +154,6 @@ func outs(s *ui.Screen) []string {
 	return out
 }
 
-// Issue #77: a page on one origin fetching a mocked API on another gets the mock without the
-// flow adding CORS headers: a simple GET (its non-safelisted header readable), a JSON POST
-// whose preflight (OPTIONS) the mock's method does not cover, and a credentialed fetch. A mock
-// that sets its own CORS headers keeps them. The API server answers without CORS headers, so
-// a request that reaches it fails. Needs Chrome: runs with TB_BROWSER_TESTS=1.
 func TestMockNetworkCrossOriginInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -184,7 +168,7 @@ func TestMockNetworkCrossOriginInChrome(t *testing.T) {
 		w.Write([]byte("real api"))
 	}))
 	defer api.Close()
-	apiURL := strings.Replace(api.URL, "127.0.0.1", "localhost", 1) // another origin, another site
+	apiURL := strings.Replace(api.URL, "127.0.0.1", "localhost", 1)
 	fetches := []string{
 		`fetch(API + '/api/items').then(r => r.text().then(b => r.status + ' ' + r.headers.get('x-total') + ' ' + b))`,
 		`fetch(API + '/api/orders', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Token': 't'},

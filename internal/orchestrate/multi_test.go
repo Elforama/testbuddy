@@ -34,7 +34,6 @@ func runMulti(t *testing.T, yaml string, drivers map[string]driver.Driver) Multi
 	return res
 }
 
-// Role blocks run their commands on that role's device, in order.
 func TestRunMultiRoleBlocks(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, twoRoles+`- alice:
@@ -61,7 +60,6 @@ func TestRunMultiRoleBlocks(t *testing.T) {
 	}
 }
 
-// A role with no device fails before anything runs.
 func TestRunMultiMissingDevice(t *testing.T) {
 	a := newFake("a", "A", "android")
 	res := runMulti(t, twoRoles+"- alice: [{inputText: x}]\n", map[string]driver.Driver{"alice": a})
@@ -73,7 +71,6 @@ func TestRunMultiMissingDevice(t *testing.T) {
 	}
 }
 
-// A failing step stops the flow: later steps never run.
 func TestRunMultiFailureStopsLaterSteps(t *testing.T) {
 	a, b, drivers := pair()
 	a.launchFails = -1
@@ -86,8 +83,6 @@ func TestRunMultiFailureStopsLaterSteps(t *testing.T) {
 	}
 }
 
-// parallel blocks run at the same time: each waits for a signal the other raises, which
-// would deadlock if they ran one after the other.
 func TestRunMultiParallelIsConcurrent(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, twoRoles+`- parallel:
@@ -108,7 +103,6 @@ func TestRunMultiParallelIsConcurrent(t *testing.T) {
 	}
 }
 
-// The first failure in a parallel block cancels the others, and the error names the role.
 func TestRunMultiParallelFailureCancelsOthers(t *testing.T) {
 	a, b, drivers := pair()
 	a.launchFails = -1
@@ -133,7 +127,6 @@ func TestRunMultiParallelFailureCancelsOthers(t *testing.T) {
 	}
 }
 
-// A parallel block waits for every role before the next step.
 func TestRunMultiParallelWaitsForAll(t *testing.T) {
 	a, b, drivers := pair()
 	var mu sync.Mutex
@@ -166,7 +159,6 @@ func TestRunMultiParallelWaitsForAll(t *testing.T) {
 	}
 }
 
-// All devices share one JavaScript output object: a value set on one is typed on another.
 func TestRunMultiSharedOutput(t *testing.T) {
 	_, b, drivers := pair()
 	res := runMulti(t, twoRoles+`- alice:
@@ -182,7 +174,6 @@ func TestRunMultiSharedOutput(t *testing.T) {
 	}
 }
 
-// Each device sees the shared env and TB_ROLE; names only one side defines reach the device.
 func TestRunMultiEnv(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, `appId: com.app
@@ -206,8 +197,6 @@ devices:
 	}
 }
 
-// docs/multi-device.md: "Each device sees the shared env:, then its role's env:", so a
-// role's value overrides the shared one of the same name.
 func TestRunMultiRoleEnvOverridesShared(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, `appId: com.app
@@ -231,7 +220,6 @@ devices:
 	}
 }
 
-// A role's env reaches its device when the flow does not define the same name.
 func TestRunMultiRoleEnv(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, `appId: com.app
@@ -250,7 +238,6 @@ devices:
 	}
 }
 
-// The base options' env (the CLI's -e values) reaches every device.
 func TestRunMultiBaseEnv(t *testing.T) {
 	a, b, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- alice: [{inputText: \"${CLI}\"}]\n- bob: [{inputText: \"${CLI}\"}]\n")
@@ -265,7 +252,6 @@ func TestRunMultiBaseEnv(t *testing.T) {
 	}
 }
 
-// A role's appId is that device's default app; roles without one use the flow's.
 func TestRunMultiRoleAppID(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, `appId: com.shared
@@ -284,7 +270,6 @@ devices:
 	}
 }
 
-// A device command outside a role block is refused when several devices could run it.
 func TestRunMultiPlainCommandNeedsRole(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, twoRoles+"- inputText: hello\n", drivers)
@@ -300,7 +285,6 @@ func TestRunMultiPlainCommandNeedsRole(t *testing.T) {
 	}
 }
 
-// Commands that do not touch a device may sit outside role blocks.
 func TestRunMultiDeviceFreeTopLevel(t *testing.T) {
 	_, b, drivers := pair()
 	res := runMulti(t, twoRoles+`- evalScript: ${output.n = 2}
@@ -318,7 +302,6 @@ func TestRunMultiDeviceFreeTopLevel(t *testing.T) {
 	}
 }
 
-// With a single role, plain commands run on its device.
 func TestRunMultiSingleRole(t *testing.T) {
 	a := newFake("a", "A", "android")
 	res := runMulti(t, "appId: com.app\ndevices:\n  solo: android\n---\n- inputText: direct\n- solo: [{inputText: block}]\n", map[string]driver.Driver{"solo": a})
@@ -330,7 +313,6 @@ func TestRunMultiSingleRole(t *testing.T) {
 	}
 }
 
-// onFlowStart and onFlowComplete run on every device.
 func TestRunMultiHooksOnEveryDevice(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, `appId: com.app
@@ -355,7 +337,6 @@ onFlowComplete:
 	}
 }
 
-// onFlowComplete runs even when the commands fail; the commands' error wins.
 func TestRunMultiCompleteAfterFailure(t *testing.T) {
 	a, b, drivers := pair()
 	a.launchFails = -1
@@ -376,7 +357,6 @@ onFlowComplete:
 	}
 }
 
-// A failing onFlowStart skips the commands; a failing onFlowComplete fails a passing flow.
 func TestRunMultiHookFailures(t *testing.T) {
 	t.Run("start fails", func(t *testing.T) {
 		a, _, drivers := pair()
@@ -399,7 +379,6 @@ func TestRunMultiHookFailures(t *testing.T) {
 	})
 }
 
-// A step naming a role the flow did not declare is an error (flows built in code).
 func TestRunMultiUnknownRole(t *testing.T) {
 	_, _, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- alice: [back]\n")
@@ -415,7 +394,6 @@ func TestRunMultiUnknownRole(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the flow before its first step.
 func TestRunMultiCancelled(t *testing.T) {
 	a, _, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- alice: [{inputText: x}]\n")
@@ -430,7 +408,6 @@ func TestRunMultiCancelled(t *testing.T) {
 	}
 }
 
-// A parallel block under an already-cancelled context reports the cancellation.
 func TestRunMultiParallelCancelled(t *testing.T) {
 	_, _, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- parallel:\n    alice: [{inputText: x}]\n    bob: [{inputText: y}]\n")
@@ -445,7 +422,6 @@ func TestRunMultiParallelCancelled(t *testing.T) {
 	}
 }
 
-// An env value that does not evaluate fails the flow at setup.
 func TestRunMultiSetupError(t *testing.T) {
 	_, _, drivers := pair()
 	res := runMulti(t, "appId: com.app\nenv:\n  BAD: ${(}\ndevices:\n  alice: android\n  bob: android\n---\n- alice: [back]\n", drivers)
@@ -454,7 +430,6 @@ func TestRunMultiSetupError(t *testing.T) {
 	}
 }
 
-// A recording left running on a device is stopped when the flow ends.
 func TestRunMultiStopsRecordings(t *testing.T) {
 	a, b, drivers := pair()
 	res := runMulti(t, twoRoles+"- alice: [{startRecording: clip}]\n- bob: [{inputText: x}]\n", drivers)
@@ -471,7 +446,6 @@ func TestRunMultiStopsRecordings(t *testing.T) {
 	}
 }
 
-// waitForSignal times out with a clear message when the signal never comes.
 func TestRunMultiSignalTimeout(t *testing.T) {
 	_, _, drivers := pair()
 	res := runMulti(t, twoRoles+"- bob: [{waitForSignal: {name: ready, timeout: 50}}]\n", drivers)
@@ -480,7 +454,6 @@ func TestRunMultiSignalTimeout(t *testing.T) {
 	}
 }
 
-// A signal raised before anyone waits is remembered.
 func TestRunMultiSignalBeforeWait(t *testing.T) {
 	_, b, drivers := pair()
 	res := runMulti(t, twoRoles+"- alice: [{signal: done}, {signal: done}]\n- bob: [{waitForSignal: done}, {inputText: ok}]\n", drivers)
@@ -489,7 +462,6 @@ func TestRunMultiSignalBeforeWait(t *testing.T) {
 	}
 }
 
-// Which commands may run outside a role block.
 func TestDeviceFree(t *testing.T) {
 	for name, want := range map[string]bool{
 		"runScript": true, "evalScript": true, "assertTrue": true, "signal": true, "waitForSignal": true, "setClipboard": true,
@@ -501,7 +473,6 @@ func TestDeviceFree(t *testing.T) {
 	}
 }
 
-// soleRunner finds the only runner; anyRunner any one; both handle empty maps.
 func TestRunnerPickers(t *testing.T) {
 	r1 := engine.New(newFake("a", "A", "android"), engine.Options{})
 	r2 := engine.New(newFake("b", "B", "android"), engine.Options{})
@@ -522,8 +493,6 @@ func TestRunnerPickers(t *testing.T) {
 	}
 }
 
-// console.log lines inside a parallel block carry the device that logged them: the devices
-// share one JavaScript engine and log at the same time.
 func TestRunMultiParallelLogsTaggedByDevice(t *testing.T) {
 	_, _, drivers := pair()
 	logs := func(who string) string {
@@ -562,7 +531,6 @@ func TestRunMultiParallelLogsTaggedByDevice(t *testing.T) {
 	}
 }
 
-// A multi-device flow's devices share one trace, each line tagged with its role.
 func TestRunMultiTraceTaggedByDevice(t *testing.T) {
 	_, _, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- parallel:\n    alice:\n      - inputText: a\n    bob:\n      - inputText: b\n")
@@ -594,8 +562,6 @@ type writerFunc func([]byte) (int, error)
 
 func (w writerFunc) Write(p []byte) (int, error) { return w(p) }
 
-// --record in a multi-device flow records each role's device, from the flow's start to its
-// end, each into its own file, and the result lists them role by role.
 func TestRunMultiRecordsEachDevice(t *testing.T) {
 	a, b, drivers := pair()
 	f := parseFlow(t, "multi", twoRoles+"- alice: [{inputText: a}]\n- bob: [{inputText: b}]\n")
@@ -623,12 +589,10 @@ func TestRunMultiRecordsEachDevice(t *testing.T) {
 	}
 }
 
-// panicOnRecord is a device whose StartRecording crashes (a bug in a driver, say).
 type panicOnRecord struct{ *fakeDriver }
 
 func (p panicOnRecord) StartRecording(context.Context, string) error { panic("recording crashed") }
 
-// panicOnStop is a device whose StopRecording crashes, after counting the stop.
 type panicOnStop struct{ *fakeDriver }
 
 func (p panicOnStop) StopRecording(ctx context.Context) error {
@@ -636,10 +600,6 @@ func (p panicOnStop) StopRecording(ctx context.Context) error {
 	panic("stopping crashed")
 }
 
-// issue #40: with --record, every recording a multi-device flow started is stopped, whatever
-// way the flow ends: a role that fails to start (no device, an env that does not evaluate)
-// must not leave the recordings already started on the other roles' devices running, and
-// the role that failed must not leave its own running either.
 func TestRunMultiStopsRecordingsOnEveryWayOut(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -647,9 +607,9 @@ func TestRunMultiStopsRecordingsOnEveryWayOut(t *testing.T) {
 		name    string
 		yaml    string
 		ctx     context.Context
-		noBob   bool // bob has no device
-		panics  bool // bob's StartRecording panics
-		stopBad bool // bob's StopRecording panics: alice's is still stopped
+		noBob   bool
+		panics  bool
+		stopBad bool
 		started []string
 	}{
 		{name: "role env fails", yaml: "appId: com.app\ndevices:\n  alice: android\n  bob: {platform: android, env: {X: \"${nope()}\"}}\n---\n- alice: [launchApp]\n",
@@ -701,7 +661,7 @@ func TestRunMultiStopsRecordingsOnEveryWayOut(t *testing.T) {
 				}
 			}
 			if crash != nil {
-				return // a crash's result is runSafely's, not this one
+				return
 			}
 			var roles []string
 			for _, v := range res.Videos {

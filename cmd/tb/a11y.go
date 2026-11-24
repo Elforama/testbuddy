@@ -146,7 +146,6 @@ func cmdA11y(argv []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
-		// Report what is left now.
 		if !dryRun && len(fixed.Fixed) > 0 {
 			if res, err = check(); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -196,13 +195,6 @@ func cmdA11y(argv []string) int {
 	return 0
 }
 
-// a11yText lists findings per file, one element per line in tb look's notation with the
-// rule it breaks, then a legend explaining each rule used once, then a summary; or just "ok".
-//
-//	src/Login.tsx
-//	  :6 Pressable ✗ rn-no-selector
-//
-//	✗ rn-no-selector: touchable with no testID, …. Fix: add testID="…" …
 func a11yText(res *a11y.Result) string {
 	var b strings.Builder
 	last := ""
@@ -223,12 +215,6 @@ func a11yText(res *a11y.Result) string {
 	return b.String()
 }
 
-// a11yJSON is the text output's shape as JSON: findings grouped by file, each element in
-// tb look's notation, and each rule used explained once.
-//
-//	{"files":2,"errors":1,"warnings":0,
-//	 "findings":{"src/Login.tsx":[{"line":6,"element":"Pressable","rule":"rn-no-selector"}]},
-//	 "rules":{"rn-no-selector":{"severity":"error","platform":"React Native","problem":"…","fix":"…"}}}
 func a11yJSON(res *a11y.Result) *a11yReport {
 	out := &a11yReport{Files: res.Files, Errors: res.Errors(), Warnings: len(res.Findings) - res.Errors(),
 		Findings: map[string][]a11yItem{}, Rules: map[string]a11y.Rule{}}
@@ -247,8 +233,6 @@ type a11yItem struct {
 	Rule    string `json:"rule"`
 }
 
-// a11yReport is tb a11y's JSON. With --fix it also lists what was fixed (as the elements are
-// after the fix) and what was left for a person, with why.
 type a11yReport struct {
 	Files    int                   `json:"files"`
 	Errors   int                   `json:"errors"`
@@ -256,7 +240,7 @@ type a11yReport struct {
 	Findings map[string][]a11yItem `json:"findings"`
 	Rules    map[string]a11y.Rule  `json:"rules"`
 	DryRun   bool                  `json:"dry_run,omitempty"`
-	Fixed    *[]a11yFixJSON        `json:"fixed,omitempty"` // with --fix, even when empty
+	Fixed    *[]a11yFixJSON        `json:"fixed,omitempty"`
 	Left     *[]a11yFixJSON        `json:"left,omitempty"`
 }
 
@@ -269,11 +253,6 @@ type a11yFixJSON struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// a11yFixText is a line per element --fix gave a selector (or would, in a dry run), and a
-// line per element it left for a person, with why; then a blank line.
-//
-//	fixed app/res/layout/home.xml:3 ImageButton: added android:id="@+id/close_button"
-//	left lib/home.dart:3 IconButton (flutter-no-label): its label is a tooltip people see, …
 func a11yFixText(rep *a11y.FixReport) string {
 	var b strings.Builder
 	for _, f := range rep.Fixed {
@@ -323,7 +302,6 @@ func plural(n int, word string) string {
 	return strconv.Itoa(n) + " " + word + "s"
 }
 
-// ghEscape escapes a GitHub Actions workflow command value (properties also escape , and :).
 func ghEscape(s string, property bool) string {
 	s = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
 	if property {
@@ -342,7 +320,6 @@ func git(args ...string) (string, error) {
 	return out.String(), nil
 }
 
-// gitTop is the repository's top folder, or "" outside a repository.
 func gitTop() string {
 	out, err := git("rev-parse", "--show-toplevel")
 	if err != nil {
@@ -351,7 +328,6 @@ func gitTop() string {
 	return strings.TrimSpace(out)
 }
 
-// defaultBase is where the current branch left the main branch.
 func defaultBase() string {
 	for _, ref := range []string{"origin/HEAD", "origin/main", "origin/master", "main", "master"} {
 		if out, err := git("merge-base", "HEAD", ref); err == nil {
@@ -363,9 +339,6 @@ func defaultBase() string {
 
 var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 
-// changedLines lists the files under paths that differ from base (committed, staged,
-// unstaged or untracked), with the lines each one added. Untracked files are new
-// throughout, so they have no line filter. Paths are relative to the current folder.
 func changedLines(top, base string, paths []string) ([]string, map[string]map[int]bool, error) {
 	cwd, _ := os.Getwd()
 	rel := func(p string) string {
@@ -429,7 +402,6 @@ func changedLines(top, base string, paths []string) ([]string, map[string]map[in
 			files = append(files, r)
 		}
 	}
-	// Keep only files a folder walk would check (no build output, tests or dependencies).
 	var kept []string
 	for _, f := range files {
 		if a11y.Wanted(f) {

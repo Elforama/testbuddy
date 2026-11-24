@@ -11,9 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// webDialogFake is a browser that keeps the JavaScript dialogs it answered (driver.DialogLog),
-// as the web driver does: tapping "Delete" opens a confirm. It notes other things it does on
-// its own too (driver.Noter), which are for a run's trace only.
 type webDialogFake struct {
 	*fakeDriver
 	nmu   sync.Mutex
@@ -56,7 +53,6 @@ func (f *webDialogFake) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 	return f.fakeDriver.Tap(ctx, x, y, o)
 }
 
-// openWith opens a session on drv the way tb open does (Service.connect).
 func openWith(t *testing.T, s *Service, info device.Info, drv driver.Driver) {
 	t.Helper()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return drv, nil }
@@ -65,11 +61,6 @@ func openWith(t *testing.T, s *Service, info device.Info, drv driver.Driver) {
 	}
 }
 
-// issue #91: the line tb writes for each JavaScript dialog it answers went only to a run's
-// trace, which tb do and tb look have none of, so an agent driving a page never learnt that a
-// dialog had opened, or what it said. do prints it under the step it opened in (and in
-// --json), and look prints, after the listing, those since the last command (and in --json).
-// Dialogs from before the session opened are not printed, and nor are the driver's other notes.
 func TestDoAndLookShowDialogNotes(t *testing.T) {
 	s := New()
 	f := &webDialogFake{fakeDriver: newFake("chrome", "Chrome", device.Web)}
@@ -106,8 +97,6 @@ func TestDoAndLookShowDialogNotes(t *testing.T) {
 		}
 	}
 
-	// A dialog that opens between commands (a timer) is shown by the next look, after the
-	// listing, once.
 	f.dialog("alert", "Saved!")
 	resp, _ = call(t, s.look, nil, "")
 	if !strings.HasPrefix(resp.Text, "web 400x800") || !strings.HasSuffix(resp.Text, "\nnote: web: the page opened a JavaScript alert \"Saved!\": tb answered OK\n") {
@@ -117,7 +106,6 @@ func TestDoAndLookShowDialogNotes(t *testing.T) {
 	if strings.Contains(resp.Text, "note:") {
 		t.Errorf("look shows a note twice:\n%s", resp.Text)
 	}
-	// look --json has them too, next to the listing's fields.
 	f.dialog("prompt", "Name?")
 	resp, _ = call(t, s.look, map[string]any{"json": true}, "")
 	var l struct {
@@ -136,9 +124,6 @@ func TestDoAndLookShowDialogNotes(t *testing.T) {
 	}
 }
 
-// noterFake is a phone whose driver notes what it did on its own (driver.Noter), as the
-// Android and iOS drivers do (a keyboard hidden, a launch retried): those are for a run's trace,
-// and tb do and tb look print none of them.
 type noterFake struct {
 	*fakeDriver
 	nmu   sync.Mutex

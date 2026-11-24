@@ -10,7 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The protocol's requests and replies, against a fake device. */
 class OpsTest {
     private val clock = FakeClock(1_000)
     private val probe = FakeProbe()
@@ -24,12 +23,6 @@ class OpsTest {
 
     private fun call(req: String): JSONObject = JSONObject(ops.handle(req)!!.text)
 
-    // Issue #373: an assertVisible right after setOrientation failed at once with the tree
-    // read's own "Collection contains no element matching the predicate." While the activity
-    // is recreated, the cached list held the status bar alone (no app window), and the read
-    // past the cache found no window at all: the recovery took that for "an app window is
-    // readable" and looked for it with first { }. Such a moment is a transient screen,
-    // answered as one, never an error that fails the step.
     @Test
     fun aTreeReadWhoseWindowsVanishPastTheCacheIsNotAnError() {
         val statusBar = FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM,
@@ -38,16 +31,13 @@ class OpsTest {
         nodes.windowList = listOf(statusBar)
         nodes.active = FakeNode("android.widget.TextView", "Old orientation", bounds = Box(0, 0, 1080, 2400))
             .apply { windowId = 5 }
-        nodes.onClearCache = { nodes.windowList = emptyList() } // the activity is being recreated
+        nodes.onClearCache = { nodes.windowList = emptyList() }
         val reply = call("""{"id":1,"op":"tree"}""")
         assertTrue(reply.toString(), reply.getBoolean("ok"))
         assertEquals(1, nodes.cacheClears)
-        // Issue #373 review: the read says it has no app window yet, so that the host never
-        // judges an absence on it (an empty screen shows none of the app's elements).
         val fix = reply.optJSONObject("windowFix")
         assertTrue(reply.toString(), fix != null && fix.optBoolean("pending"))
         assertEquals("pending", fix!!.getString("how"))
-        // Once the new activity's window is listed, the next read has it.
         nodes.onClearCache = {}
         nodes.windowList = listOf(statusBar, FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION,
             FakeNode("android.widget.TextView", "restore_top").apply { windowId = 7 },
@@ -58,8 +48,6 @@ class OpsTest {
         assertFalse(next.toString(), next.optJSONObject("windowFix")?.optBoolean("pending") ?: false)
     }
 
-    /** Issue #373 review: with no window listed, asking for the active root can throw too (the
-     *  window gone mid-read): the read is an empty screen marked pending, not an error. */
     @Test
     fun aTreeReadWhoseActiveRootThrowsIsNotAnError() {
         nodes.windowList = emptyList()
@@ -70,8 +58,6 @@ class OpsTest {
         assertTrue(reply.toString(), reply.getJSONObject("windowFix").getBoolean("pending"))
     }
 
-    /** Issue #373 review: a window whose properties throw as it is read (gone mid-read) is left
-     *  out; the others are written, and the reply is whole. */
     @Test
     fun aWindowThatVanishesWhileWrittenIsLeftOut() {
         val app = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION,
@@ -87,7 +73,6 @@ class OpsTest {
         assertEquals(7, windows.getJSONObject(0).getInt("id"))
     }
 
-    // AND-005: preparing an editor key is a read/fence, never an early deletion.
     @Test
     fun editorPreparationDoesNotInjectInputOrSerializeAScreen() {
         val target = EditorTarget("example.app", 7, 42, "field", "EditText")
@@ -118,9 +103,6 @@ class OpsTest {
         assertTrue(injector.keys.isEmpty())
     }
 
-    // AND-004: an opacity-zero overlay can remain mounted and intercept input.
-    // Readiness diagnostics must be able to observe it without exposing hidden
-    // nodes in ordinary snapshots.
     @Test
     fun hiddenMountedNodesAreOnlyIncludedWhenRequested() {
         val hidden = FakeNode(visibleToUser = false,
@@ -192,10 +174,9 @@ class OpsTest {
         assertTrue(r.getBoolean("ok"))
         assertTrue(r.getBoolean("verifyUnavailable"))
         assertTrue(injector.keys.isEmpty())
-        assertEquals(1000L + Input.FOCUS_WAIT_MS, clock.now) // CI mode: waited for focus to arrive (issue #97)
+        assertEquals(1000L + Input.FOCUS_WAIT_MS, clock.now)
     }
 
-    /** The host asks for the focus wait only in CI mode ("ci": true); without it there is none. */
     @Test
     fun unobservableFocusedFieldOutsideCIReportsFallbackAtOnce() {
         val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true}""")
@@ -216,15 +197,13 @@ class OpsTest {
                 else field.value += ('a' + key.code - android.view.KeyEvent.KEYCODE_A)
             }
         }
-        // Issue #299: the key is typed again only once the app's UI has sent an event after it
-        // and the field still does not show it a cap later.
         clock.repeat(1100, 100, 5000) {
             events.onEvent(UiEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
         }
         val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true,"settle":false}""")
         assertTrue(r.getBoolean("ok"))
         assertEquals("abc", field.value)
-        assertEquals(2300L, clock.now) // the latest event at 2000, still not shown a cap (300 ms) later
+        assertEquals(2300L, clock.now)
     }
 
     @Test
@@ -245,7 +224,6 @@ class OpsTest {
         assertEquals(listOf(1000L, 1080L, 1080L), at)
     }
 
-    /** The app redraws 30 ms after a touch lifts. */
     private fun appReactsToTaps() {
         injector.onTouch = { t ->
             if (t.action == MotionEvent.ACTION_UP) clock.postDelayed({
@@ -254,7 +232,6 @@ class OpsTest {
         }
     }
 
-    // Issue #204: windows on screen, top-most first, and when the agent was told each was added.
     private val appWindow = FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
     private fun showWindows(vararg ws: FakeWindow, addedAt: Long = clock.now) {
         nodes.windowList = ws.toList()
@@ -265,21 +242,14 @@ class OpsTest {
     private fun tap(ci: Boolean = false) =
         call("""{"id":9,"op":"tap","x":100,"y":100,"settle":false${if (ci) ",\"ci\":true" else ""}}""")
 
-    // Issue #204: Android drops a touch sent into a window just added whose input channel is not
-    // up yet (InputDispatcher: NO_INPUT_CHANNEL). Here the dispatcher takes touches into the new
-    // window only once it is 80 ms old. Without the wait (outside CI mode) the tap 50 ms after
-    // the window came is dropped: the platform reports its UP not delivered. In CI mode the tap
-    // is held until the window is 400 ms old, and lands. The hold is CI mode's: #204 was seen on
-    // a CI emulator only (aTapOutsideCIIsNotHeld).
     @Test
     fun tapIntoAWindowJustAddedWaitsUntilItTakesInput() {
         for ((age, ci) in listOf(0L to false, Ops.CI_INPUT_WINDOW_AGE_MS to true)) {
             injector.touches.clear()
             clock.advance(10_000)
-            showWindows() // the window goes, then comes again: new
+            showWindows()
             val added = clock.now
             showWindows(appWindow)
-            // An async DOWN is queued either way; the dispatcher's verdict comes with the sync UP.
             injector.accept = { _, sync -> !sync || clock.now - added >= 80 }
             clock.advance(50)
             val r = tap(ci)
@@ -294,8 +264,6 @@ class OpsTest {
         }
     }
 
-    // The age runs from when the window was added (the event's time), not from when the agent
-    // heard of it: an event that reached the agent 60 ms late leaves 340 ms to wait (CI mode).
     @Test
     fun windowAgeRunsFromTheEventsTime() {
         clock.advance(10_000)
@@ -303,8 +271,6 @@ class OpsTest {
         assertEquals(Ops.CI_INPUT_WINDOW_AGE_MS - 60, tap(ci = true).getLong("windowWaitMs"))
     }
 
-    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix. One
-    // read finds the window under it, for firstInWindow (issue #280).
     @Test
     fun aTapOutsideCIIsNotHeld() {
         clock.advance(10_000)
@@ -318,72 +284,57 @@ class OpsTest {
         assertEquals(reads + 1, nodes.windowReads)
     }
 
-    // Issue #321: a read numbers itself ("read"); a tap with "aim" names the very node it aims at
-    // by that read, its window and its place there (from 1), and the agent refreshes that node
-    // (asks its app, past the cache) just before the DOWN, and says where it was then ("aimAt"):
-    // a node with no view id, and a move no event told of, included. A node gone, not shown, or
-    // of a read no longer kept says nothing; without "aim" no node is refreshed.
     private fun aimedTap(read: Long, ref: Int) =
         call("""{"id":9,"op":"tap","x":50,"y":50,"settle":false,"aim":{"read":$read,"window":1,"ref":$ref}}""")
 
     @Test
     fun anAimedTapSaysWhereItsNodeWasJustBeforeTheTouch() {
-        val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100)) // no view id
+        val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100))
         val other = FakeNode(bounds = Box(0, 200, 1080, 300))
         showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(toggle, other))))
         val read = call("""{"id":1,"op":"tree"}""").getLong("read")
         assertTrue(read > 0)
-        // The app moved it by a translation: no event, the cache still has it where it was.
         toggle.appBounds = Box(310, 10, 400, 100)
         var touchesAtRefresh = -1
         toggle.onRefresh = { touchesAtRefresh = injector.touches.size }
-        val r = aimedTap(read, 2) // the root is 1, the toggle 2
-        assertEquals(0, touchesAtRefresh) // asked before the DOWN
+        val r = aimedTap(read, 2)
+        assertEquals(0, touchesAtRefresh)
         val at = r.getJSONArray("aimAt")
         assertEquals(listOf(310, 10, 400, 100), (0 until 4).map { at.getInt(it) })
         assertTrue(r.has("aimMs"))
 
-        assertFalse(aimedTap(read + 1000, 2).has("aimAt")) // no such read
-        assertFalse(aimedTap(read, 9).has("aimAt")) // no such node
+        assertFalse(aimedTap(read + 1000, 2).has("aimAt"))
+        assertFalse(aimedTap(read, 9).has("aimAt"))
         toggle.appShown = false
-        assertFalse(aimedTap(read, 2).has("aimAt")) // no longer shown
+        assertFalse(aimedTap(read, 2).has("aimAt"))
         toggle.appShown = true
         toggle.gone = true
-        assertFalse(aimedTap(read, 2).has("aimAt")) // gone
+        assertFalse(aimedTap(read, 2).has("aimAt"))
 
         val refreshes = toggle.refreshes
         assertFalse(tap().has("aimAt"))
         assertEquals(refreshes, toggle.refreshes)
-        // Only the last reads are kept.
         repeat(Tree.KEPT_READS) { call("""{"id":1,"op":"tree"}""") }
         toggle.gone = false
         assertFalse(aimedTap(read, 2).has("aimAt"))
     }
 
-    // Issue #321 review: a refresh asks by the node's accessibility id, which a recycled view
-    // keeps. A row rebound in place ("Alice" now showing "Bob", same view, same place) is not
-    // the node the tap aimed at: no aimAt, so the host keeps its recovery. A bare container
-    // (nothing a selector matches, nothing a touch acts on) is not kept: no aimAt, no refresh.
     @Test
     fun aReboundRowOrABareContainerSaysNothing() {
         val row = FakeNode(text = "Alice", bounds = Box(0, 500, 1080, 600)).apply { clickable = true }
         val root = FakeNode(children = listOf(row))
         showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, root))
         val read = call("""{"id":1,"op":"tree"}""").getLong("read")
-        row.onRefresh = { row.text = "Bob" } // the list re-sorted: the view now shows Bob
+        row.onRefresh = { row.text = "Bob" }
         val r = call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read,"window":1,"ref":2}}""")
         assertEquals(1, row.refreshes)
         assertFalse(r.has("aimAt"))
-        row.onRefresh = {} // the same row, still Bob
+        row.onRefresh = {}
         val read2 = call("""{"id":1,"op":"tree"}""").getLong("read")
         assertTrue(call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read2,"window":1,"ref":2}}""").has("aimAt"))
-        // The root: a bare container.
         assertFalse(call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read2,"window":1,"ref":1}}""").has("aimAt"))
     }
 
-    // Issue #321 review: the refresh is a call into the app's UI thread, made before the DOWN.
-    // One that takes longer than the budget (a busy UI thread) is not waited for: the tap goes
-    // with no aimAt. While it still runs, the next aimed tap does not wait on it either.
     @Test
     fun aSlowRefreshDoesNotHoldTheTouch() {
         val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100))
@@ -397,7 +348,7 @@ class OpsTest {
         assertFalse(r.has("aimAt"))
         assertEquals(1, injector.touches.count { it.event.action == MotionEvent.ACTION_DOWN })
         assertTrue("took $tookMs ms", tookMs < Tree.REFRESH_BUDGET_MS + 400)
-        assertFalse(aimedTap(read, 2).has("aimAt")) // the stuck one still runs
+        assertFalse(aimedTap(read, 2).has("aimAt"))
         assertEquals(1, toggle.refreshes)
         stuck.countDown()
         toggle.onRefresh = {}
@@ -407,12 +358,10 @@ class OpsTest {
         assertTrue(again)
     }
 
-    // Issue #280: a tap's reply says whether it was the first input the window under it ever
-    // got, and the window's age: true only for the first touch into a window id.
     @Test
     fun firstInWindowOnlyForTheFirstTouchIntoAWindow() {
         clock.advance(10_000)
-        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows()
         showWindows(appWindow)
         clock.advance(150)
         val r = tap()
@@ -424,14 +373,10 @@ class OpsTest {
         assertEquals(250L, again.getLong("windowAgeMs"))
     }
 
-    // A modal (a dialog's window) comes over the app's window: the first touch into it is first.
-    // When it closes, the app's window is back, with the same id: not new, and it took input
-    // before, so the next touch into it is not first. (A rule on "the window changed since the
-    // last touch" would take it for new and send a late-acting press twice.)
     @Test
     fun theAppsWindowBackAfterAModalClosedIsNotNew() {
         clock.advance(10_000)
-        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows()
         showWindows(appWindow)
         clock.advance(200)
         assertTrue(tap().getBoolean("firstInWindow"))
@@ -441,17 +386,13 @@ class OpsTest {
         val onDialog = tap()
         assertTrue(onDialog.getBoolean("firstInWindow"))
         assertEquals(150L, onDialog.getLong("windowAgeMs"))
-        showWindows(appWindow) // the dialog closed
+        showWindows(appWindow)
         clock.advance(100)
         assertFalse(tap().getBoolean("firstInWindow"))
-        // The same dialog opened again is a new window (a new id), and takes its first input again.
         val reopened = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 1400))
         showWindows(reopened, appWindow)
         clock.advance(100)
         assertTrue(tap().getBoolean("firstInWindow"))
-        // A full-screen dialog drops the app's window from the list while it is up (seen on an
-        // emulator): listed again when the dialog closes, with its id, it is still not new, and
-        // its age runs from when it first came.
         val fullScreen = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
         showWindows(fullScreen)
         clock.advance(100)
@@ -463,16 +404,11 @@ class OpsTest {
         assertEquals(750L, back.getLong("windowAgeMs"))
     }
 
-    // Issue #280 review: which class opened a window (its window-state event).
     private fun opened(w: FakeWindow, cls: String, pkg: String = "com.app", activity: Boolean = false) {
         if (activity) device.activities += "$pkg/$cls"
         events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg, cls, windowId = w.id))
     }
 
-    // Issue #280 re-review: an Activity's window whose first window-state event the agent saw
-    // names a view's class (a drawer opening), not the Activity's (its creation event missed,
-    // or late): it must not be taken for a dialog over the app. Fails closed: a framework view
-    // class, or a class from an event long after the window came, says nothing.
     @Test
     fun aViewsEventDoesNotMakeAnActivityADialog() {
         for ((cls, late) in listOf("androidx.drawerlayout.widget.DrawerLayout" to 0L, "com.app.SidePane" to 1_200L)) {
@@ -485,7 +421,7 @@ class OpsTest {
             val next = FakeWindow(21 + late.toInt() / 1000, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
             showWindows(next)
             clock.advance(late)
-            opened(next, cls) // the Activity's own event was not seen
+            opened(next, cls)
             clock.advance(100)
             val r = tap()
             assertTrue(r.getBoolean("firstInWindow"))
@@ -493,10 +429,6 @@ class OpsTest {
         }
     }
 
-    // Review of issue #280: only a window that came in over the app may swallow a touch while it
-    // comes in: one an Activity did not open (a Dialog, a sheet, a popup) that came while a
-    // window of its app was listed. A new screen (an Activity) is not: a press there that acts
-    // late and draws nothing must never be sent twice.
     @Test
     fun onlyAWindowOverTheAppComesIn() {
         clock.advance(10_000)
@@ -507,14 +439,11 @@ class OpsTest {
         val activity = tap()
         assertTrue(activity.getBoolean("firstInWindow"))
         assertFalse(activity.getBoolean("windowOver"))
-        // A modal dialog over it: Android takes the Activity's window off the list meanwhile.
         val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
         showWindows(dialog)
         opened(dialog, "androidx.compose.ui.window.DialogWrapper")
         clock.advance(100)
         assertTrue(tap().getBoolean("windowOver"))
-        // An Activity of another app that covers the app's window: another app launched, not
-        // over the app (a floating one is: issue #317, below).
         showWindows(appWindow)
         val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.android.permissioncontroller" })
         showWindows(other)
@@ -523,22 +452,12 @@ class OpsTest {
         val permission = tap()
         assertTrue(permission.getBoolean("firstInWindow"))
         assertFalse(permission.getBoolean("windowOver"))
-        // A window whose opening was not seen: not over.
         val unseen = FakeWindow(8, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
         showWindows(unseen, appWindow)
         clock.advance(100)
         assertFalse(tap().getBoolean("windowOver"))
     }
 
-    // Issue #317: Android's runtime permission dialog is an Activity of another package (the
-    // permission controller's GrantPermissionsActivity), floating over the app: seen on an
-    // emulator (API 36), its window is inset on every side, and the app's window drops off the
-    // list while it is up. A tap its enter animation swallows must be sent again, so its window
-    // comes over the app: an Activity of a package other than the last input's, whose window
-    // came while a window of that package was listed, and floats inside it. The app's own
-    // dialog-styled Activity never does (a new screen of the app: #280's late-acting "Pay"), nor
-    // another app's Activity that covers the app's window, beside it (split screen), or that
-    // came over no window of the app.
     @Test
     fun anotherPackagesActivityFloatingOverTheAppComesOver() {
         val perm = "com.google.android.permissioncontroller"
@@ -552,24 +471,21 @@ class OpsTest {
             showWindows(app)
             opened(app, "com.app.MainActivity", activity = true)
             clock.advance(2_000)
-            tapDialog() // the tap that asks for the permission, in the app's window
+            tapDialog()
             return app
         }
 
         appWithInput(30)
         val dialog = FakeWindow(31, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, dialogBox)
-        showWindows(dialog) // the app's window is no longer listed under it
+        showWindows(dialog)
         opened(dialog, grant, perm, activity = true)
         clock.advance(50)
-        // Seen on an emulator: the dialog's window sends its Activity's event again (review of
-        // issue #317): the same Activity, no new screen.
         opened(dialog, grant, perm, activity = true)
         clock.advance(50)
         val onDialog = tapDialog()
         assertTrue(onDialog.getBoolean("firstInWindow"))
         assertTrue("the permission dialog over the app", onDialog.getBoolean("windowOver"))
 
-        // The app's own dialog-styled Activity: a new screen of the app, not over it.
         appWithInput(40)
         val own = FakeWindow(41, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), dialogBox)
         showWindows(own)
@@ -577,7 +493,6 @@ class OpsTest {
         clock.advance(100)
         assertFalse("the app's own Activity", tapDialog().getBoolean("windowOver"))
 
-        // Another app's Activity covering the app's window: another app launched.
         appWithInput(50)
         val browser = FakeWindow(51, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.browser" })
         showWindows(browser)
@@ -585,7 +500,6 @@ class OpsTest {
         clock.advance(100)
         assertFalse("another app over all of the app", tapDialog().getBoolean("windowOver"))
 
-        // Another app's floating Activity beside the app's window (split screen), not over it.
         clock.advance(10_000)
         showWindows()
         val left = FakeWindow(60, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 538, 2400))
@@ -601,9 +515,6 @@ class OpsTest {
         assertTrue(besideTap.getBoolean("firstInWindow"))
         assertFalse("beside the app", besideTap.getBoolean("windowOver"))
 
-        // Issue #317 review: freeform or desktop windowing, another app's window cascaded wholly
-        // inside the maximized app's (a browser, a chooser). The app's window stays listed under
-        // it, unlike under the touch-modal permission dialog: not over the app.
         appWithInput(70)
         val app70 = FakeWindow(70, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
         val cascaded = FakeWindow(71, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.browser" }, dialogBox)
@@ -614,8 +525,6 @@ class OpsTest {
         assertTrue(freeform.getBoolean("firstInWindow"))
         assertFalse("freeform: the app's window still listed", freeform.getBoolean("windowOver"))
 
-        // Issue #317 review: a later window-state event of the floating window naming an
-        // Activity (a screen opened in it) makes it a screen.
         appWithInput(80)
         val later = FakeWindow(81, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, dialogBox)
         showWindows(later)
@@ -626,8 +535,6 @@ class OpsTest {
         assertFalse("a later Activity event", tapDialog().getBoolean("windowOver"))
     }
 
-    // Split screen: two Activities side by side; a new Activity replaces the right one, smaller
-    // than the display: a new screen, not over the app.
     @Test
     fun aNewActivityInSplitScreenIsNotOver() {
         clock.advance(10_000)
@@ -647,7 +554,6 @@ class OpsTest {
         assertFalse(split.getBoolean("windowOver"))
     }
 
-    // Landscape with 3-button navigation: an Activity narrower than the display is a new screen.
     @Test
     fun aLandscapeActivityNarrowerThanTheDisplayIsNotOver() {
         clock.advance(10_000)
@@ -666,7 +572,6 @@ class OpsTest {
         assertFalse(wide.getBoolean("windowOver"))
     }
 
-    // A bottom sheet's window covers the display, over its Activity: over the app.
     @Test
     fun aFullScreenSheetOverItsActivityIsOver() {
         clock.advance(10_000)
@@ -684,7 +589,6 @@ class OpsTest {
         assertTrue(onSheet.getBoolean("windowOver"))
     }
 
-    // A swipe is input too: a scroll, then a tap in the same window, is not its first.
     @Test
     fun aSwipeIsTheWindowsInput() {
         clock.advance(10_000)
@@ -695,12 +599,10 @@ class OpsTest {
         assertFalse(tap().getBoolean("firstInWindow"))
     }
 
-    // After an agent restart, a window that was there but hidden (under a full-screen dialog)
-    // is listed only later: its id is below the highest listed at the start, so it is old.
     @Test
     fun aWindowHiddenWhenTheAgentStartedIsOld() {
         clock.advance(10_000)
-        probe.windows = intArrayOf(1, 5) // the app's window 3 is under the dialog 5
+        probe.windows = intArrayOf(1, 5)
         val restarted = Events(probe, clock)
         val ops2 = Ops(device, tree, input, restarted, clock)
         val hidden = FakeWindow(3, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
@@ -712,11 +614,10 @@ class OpsTest {
         assertFalse(r.has("firstInWindow"))
     }
 
-    // A key into a window is input too: a tap into it after is not its first.
     @Test
     fun aKeyIsTheWindowsFirstInput() {
         clock.advance(10_000)
-        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows()
         showWindows(appWindow)
         probe.activeWindow = appWindow.id
         clock.advance(100)
@@ -724,12 +625,10 @@ class OpsTest {
         assertFalse(tap().getBoolean("firstInWindow"))
     }
 
-    // Windows already there when the agent started, and windows older than the horizon, say
-    // nothing: they are not ones coming in, and nothing is read for them.
     @Test
     fun oldWindowsSayNothingOfFirstInput() {
         clock.advance(10_000)
-        probe.windows = intArrayOf(appWindow.id) // there when the agent starts
+        probe.windows = intArrayOf(appWindow.id)
         nodes.windowList = listOf(appWindow)
         val started = Ops(device, tree, input, Events(probe, clock), clock)
         clock.advance(100)
@@ -738,8 +637,8 @@ class OpsTest {
         assertFalse(before.has("firstInWindow"))
         assertEquals(reads, nodes.windowReads)
         showWindows()
-        showWindows(appWindow) // added now
-        clock.advance(5_000) // and tapped only once it is old (Ops.FIRST_INPUT_HORIZON_MS)
+        showWindows(appWindow)
+        clock.advance(5_000)
         reads = nodes.windowReads
         val r = tap()
         assertFalse(r.has("firstInWindow"))
@@ -747,8 +646,6 @@ class OpsTest {
         assertEquals(reads, nodes.windowReads)
     }
 
-    // A tap into a window that has been there a while is not held, and nothing is read for it
-    // (CI mode, where the hold is).
     @Test
     fun tapIntoAnOldWindowDoesNotWait() {
         showWindows(appWindow)
@@ -761,8 +658,6 @@ class OpsTest {
         assertEquals(reads, nodes.windowReads)
     }
 
-    // Only the target window's age counts: the keyboard, the status bar or a dialog elsewhere
-    // coming, a window going, or the app's window changing its title or bounds never delay a tap.
     @Test
     fun otherWindowsChangingDoNotDelayATap() {
         showWindows(appWindow)
@@ -774,7 +669,7 @@ class OpsTest {
             { showWindows(ime, appWindow) },
             { showWindows(bar, ime, appWindow) },
             { showWindows(dialog, appWindow) },
-            { showWindows(appWindow) }, // the others go
+            { showWindows(appWindow) },
             { showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 2000), title = "Other")) },
         )
         for (change in changes) {
@@ -788,9 +683,6 @@ class OpsTest {
         }
     }
 
-    // A touch the platform refuses is reported: a refused DOWN sends nothing more (no app saw a
-    // tap: the host sends it again), and an UP not delivered says so after a CANCEL, so that no
-    // touch is left down (the DOWN may have reached the app: the host fails the step).
     @Test
     fun aTouchNotInjectedIsReported() {
         injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
@@ -841,9 +733,6 @@ class OpsTest {
         assertEquals(1500L,clock.now)
     }
 
-    // Issue #175: the tap focused a field, and its keyboard is still on its way up when
-    // hideKeyboard comes (on a slow emulator it shows a second after the tap). It is closed
-    // once it shows, not left to come up after the command returned.
     @Test
     fun hidingKeyboardClosesOneStillComingUp() {
         nodes.field = FakeField()
@@ -862,13 +751,9 @@ class OpsTest {
         assertTrue(r.getBoolean("hidden"))
         assertTrue(r.getBoolean("late"))
         assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
-        assertEquals(1780L, clock.now) // up at 1600, steady at 1700, gone 80 ms after Back
+        assertEquals(1780L, clock.now)
     }
 
-    // Issue #175: the tap opened a screen that focuses its field and asks for the keyboard
-    // itself; the screen is not even there yet (no focused field) when hideKeyboard comes. It
-    // opens slowly (changes at 700 and 1400 ms), and the keyboard shows at 1900 ms, after
-    // pendingMs from the tap but within pendingMs of the screen's last change.
     @Test
     fun hidingKeyboardClosesOneANewScreenBringsUp() {
         call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
@@ -892,8 +777,6 @@ class OpsTest {
         assertEquals(3080L, clock.now)
     }
 
-    // Issue #175: a screen that never stops changing does not hold the wait past twice
-    // pendingMs.
     @Test
     fun hidingKeyboardWaitOnAChangingScreenIsBounded() {
         call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
@@ -906,8 +789,6 @@ class OpsTest {
         assertEquals(3000L, clock.now)
     }
 
-    // Issue #175: with no keyboard coming, the wait ends pendingMs after the last action, with
-    // no Back (which would navigate), and long after an action it does not wait at all.
     @Test
     fun hidingKeyboardThatNeverComesWaitsOnlyAfterAnAction() {
         nodes.field = FakeField()
@@ -933,8 +814,6 @@ class OpsTest {
         events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
     }
 
-    // Issue #175 (review): tap, type, hide with the keyboard never seen since the tap: the
-    // keyboard may still be coming, so it waits pendingMs after the typing.
     @Test
     fun hidingKeyboardNeverSeenSinceTheTapWaitsAfterTyping() {
         nodes.field = FakeField()
@@ -947,10 +826,6 @@ class OpsTest {
         assertFalse(injector.keys.any { it.event.code == android.view.KeyEvent.KEYCODE_BACK })
     }
 
-    // Issue #175, as on CI run 43213081336 (keyboard.yaml): the tap opens the autofocus screen,
-    // "auto" is typed before its keyboard is up, and the keyboard shows while hideKeyboard runs.
-    // Without the wait the agent replied "hidden" at once and the host then found the keyboard
-    // up ("Couldn't hide the keyboard"); now it is closed once it shows.
     @Test
     fun hidingKeyboardClosesTheAutofocusKeyboardThatShowsAfterTyping() {
         call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
@@ -970,14 +845,12 @@ class OpsTest {
         assertFalse(tree.keyboardShown())
     }
 
-    // Issue #175 (review): the keyboard was up after the tap and Enter closed it: it is not
-    // still on its way, so hideKeyboard returns at once.
     @Test
     fun hidingKeyboardAfterEnterDoesNotWait() {
         nodes.field = FakeField()
         call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
         imeUp()
-        call("""{"id":2,"op":"info"}""") // a read finds it up
+        call("""{"id":2,"op":"info"}""")
         injector.onKey = { key -> if (key.action == android.view.KeyEvent.ACTION_UP) imeDown() }
         call("""{"id":3,"op":"key","code":66,"settle":false}""")
         val t = clock.now
@@ -987,8 +860,6 @@ class OpsTest {
         assertEquals(listOf(66, 66), injector.keys.map { it.event.code })
     }
 
-    // Issue #175 (review): a keyboard closed by Back gets no extra wait, and neither does a
-    // second hideKeyboard right after.
     @Test
     fun hidingKeyboardTwiceDoesNotWait() {
         nodes.field = FakeField()
@@ -1006,7 +877,6 @@ class OpsTest {
         assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
     }
 
-    // Issue #175 (review): a request without pendingMs (an older host) never waits.
     @Test
     fun hidingKeyboardWithoutPendingMsDoesNotWait() {
         nodes.field = FakeField()
@@ -1015,8 +885,6 @@ class OpsTest {
         assertEquals(1000L, clock.now)
     }
 
-    // Issue #175 (review): a keyboard that flickers up and away during the wait gets no Back,
-    // which would navigate once it is gone.
     @Test
     fun hidingKeyboardSendsNoBackForAFlicker() {
         nodes.field = FakeField()
@@ -1026,7 +894,7 @@ class OpsTest {
         val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
         assertTrue(r.getBoolean("hidden"))
         assertTrue(injector.keys.isEmpty())
-        assertEquals(2340L, clock.now) // pendingMs after the screen's last change, at 1340
+        assertEquals(2340L, clock.now)
     }
 
     @Test
@@ -1066,11 +934,6 @@ class OpsTest {
         assertEquals(30 + Events.DEFAULT_QUIET_MS, r.getInt("settleMs"))
     }
 
-    /**
-     * A tap says whether a view reported a click: one that reached no view (its target moved
-     * away under it, bench/flows/scenarios/animations.yaml's layout shift) reports none, so the
-     * host can tap it where it is now.
-     */
     @Test
     fun aTapSaysWhetherAViewTookTheClick() {
         appReactsToTaps()
@@ -1083,11 +946,6 @@ class OpsTest {
         assertTrue(call("""{"id":2,"op":"tap","x":10,"y":20}""").getBoolean("clicked"))
     }
 
-    /**
-     * A click can be reported after the tap's reply (bench/flows/scenarios/errors.yaml: the
-     * reply went out 2 ms after the tap): the reply carries the count before the tap, and
-     * "clicks" the count now, for the host to compare before it taps again.
-     */
     @Test
     fun aClickReportedAfterTheReplyCountsLater() {
         val r = call("""{"id":1,"op":"tap","x":10,"y":20,"settle":false}""")
@@ -1122,12 +980,6 @@ class OpsTest {
         assertEquals(10, injector.touches.count { it.event.action == MotionEvent.ACTION_MOVE })
     }
 
-    /**
-     * Issue #358: a swipe with a hold is the flow's press-and-hold drag: the finger still for the
-     * hold before it moves, then lifted (never a drag's CANCEL). Sent again with its request
-     * token after a dropped connection, it is answered from its first run: a second drag would
-     * reorder again.
-     */
     @Test
     fun aSwipeWithAHoldIsAPressAndHoldDragNeverSentTwice() {
         val t0 = clock.now
@@ -1150,10 +1002,9 @@ class OpsTest {
         appReactsToTaps()
         val first = ops.handle("""{"id":1,"op":"tap","x":10,"y":20,"rid":"r-1"}""")!!.text
         val again = ops.handle("""{"id":2,"op":"tap","x":10,"y":20,"rid":"r-1"}""")!!.text
-        assertEquals(2, injector.touches.size) // tapped once
+        assertEquals(2, injector.touches.size)
         assertEquals(Ops.withId(first, 2), again)
         assertEquals(2, JSONObject(again).getInt("id"))
-        // Another token is another request.
         ops.handle("""{"id":3,"op":"tap","x":10,"y":20,"rid":"r-2"}""")
         assertEquals(4, injector.touches.size)
     }
@@ -1164,7 +1015,7 @@ class OpsTest {
         val taps = injector.touches.size
         call("""{"id":100,"op":"tap","x":1,"y":1,"settle":false,"rid":"r${Ops.RECENT_REQUESTS}"}""")
         assertEquals(taps, injector.touches.size)
-        call("""{"id":101,"op":"tap","x":1,"y":1,"settle":false,"rid":"r0"}""") // forgotten: runs again
+        call("""{"id":101,"op":"tap","x":1,"y":1,"settle":false,"rid":"r0"}""")
         assertEquals(taps + 2, injector.touches.size)
     }
 

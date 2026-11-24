@@ -1,10 +1,6 @@
-// Scenario 4, "Overlays" (bench/SCENARIOS.md): things drawn over the screen that take taps.
-// The "Under" button sits at the bottom, where every overlay covers it.
 (() => {
   const { h } = Bench;
 
-  // A bottom sheet: a backdrop and a panel. Closes on its Close button, a backdrop tap, or a
-  // drag down (a pointer drag, or a downward wheel/trackpad swipe over it).
   const makeSheet = (contents, onClose) => {
     const back = h('div', { class: 'backdrop', hidden: true });
     const sheet = h('div', { class: 'sheet', role: 'dialog', hidden: true }, h('div', { class: 'grabber' }), ...contents);
@@ -25,7 +21,7 @@
     sheet.addEventListener('pointercancel', up);
     sheet.addEventListener('wheel', (e) => {
       e.preventDefault();
-      pull += -e.deltaY; // a swipe down scrolls up
+      pull += -e.deltaY;
       clearTimeout(wheelTimer);
       wheelTimer = setTimeout(() => (pull = 0), 300);
       if (pull > 60) { pull = 0; close(); }
@@ -43,15 +39,13 @@
       h('button', { id: 'under_button', onclick: () => (underCount.textContent = 'Under taps: ' + ++under) }, 'Under'),
       underCount);
 
-    // Modal dialog: the platform's own, <dialog>.
     const dlg = h('dialog', { class: 'alert' },
       h('h2', { id: 'dialog_title' }, 'Delete item?'),
       h('div', { class: 'actions' },
         h('button', { onclick: () => { dlg.close(); set('Cancelled'); } }, 'Cancel'),
         h('button', { onclick: () => { dlg.close(); set('Deleted'); } }, 'Delete')));
-    dlg.addEventListener('cancel', () => set('Cancelled')); // Esc
+    dlg.addEventListener('cancel', () => set('Cancelled'));
 
-    // Bottom sheet.
     const sheet = makeSheet([
       h('h2', { id: 'sheet_title' }, 'Sheet'),
       h('button', { id: 'sheet_action', onclick: () => set('Sheet action') }, 'Sheet action'),
@@ -59,7 +53,6 @@
     ]);
     sheet.sheet.id = 'sheet';
 
-    // Snackbar, 3000 ms.
     let snackTimer;
     const snack = h('div', { id: 'snackbar', class: 'snackbar', role: 'status', hidden: true },
       h('span', { id: 'snackbar_text' }, 'Saved'),
@@ -70,7 +63,6 @@
       snackTimer = setTimeout(() => (snack.hidden = true), 3000);
     };
 
-    // Loading veil, 1500 ms, swallows every tap (it is simply on top).
     let veilTimer;
     const veil = h('div', { id: 'veil', class: 'veil', hidden: true }, h('div', { class: 'spinner' }));
     const showVeil = () => {
@@ -79,8 +71,6 @@
       veilTimer = setTimeout(() => (veil.hidden = true), 1500);
     };
 
-    // Tooltip: anchored under its button; a tap anywhere (on a transparent catcher over the
-    // whole screen) dismisses it without reaching what is under.
     const tipButton = h('button', { id: 'show_tooltip' }, 'Show tooltip');
     const tip = h('div', { id: 'tooltip', class: 'tooltip', role: 'tooltip', hidden: true }, h('span', { id: 'tooltip_text' }, 'Tip: long press for more'));
     const catcher = h('div', { class: 'catcher', hidden: true });
@@ -95,7 +85,6 @@
       catcher.hidden = false;
     });
 
-    // Full-screen cover, with a sheet that opens over it.
     const coverResult = h('span', { id: 'cover_result', hidden: true });
     const coverSheet = makeSheet([
       h('h2', { id: 'cover_sheet_title' }, 'Sheet on cover'),
@@ -111,9 +100,6 @@
       h('button', { id: 'cover_close', onclick: () => { coverSheet.close(); cover.hidden = true; } }, 'Close cover'),
       coverSheet.back, coverSheet.sheet);
 
-    // Navigation drawer (web only, issue #300): a fixed drawer over a backdrop, whose item
-    // repeats the page's "Open dialog" button, now under the backdrop. A tap on the backdrop
-    // closes the drawer.
     const drawerBack = h('div', { class: 'backdrop', hidden: true });
     const drawer = h('nav', { id: 'drawer', class: 'drawer', hidden: true },
       h('h2', { id: 'drawer_title' }, 'Drawer'),
@@ -157,11 +143,6 @@
     };
   });
 
-  // Browser dialogs (web only, issue #91): alert(), confirm() and prompt() opened by a
-  // cross-origin iframe, and a beforeunload "Leave site?" on this page. The iframe comes from
-  // the bench's second origin on the next port (bench/web/main.go), which answers as both
-  // localhost and 127.0.0.1: the frame takes whichever this page is not on, so it is another
-  // site and Chrome runs it in its own process.
   const otherOrigin = () => 'http://' + (location.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1') +
     ':' + (Number(location.port || 80) + 1);
   Bench.sub('js_dialogs', '/overlays/js', 'Browser dialogs', 'js_title', (page) => {
@@ -174,8 +155,6 @@
       if (e.origin !== otherOrigin()) return;
       if (e.data && typeof e.data.jsDialog === 'string') result.textContent = e.data.jsDialog;
     });
-    // A panel of the page over the frame (issue #315): a modal drawer and its backdrop, drawn by
-    // the page over the frame's process. Its "Alert" repeats the frame's, which lies under it.
     const panelBack = h('div', { class: 'backdrop', hidden: true });
     const panel = h('nav', { id: 'js_panel', class: 'drawer', role: 'dialog', 'aria-modal': 'true', hidden: true },
       h('h2', { id: 'js_panel_title' }, 'Page panel'),

@@ -11,31 +11,20 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// swipeLog wraps the fake driver for issue #111: each swipe can take a while to send (a
-// simulator still starting up), be dropped (its touches never reached the app, so the screen
-// does not move), and say so, as the iOS agent does when testmanagerd only confirmed it
-// implicitly. It records when each swipe was sent and when it returned.
 type swipeLog struct {
 	*fakeDriver
-	slow        func(n int) time.Duration // how long the n-th swipe (from 1) takes to send
-	dropped     func(n int) bool          // whether the n-th swipe's touches never reached the app
-	unconfirmed func(n int) bool          // whether the agent reports the n-th swipe as unconfirmed
-	// late: how long after the n-th swipe returns its touches move the list (an app whose
-	// main thread was blocked: the queued touches land once it runs); 0 for at once.
-	late func(n int) time.Duration
-	// verdict: the agent's delivery verdict on the n-th swipe (#334's rules), nil for an agent
-	// that gives no token (outside CI mode). The token is n.
-	verdict func(n int) string
-	// implicit: the verdict on the n-th swipe rests on testmanagerd's implicit confirmation (no
-	// process reported its touches).
-	implicit func(n int) bool
-	// landOnAsk: the n-th swipe's touches move the list while the host asks about them.
-	landOnAsk func(n int) bool
+	slow        func(n int) time.Duration
+	dropped     func(n int) bool
+	unconfirmed func(n int) bool
+	late        func(n int) time.Duration
+	verdict     func(n int) string
+	implicit    func(n int) bool
+	landOnAsk   func(n int) bool
 
 	mu       sync.Mutex
 	sent     []time.Time
 	returned []time.Time
-	asked    []int64 // the tokens asked about
+	asked    []int64
 	pending  map[int]func()
 }
 
@@ -76,7 +65,6 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 	}
 	onAsk := l.landOnAsk != nil && l.landOnAsk(n)
 	if (l.dropped != nil && l.dropped(n)) || delay > 0 || onAsk {
-		// Recorded as sent, but the screen does not move (or not yet).
 		l.fakeDriver.mu.Lock()
 		l.fakeDriver.swipes = append(l.fakeDriver.swipes, o)
 		l.fakeDriver.swipeAt = append(l.fakeDriver.swipeAt, [4]int{x1, y1, x2, y2})
@@ -107,7 +95,6 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 	return res, err
 }
 
-// gap is the time between the n-th swipe's return and the next swipe's send (n from 1).
 func (l *swipeLog) gap(t *testing.T, n int) time.Duration {
 	t.Helper()
 	l.mu.Lock()
@@ -127,11 +114,6 @@ func runTraced(t *testing.T, d driver.Driver, yaml string) (FlowResult, string) 
 	return res, buf.String()
 }
 
-// Issue #111, item 1: after a drag that moved nothing, tb waits up to 2 s for a change. That
-// wait was timed from when the drag began, so a drag that itself took longer than 2 s to send
-// (a simulator still starting up) got no wait at all, and the trace said nothing of it. In CI
-// mode (where the slow simulators are) it is timed from when the drag returned. Outside CI the
-// timing stays as it was, and the trace says the drag used up the wait.
 func TestScrollWaitTimedFromDragReturn(t *testing.T) {
 	setup := func() *swipeLog {
 		f := &fakeDriver{plat: "ios"}
@@ -173,10 +155,6 @@ func TestScrollWaitTimedFromDragReturn(t *testing.T) {
 	})
 }
 
-// Issue #111, item 2: drags whose touches never reached the app were reported as "2 drags in a
-// row brought nothing new into view (a paging list springs back)", which names the wrong cause.
-// The line names every cause it may be, and says when the agent reported the touches as never
-// confirmed.
 func TestScrollFruitlessDragsWording(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	flingLine := func(t *testing.T, trace string) string {
@@ -210,11 +188,6 @@ func TestScrollFruitlessDragsWording(t *testing.T) {
 	})
 }
 
-// Issue #111, item 3: the iOS agent reports a swipe whose touches testmanagerd only confirmed
-// implicitly ("Timed out after waiting 5.0s for TouchEventsCompleted"). The trace says so on
-// every run. testmanagerd's late confirmation does not show the system routed the touches (it
-// may hold them and deliver them later), so whether they reached the app is unknown: never a
-// second drag (review of c5e98bf).
 func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 	setup := func() *swipeLog {
 		f := &fakeDriver{plat: "ios"}
@@ -232,10 +205,6 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 			implicit: func(n int) bool { return n == 1 },
 		}
 	}
-	// The review's timeline: the system holds the touches past testmanagerd's implicit
-	// confirmation, the list reads unmoved, the app answers its idle asks promptly, and the
-	// held touches land later. A drag sent again then would land too: a double scroll. The
-	// verdict rests on no process's report (implicit), so it is not trusted as "not delivered".
 	t.Run("CI mode, held touches land late", func(t *testing.T) {
 		t.Setenv("TB_CI", "1")
 		l := setup()
@@ -270,9 +239,6 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 			t.Errorf("outside CI the 2 s wait for a change stays: the next drag went %v later", g)
 		}
 	})
-	// The signal also comes for an app whose main thread was blocked past testmanagerd's 5 s:
-	// its queued touches still land, a moment after the swipe returns. Sending the drag again
-	// would scroll the list twice as far, past the element.
 	t.Run("CI mode, the touches land late", func(t *testing.T) {
 		t.Setenv("TB_CI", "1")
 		f := &fakeDriver{plat: "ios"}
@@ -286,7 +252,6 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 				}
 				return 0
 			},
-			// The agent's idle answers come late from a blocked app: no proof.
 			verdict: func(int) string { return driver.Unknown },
 		}
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
@@ -300,12 +265,6 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 	})
 }
 
-// Issue #111, with #334's evidence: in CI mode the agent judges whether the app got a swipe's
-// touches (SpringBoard's report, or testmanagerd's implicit confirmation, then two prompt idle
-// answers with no report from the app). A drag that left the list unmoved and that the app
-// provably did not get is sent again at once: it is not a drag that found nothing, so neither
-// the 2 s wait for a change nor the switch to flinging comes of it. On doubt ("unknown") it
-// counts as delivered: never a second drag that could scroll the list twice as far.
 func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
 	setup := func(verdict string, unconfirmed bool) *swipeLog {
 		f := &fakeDriver{plat: "ios"}
@@ -345,8 +304,6 @@ func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
 	})
 	t.Run("CI mode, unknown counts as delivered", func(t *testing.T) {
 		t.Setenv("TB_CI", "1")
-		// testmanagerd confirmed it only implicitly, but the app's idle answers came late (its
-		// main thread blocked, the touches maybe queued): no proof.
 		l := setup(driver.Unknown, true)
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
 		mustPass(t, res)
@@ -382,7 +339,6 @@ func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
 			t.Errorf("outside CI mode a swipe was sent again; trace:\n%s", trace)
 		}
 	})
-	// The trace names what is known of the touches, not testmanagerd's timeout.
 	t.Run("trace wording", func(t *testing.T) {
 		t.Setenv("TB_CI", "0")
 		l := setup(driver.Unknown, true)
@@ -396,13 +352,10 @@ func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
 	})
 }
 
-// Review of c5e98bf: the guards around sending a swipe again (issue #111), in CI mode.
 func TestScrollUndeliveredSwipeGuards(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	notDelivered := func(int) string { return driver.NotDelivered }
 	countAgain := func(trace string) int { return strings.Count(trace, "sending it again at once") }
-	// The screen is read again right before the re-send: a list that moved while the app was
-	// asked (its touches landed meanwhile) is not dragged again.
 	t.Run("the list moved during the ask", func(t *testing.T) {
 		f := &fakeDriver{plat: "ios"}
 		f.scroller(200, false, 0)
@@ -413,8 +366,6 @@ func TestScrollUndeliveredSwipeGuards(t *testing.T) {
 			t.Errorf("review of c5e98bf: sent again %d times though the list moved during the ask; trace:\n%s", n, trace)
 		}
 	})
-	// At most 2 re-sends in a row, as a tap's (tap_undelivered): then the drag counts as one
-	// that moved nothing.
 	t.Run("at most 2 in a row", func(t *testing.T) {
 		f := &fakeDriver{plat: "ios"}
 		f.scroller(200, false, 0)
@@ -425,8 +376,6 @@ func TestScrollUndeliveredSwipeGuards(t *testing.T) {
 			t.Errorf("review of c5e98bf: sent again %d times in a row, want 2; trace:\n%s", n, trace)
 		}
 	})
-	// A fling carries a token too: one the app provably did not get, that left the list
-	// unmoved, is sent again, the same fling.
 	t.Run("a fling", func(t *testing.T) {
 		f := &fakeDriver{plat: "ios"}
 		f.scroller(200, false, 0)

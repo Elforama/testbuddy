@@ -1,9 +1,5 @@
 package ios
 
-// Issue #48: a runner busy with an op answers the probe at once and says so (busy, busyMs,
-// busyLimitMs). connect waits for it to finish the op before using it, replaces it once it is
-// busy past the op's limit (stuck), and ends a runner of another build that holds the port.
-
 import (
 	"fmt"
 	"strings"
@@ -15,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// fakeProcs replaces ending a runner process: each pid's handler runs instead (closing the fake
-// runner, as the process ending would); the pids ended are recorded.
 type fakeProcs struct {
 	mu    sync.Mutex
 	ended []int
@@ -47,16 +41,12 @@ func (fp *fakeProcs) endedPids() []int {
 	return append([]int(nil), fp.ended...)
 }
 
-// A runner of this build busy with an earlier connection's op (a launch) is waited for, then
-// reused: not stopped, no xcodebuild, and the new connection starts once the op is done.
 func TestConnectWaitsForABusyRunner(t *testing.T) {
 	ts := stubTools(t)
 	fp := stubProcs(t)
 	port := freePorts(t, 1)
 	udid := udidFor(t, port)
 	r := newFakeRunnerAt(t, fmt.Sprintf("127.0.0.1:%d", port), udid, BuildID())
-	// Busy for the first probe, idle from the second: counted, not timed, so a slow machine
-	// whose first probe lands late still sees the runner busy once.
 	var probes atomic.Int32
 	var idleAt atomic.Int64
 	r.on("info", func(map[string]any) map[string]any {
@@ -85,12 +75,9 @@ func TestConnectWaitsForABusyRunner(t *testing.T) {
 	}
 }
 
-// A runner busy past its op's limit is stuck: its process is ended and a new runner started
-// on its port. Before #48's limit a hung op left a runner that answered the probe forever.
 func TestConnectReplacesAStuckRunner(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		// busy: the info the stuck runner answers its probe with; then: later infos.
 		then map[string]any
 	}{
 		{"past its limit", map[string]any{"busy": "tree", "busyMs": 95_000, "busyLimitMs": 90_000}},
@@ -112,7 +99,7 @@ func TestConnectReplacesAStuckRunner(t *testing.T) {
 					return in
 				}
 				if calls.Add(1) > 1 {
-					time.Sleep(4 * time.Second) // in turn behind the hung op: no answer in 3 s
+					time.Sleep(4 * time.Second)
 					return noReply
 				}
 				in["busy"], in["busyMs"], in["busyLimitMs"] = "tree", 89_990, 90_000
@@ -139,8 +126,6 @@ func TestConnectReplacesAStuckRunner(t *testing.T) {
 	}
 }
 
-// A runner of another build that does not exit when told (busy: exit waits behind its op) has
-// its process ended, and this build's runner is started on the port.
 func TestConnectEndsAStaleRunnerThatDoesNotExit(t *testing.T) {
 	ts := stubTools(t)
 	fp := stubProcs(t)
@@ -169,7 +154,6 @@ func TestConnectEndsAStaleRunnerThatDoesNotExit(t *testing.T) {
 	}
 }
 
-// A runner of another build answering on the port after the start is not driven.
 func TestConnectRefusesARunnerOfAnotherBuild(t *testing.T) {
 	ts := stubTools(t)
 	stubProcs(t)

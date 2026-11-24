@@ -6,13 +6,11 @@ import (
 	"strings"
 )
 
-// isLayoutXML: an Android layout (in a layout*/ folder, using the android namespace).
 func isLayoutXML(path, src string) bool {
 	dir := filepath.Base(filepath.Dir(path))
 	return strings.HasPrefix(dir, "layout") && strings.Contains(src, "schemas.android.com/apk/res/android")
 }
 
-// interactiveViews are views people tap or type in. Image-like ones have no text of their own.
 var interactiveViews = map[string]bool{
 	"Button": true, "ImageButton": true, "EditText": true, "CheckBox": true, "RadioButton": true,
 	"Switch": true, "SwitchCompat": true, "SwitchMaterial": true, "MaterialSwitch": true, "ToggleButton": true,
@@ -66,11 +64,9 @@ func checkAndroidXML(f *file, p *project) {
 			continue
 		}
 		el := Element{Kind: kind}
-		// The offset is where the previous token ended; the tag starts at the next '<'.
 		if i := strings.IndexByte(f.src[off:], '<'); i >= 0 {
 			off += i
 		}
-		// The fix: an id named after the click handler, else the image, else the view.
 		base := attr["onClick"]
 		if base == "" {
 			if img := attr["src"]; img != "" {
@@ -99,7 +95,6 @@ func checkAndroidXML(f *file, p *project) {
 	}
 }
 
-// androidRole is what a view is, to end its id with: close_button, email_field.
 func androidRole(kind string) string {
 	switch {
 	case strings.Contains(kind, "Radio"):

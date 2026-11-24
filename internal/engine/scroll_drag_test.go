@@ -9,22 +9,10 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// rowsList makes the screen (400x800) a list filling it, with rows of the given heights from
-// its top, and over it the nodes over() gives (drawn over the list: listed after it). It notes
-// which rows each read could show whole within seen (the part of the list a person sees: above
-// a bar drawn over it), and returns them.
 func (f *fakeDriver) rowsList(heights []int, seen ui.Rect, over func() []*ui.Node) (whole func() map[int]bool) {
 	return f.rowsListWith(heights, seen, over, rowsOpts{})
 }
 
-// rowsOpts: the list is a collection that does not number its rows (coll: Android's
-// CollectionInfo without CollectionItemInfo, as a Compose LazyColumn reports, with info's row
-// count when set, else the rows'), and how far the n-th drag (from 1) moves it, as a multiple
-// of its length (moves: 2 is two drags landing in one update, 0 a drag whose touches were
-// lost; nil: 1). label names row i (nil: "Item i"). A row nested says is a list of its own
-// (a nested scroll view): a drag that starts on it scrolls it, not the list, and counts in
-// nestedStarts. sticky is the height of a section header pinned at the list's top, drawn over
-// its rows.
 type rowsOpts struct {
 	coll         bool
 	info         *ui.Coll
@@ -33,7 +21,7 @@ type rowsOpts struct {
 	nested       func(i int) bool
 	nestedStarts *int
 	sticky       int
-	delta        func(n, d int) int // how far the n-th drag, d px long, moves the list (nil: by moves)
+	delta        func(n, d int) int
 }
 
 func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui.Node, opts rowsOpts) (whole func() map[int]bool) {
@@ -50,7 +38,7 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 		total += h
 	}
 	shown := map[int]bool{}
-	note := func() { // under mu
+	note := func() {
 		top := -off
 		for i, h := range heights {
 			if top >= seen.T && top+h <= seen.B {
@@ -105,7 +93,7 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 		top := -off
 		for i, h := range heights {
 			if y1 >= top && y1 < top+h && nested(i) {
-				k = 0 // it scrolls the nested list
+				k = 0
 				if opts.nestedStarts != nil {
 					*opts.nestedStarts++
 				}
@@ -132,10 +120,6 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 	}
 }
 
-// Issue #372: scrollUntilVisible dragged 40% of the screen whatever the list's size, so a long
-// scroll took about twice the drags it needs. Each drag now spans most of the list it scrolls,
-// and still never steps over a row: every row on the way shows whole in some read, a tall one
-// too (the drags shorten while one shows).
 func TestScrollDragSpansTheList(t *testing.T) {
 	t.Parallel()
 	uniform := make([]int, 200)
@@ -146,7 +130,7 @@ func TestScrollDragSpansTheList(t *testing.T) {
 	for i := range mixed {
 		mixed[i] = 50
 		if i%10 == 5 {
-			mixed[i] = 300 // taller than the room a 640 px drag leaves in an 800 px list
+			mixed[i] = 300
 		}
 	}
 	for _, tc := range []struct {
@@ -155,11 +139,8 @@ func TestScrollDragSpansTheList(t *testing.T) {
 		target     int
 		maxDrags   int
 	}{
-		// Item 120's bottom at 6050: 5250 px to scroll. 40% of the screen (320 px): 17 drags.
 		{"android", "android", uniform, 120, 10},
-		// iOS started 70% into the list (480 px drags): 11.
 		{"ios", "ios", uniform, 120, 10},
-		// 4 tall rows on the way (Item 45 at 3500-3550): the old drags took 9.
 		{"tall rows", "android", mixed, 45, 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,10 +162,6 @@ func TestScrollDragSpansTheList(t *testing.T) {
 	}
 }
 
-// Issue #372: a long drag starts near the list's edge, where an app draws a floating button or
-// a bottom bar over it. No drag may start on one (it would be a tap on it, not a drag of the
-// list), and a bar drawn over the list leaves less of it to see: every row still shows whole
-// above the bar in some read.
 func TestScrollDragStartsClearOfWhatIsOverTheList(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 200)
@@ -234,11 +211,6 @@ func TestScrollDragStartsClearOfWhatIsOverTheList(t *testing.T) {
 	}
 }
 
-// Issue #372: a collection that does not number its rows (a Compose LazyColumn) gets the long
-// drags too, guarded: two drags can land in one update, and with no row numbers the gap check
-// cannot see the rows that skips. A long drag counts once a row that showed whole before it
-// shows again, moved by about the drag's length; else the drag goes back that length and the
-// rest of the scroll drags shorter, so nothing is skipped.
 func TestScrollDragUnnumberedCollection(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 200)
@@ -259,14 +231,10 @@ func TestScrollDragUnnumberedCollection(t *testing.T) {
 		target     int
 		maxDrags   int
 	}{
-		// Item 120 as in TestScrollDragSpansTheList: 17 drags of 40% of the screen.
 		{"long", "android", nil, 120, 10},
 		{"long ios", "ios", nil, 120, 10},
-		// The first drag lands with the travel of two (two drags in one update): Items 16-25
-		// never show unless the drag is checked.
 		{"merged", "android", twice(1), 20, 10},
 		{"merged ios", "ios", twice(1), 20, 10},
-		// The third: Items 42-50 skipped.
 		{"merged later", "android", twice(3), 45, 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -285,13 +253,6 @@ func TestScrollDragUnnumberedCollection(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): only a list whose skips can be seen (an Android collection numbering its
-// rows: the gap check; the web, whose drags are an instant scrollBy) gets a long drag unchecked.
-// A collection reporting no row count (Compose's -1), a list with no collection info at all
-// (a ScrollView, an iOS table or a LazyVStack) gets it checked too: the first drag lands with the
-// travel of two, and Item 20 shows anyway. The check holds when the drag back is lost (its
-// touches never reached the app: sent again) and when a label repeated about once a screen
-// ("Sponsored") shows where a row of the drag's would: it takes two rows moved alike.
 func TestScrollDragMergedDragsNeverSkip(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 200)
@@ -315,7 +276,7 @@ func TestScrollDragMergedDragsNeverSkip(t *testing.T) {
 			return map[int]int{1: 2, 2: 0}[n] + map[bool]int{true: 1}[n > 2]
 		}}},
 		{"repeated label", "android", rowsOpts{coll: true, moves: merged, label: func(i int) string {
-			if i%17 == 14 { // rows 14 and 31: Item 15 is 430 px past the first, about a drag
+			if i%17 == 14 {
 				return "Sponsored"
 			}
 			return fmt.Sprintf("Item %d", i)
@@ -335,8 +296,6 @@ func TestScrollDragMergedDragsNeverSkip(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): a long drag starts near the list's edge, where a row can be a list of its
-// own (a nested scroll view): a drag that starts there scrolls it, not the list. None may.
 func TestScrollDragNotFromANestedList(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 120)
@@ -359,9 +318,6 @@ func TestScrollDragNotFromANestedList(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): a section header pinned at the list's top (Compose's stickyHeader) is
-// drawn over the rows under it: they do not show there. Every row still shows whole below it in
-// some read.
 func TestScrollDragUnderAStickyHeader(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 200)
@@ -373,7 +329,7 @@ func TestScrollDragUnderAStickyHeader(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 120', timeout: 6000}"))
 	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
 	shown := whole()
-	for i := 3; i <= 120; i++ { // Items 0-2 start under the header
+	for i := 3; i <= 120; i++ {
 		if !shown[i] {
 			t.Errorf("Item %d never showed whole below the header (drags %v)", i, f.swipeAt)
 			break
@@ -381,8 +337,6 @@ func TestScrollDragUnderAStickyHeader(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): on iOS, a list a long drag cannot be checked on (no row named once on
-// screen) keeps the drag that starts 70% into it (dragStart).
 func TestScrollDragIOSUncheckedKeepsDragStart(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 60)
@@ -402,8 +356,6 @@ func TestScrollDragIOSUncheckedKeepsDragStart(t *testing.T) {
 	}
 }
 
-// Issue #372: an endless feed without row numbers that loads more once a drag nears its end
-// (bench/flows/scenarios/lists.yaml's "Post 55"): the long drags still find the row.
 func TestScrollDragUnnumberedFeedLoadsMore(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -428,12 +380,6 @@ func TestScrollDragUnnumberedFeedLoadsMore(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 55, timeout: 10000}"))
 }
 
-// Issue #372 (review): a checked drag that moved the content well short of its length was
-// taken for a list at its end once the app settled; the rest of it can still land with the
-// next drag. The next drag leaves room for that. Here only Items 3, 4 and 12 are named once
-// (the other rows say "Row"): the first drag (432 px) shows 72 px; the second, held at the cap
-// (360 px) for want of two rows to check it by, brings the other 360 px with it: 720 px in all
-// steps over row 7 of 112 px rows, unless it is kept to 312.
 func TestScrollDragAfterAShortOne(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 40)
@@ -470,10 +416,6 @@ func TestScrollDragAfterAShortOne(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): the same with a drag shown more than half (339 of 614 px), which passes
-// its check at once: the rest (275 px) still lands with the next drag, held at the cap (360
-// px). 635 px in all steps over the 7th row (170 px rows below a 120 px one), unless the next
-// drag leaves room for the rest too.
 func TestScrollDragAfterAPartlyShownOne(t *testing.T) {
 	t.Parallel()
 	rows := make([]int, 40)
@@ -511,9 +453,6 @@ func TestScrollDragAfterAPartlyShownOne(t *testing.T) {
 	}
 }
 
-// Issue #372 (review): the element is in a short list of its own in a scrolling page (ownList
-// chose it, as placeVertical drags it): the long drags scroll that list, never the page around
-// it (it shows less than half as much, which otherwise takes the page for the list dragged).
 func TestScrollDragKeepsTheListHoldingTheElement(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
@@ -528,7 +467,7 @@ func TestScrollDragKeepsTheListHoldingTheElement(t *testing.T) {
 			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Page %d", i), Depth: 1, Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
 		}
 		nodes = append(nodes, &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{T: 500 - page, R: 400, B: 750 - page}})
-		for j := 0; j < 40; j++ { // a list that lists all its rows, as iOS does
+		for j := 0; j < 40; j++ {
 			top := 500 - page + j*50 - inner
 			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Inner %d", j), Depth: 2, Enabled: true, Clickable: true,
 				Bounds: ui.Rect{T: top, R: 400, B: top + 50}})

@@ -1,4 +1,3 @@
-// Screen 3, Detail: one item, Add to cart, and reviews that load after 600 ms.
 import SwiftUI
 
 struct DetailView: View {

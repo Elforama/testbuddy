@@ -12,21 +12,11 @@ import (
 	"github.com/elforama/testbuddy/internal/tether"
 )
 
-// recordStarted bounds the wait for simctl to say the recording started; a recording
-// slower to start still goes on.
 var recordStarted = 5 * time.Second
 
-// recordStopWait bounds the wait for simctl to write the file out once interrupted.
 var recordStopWait = 10 * time.Second
 
-// StartRecording records the simulator's screen to path until StopRecording. It returns
-// once simctl says the recording started, so the screen from now on is in it.
-//
-// simctl runs under a watchdog (internal/tether): when tb is gone, killed with SIGKILL
-// included, the watchdog interrupts it (it writes the file out) instead of leaving it recording
-// until the simulator shuts down (issue #52).
 func (d *Driver) StartRecording(ctx context.Context, path string) error {
-	// The check and the claim under one lock: two starts cannot both record (issue #52).
 	d.mu.Lock()
 	busy := d.recording
 	if !busy {
@@ -42,7 +32,7 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		if !ok {
 			d.recording = false
 		}
-		close(d.recordStarting) // Close waits for it
+		close(d.recordStarting)
 		d.recordStarting = nil
 		d.mu.Unlock()
 	}()
@@ -51,8 +41,8 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		return err
 	}
 	started := make(chan struct{})
-	read := make(chan []string, 1) // what simctl said, once its output ended
-	var t0 time.Time               // set before started closes
+	read := make(chan []string, 1)
+	var t0 time.Time
 	go func() {
 		var said []string
 		once := false
@@ -78,11 +68,10 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		var said []string
 		select {
 		case said = <-read:
-		case <-time.After(time.Second): // something it started still holds its output
+		case <-time.After(time.Second):
 		}
 		return fmt.Errorf("simctl recordVideo stopped at once: %s", strings.Join(said, "; "))
 	case <-time.After(recordStarted):
-		// Recording on: it may only be slow to start. The trace says so (issue #52).
 		d.note(fmt.Sprintf("ios: simctl recordVideo did not confirm it started within %s; recording on, the video may miss the start", recordStarted))
 	case <-ctx.Done():
 		p.Kill()
@@ -110,22 +99,8 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	return nil
 }
 
-// statusBarHold is how long markRecordingStart shows its status bar time: a few frames.
 const statusBarHold = 300 * time.Millisecond
 
-// markRecordingStart marks the video's start, and returns when the mark showed and how long
-// it stayed (zero when it could not mark).
-//
-// simctl writes a frame only when the screen changes, so the video of a still screen begins at
-// the first change after "Recording started": in CI one began 43 s late, while a launch waited,
-// and everything --annotate drew from tb's clock came 43 s behind the picture. So right after the
-// start the driver changes the status bar's clock for a moment (the next minute) and clears it
-// again: the video begins at that change. A simulator whose status bar has overrides of its own
-// (screenshots at 9:41) is left as it is: clearing would drop them.
-//
-// The video does not always begin at the mark (CI, PR #393: it showed 2.4 s in, the video
-// beginning earlier), so --annotate looks for it in the video (driver.RecordingMark): shown is
-// when the override returned, the status bar changed by then.
 func (d *Driver) markRecordingStart(ctx context.Context) (time.Time, time.Duration) {
 	bound := func() (context.Context, context.CancelFunc) { return context.WithTimeout(ctx, 5*time.Second) }
 	c, cancel := bound()
@@ -152,15 +127,12 @@ func (d *Driver) markRecordingStart(ctx context.Context) (time.Time, time.Durati
 	return shown, cleared.Sub(shown)
 }
 
-// RecordingMark is the last recording's start mark (driver.RecordingMark).
 func (d *Driver) RecordingMark() (time.Time, time.Duration, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.recordT0, d.recordMarkHeld, d.recordMarkHeld > 0 && !d.recordT0.IsZero()
 }
 
-// hasStatusBarOverrides reads `simctl status_bar list`: an override is a "Name: value" line
-// (the heading "Current Status Bar Overrides:" has nothing after its colon).
 func hasStatusBarOverrides(list string) bool {
 	for _, l := range strings.Split(list, "\n") {
 		if k, v, ok := strings.Cut(strings.TrimSpace(l), ":"); ok && k != "" && strings.TrimSpace(v) != "" {
@@ -170,9 +142,6 @@ func hasStatusBarOverrides(list string) bool {
 	return false
 }
 
-// endRecording stops a recording still running when the driver closes (issue #52), simctl
-// writing its file out. A start still in progress is waited for first (it is bounded: the
-// watchdog's answer, then recordStarted), so the recording it makes is stopped too.
 func (d *Driver) endRecording() {
 	d.mu.Lock()
 	starting := d.recordStarting
@@ -183,9 +152,6 @@ func (d *Driver) endRecording() {
 	d.StopRecording(context.Background())
 }
 
-// RecordingStarted is when the last recording's video begins: the status bar change that
-// markRecordingStart made, else when simctl said it started ("Recording started", read as it
-// came). Zero when neither is known.
 func (d *Driver) RecordingStarted() time.Time {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -205,7 +171,7 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 		d.recording = false
 		d.mu.Unlock()
 	}()
-	p.Interrupt() // simctl finishes the file on SIGINT
+	p.Interrupt()
 	select {
 	case <-done:
 	case <-time.After(recordStopWait):

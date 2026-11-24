@@ -2,10 +2,9 @@ package ci
 
 import "testing"
 
-// TB_CI decides when set; unset, CI=true (set by CI services) turns CI mode on.
 func TestOn(t *testing.T) {
 	for _, tc := range []struct {
-		tbCI, ci string // "-" leaves it unset
+		tbCI, ci string
 		want     bool
 	}{
 		{"-", "-", false},
@@ -16,7 +15,7 @@ func TestOn(t *testing.T) {
 		{"true", "-", true},
 		{"0", "true", false},
 		{"false", "true", false},
-		{"", "true", true}, // empty is unset
+		{"", "true", true},
 		{" TRUE ", "-", true},
 	} {
 		set := func(k, v string) {

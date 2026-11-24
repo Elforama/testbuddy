@@ -2,10 +2,6 @@
 
 package tether
 
-// Issue #52: the watchdog (this test binary, started again) runs the process, passes SIGINT on
-// and its output through; an executable that does not answer as a watchdog gets the process
-// started directly. Killing tb itself is tested in the iOS and Android drivers.
-
 import (
 	"bufio"
 	"io"
@@ -54,11 +50,6 @@ func TestTethered(t *testing.T) {
 	}
 }
 
-// Issue #52 (device check): once tb is gone, a process the onGone commands told to stop gets
-// time to end on its own before it is interrupted. On an emulator, adb shell interrupted right
-// after the device was told to stop cut screenrecord off before it wrote its file out ("moov
-// atom not found"). The stand-in here finishes 0.3 s after its stop file appears and, interrupted
-// before, exits without its file.
 func TestGoneLetsOnGoneFinish(t *testing.T) {
 	dir := t.TempDir()
 	stop, done := filepath.Join(dir, "stop"), filepath.Join(dir, "done")
@@ -74,7 +65,7 @@ func TestGoneLetsOnGoneFinish(t *testing.T) {
 	if got := readLine(t, r); got != "hi" {
 		t.Fatalf("first line %q", got)
 	}
-	p.keep.Close() // as tb's end does
+	p.keep.Close()
 	go io.Copy(io.Discard, r)
 	waited := make(chan error, 1)
 	go func() { waited <- p.Wait() }()
@@ -91,7 +82,7 @@ func TestGoneLetsOnGoneFinish(t *testing.T) {
 
 func TestNotAWatchdog(t *testing.T) {
 	old := watchdogPath
-	watchdogPath = func() string { return "/bin/echo" } // answers something else
+	watchdogPath = func() string { return "/bin/echo" }
 	t.Cleanup(func() { watchdogPath = old })
 	p, err := Start([]string{"/bin/sh", "-c", script}, nil)
 	if err != nil {

@@ -1,13 +1,10 @@
-// Scenario 7, "Onboarding and login" (bench/SCENARIOS.md): a pager shown once per page load,
-// then sign in (validation, a 1000 ms spinner), a six-box one-time code, signed in.
 (() => {
   const { h } = Bench;
 
   Bench.scenario('onboarding', 'Onboarding and login', (page) => {
-    let seen = false; // onboarding was finished in this page load
+    let seen = false;
     let email = '';
 
-    // ---- pager ----
     const TITLES = ['Welcome', 'Track things', 'Stay in sync'];
     const BLURBS = ['Buddy Bench keeps your things in one place.', 'Add anything and watch it change.', 'Everything follows you on every device.'];
     const pager = h('div', { id: 'pager', class: 'pager', 'aria-roledescription': 'carousel' },
@@ -23,8 +20,6 @@
       done.hidden = i !== 2;
     };
     pager.addEventListener('scroll', onPage, { passive: true });
-    // A horizontal wheel/trackpad swipe turns one page once it passes 20 % of the width, as a
-    // phone pager's fling does; a shorter one springs back. (Touch uses the native snap.)
     let swipe = 0, swipeTurned = false, swipeTimer;
     pager.addEventListener('wheel', (e) => {
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
@@ -43,7 +38,6 @@
       h('div', { class: 'row', style: 'justify-content:space-between' },
         h('button', { id: 'onboarding_skip', onclick: () => finish() }, 'Skip'), indicator, next, done));
 
-    // ---- sign in ----
     const emailField = h('input', { id: 'signin_email', type: 'email', inputmode: 'email', placeholder: 'Email', autocomplete: 'off' });
     const pwField = h('input', { id: 'signin_password', type: 'password', placeholder: 'Password', autocomplete: 'off' });
     const remember = h('input', { id: 'signin_remember', type: 'checkbox' });
@@ -75,7 +69,6 @@
       h('label', { class: 'row' }, remember, 'Remember me'),
       submit, spinner, error);
 
-    // ---- one-time code ----
     const boxes = [1, 2, 3, 4, 5, 6].map((i) => h('input', {
       id: 'otp_' + i, inputmode: 'numeric', autocomplete: 'one-time-code', 'aria-label': 'Digit ' + i,
     }));
@@ -91,11 +84,9 @@
     boxes.forEach((box, i) => {
       box.addEventListener('input', (e) => {
         otpError.hidden = true;
-        // One digit per box: a typed digit replaces the box's digit; a pasted (or inserted)
-        // code spreads over the boxes from here.
         const typed = e.inputType === 'insertText' && e.data != null;
         const digits = (typed ? e.data : box.value).replace(/\D/g, '');
-        if (typed && !digits) { box.value = box.dataset.v || ''; return; } // not a digit
+        if (typed && !digits) { box.value = box.dataset.v || ''; return; }
         box.dataset.v = digits.slice(0, 1);
         box.value = digits.slice(0, 1);
         let k = i;
@@ -113,7 +104,6 @@
       h('div', { class: 'otp' }, boxes),
       otpError);
 
-    // ---- signed in ----
     const signedIn = h('span', { id: 'signin_done' });
     const signedView = h('div', { class: 'view' }, signedIn,
       h('button', { id: 'signout', onclick: () => { resetSignin(); show('signin'); } }, 'Sign out'));

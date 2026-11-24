@@ -1,5 +1,3 @@
-// Scenario 13, Errors and retries: a load that fails once, form validation, an empty state, a
-// request that outlasts a runner's settle time, and a short-lived error snackbar.
 import SwiftUI
 
 struct ErrorsScenario: View {
@@ -114,7 +112,6 @@ struct ErrorsScenario: View {
         }
     }
 
-    /// Fails the first time, succeeds on every later try.
     private func load() {
         showRetry = false
         empty = false

@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// mockNetwork reads every option; values stay raw (the engine interpolates them).
 func TestMockNetworkFull(t *testing.T) {
 	c := step(t, `- mockNetwork:
     url: "*/api/items*"
@@ -28,7 +27,6 @@ func TestMockNetworkFull(t *testing.T) {
 	}
 }
 
-// The defaults: any method, status 200, an empty body, no delay.
 func TestMockNetworkDefaults(t *testing.T) {
 	c := step(t, "- mockNetwork: {url: \"*/api/*\"}\n")
 	want := &NetworkMock{URL: "*/api/*", Status: 200}
@@ -37,7 +35,6 @@ func TestMockNetworkDefaults(t *testing.T) {
 	}
 }
 
-// fail: true makes the request fail; it takes no response options.
 func TestMockNetworkFail(t *testing.T) {
 	c := step(t, "- mockNetwork: {url: \"*/ads/*\", fail: true}\n")
 	if !c.Mock.Fail || c.Mock.URL != "*/ads/*" {
@@ -45,8 +42,6 @@ func TestMockNetworkFail(t *testing.T) {
 	}
 }
 
-// file: is read at parse time, relative to the flow file, like runScript's file; the body
-// keeps its bytes as they are (no interpolation) and the path is kept for its extension.
 func TestMockNetworkFile(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"fixtures/items.json": `{"items": ["${raw}"]}`})
 	f, err := ParseBytes(filepath.Join(dir, "main.yaml"), []byte(hdr+"- mockNetwork: {url: \"*/items\", file: fixtures/items.json}\n"))
@@ -76,7 +71,6 @@ func TestMockNetworkErrors(t *testing.T) {
 	})
 }
 
-// clearNetworkMocks is a bare command; a map form takes label and optional only.
 func TestClearNetworkMocks(t *testing.T) {
 	if c := step(t, "- clearNetworkMocks\n"); c.Name != "clearNetworkMocks" {
 		t.Errorf("name %q", c.Name)
@@ -89,7 +83,6 @@ func TestClearNetworkMocks(t *testing.T) {
 	})
 }
 
-// Mocking changes no screen: it does not count as an interaction.
 func TestMockNetworkNotMutating(t *testing.T) {
 	for _, n := range []string{"mockNetwork", "clearNetworkMocks"} {
 		if (&Command{Name: n}).Mutating() {

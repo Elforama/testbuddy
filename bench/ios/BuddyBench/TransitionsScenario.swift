@@ -1,15 +1,9 @@
-// Scenario 15, Screen transitions: an account list that closes over a form while the app is
-// busy. After a pick it is already gone for accessibility (the form is listed at once), but it
-// stays drawn, perfectly still, and takes touches for 800 ms, so a tap on the form's amount
-// field in that time picks "Credit card".
 import SwiftUI
 
 struct TransitionsScenario: View {
-    /// How long a closed list stays drawn (and takes touches) before it is removed.
     static let closeDelay = 800
 
     @State private var listOpen = false
-    /// Whether the list is closing: picked, out of the accessibility tree, not removed yet.
     @State private var closing = false
     @State private var removal: Task<Void, Never>?
     @State private var account = "none"
@@ -23,13 +17,11 @@ struct TransitionsScenario: View {
                 form
                 if listOpen {
                     AccountList(closing: closing, pick: pick)
-                        // Full width under the title, down to the bottom of the screen.
                         .padding(.horizontal, -20)
                         .ignoresSafeArea(.container, edges: .bottom)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            // Opened and removed in one step: no transition.
             .transaction { $0.animation = nil }
         }
         .onDisappear { removal?.cancel() }
@@ -47,7 +39,6 @@ struct TransitionsScenario: View {
             status("To: \(account)", "tr_account")
             status(amount.isEmpty ? "Send nothing to \(account)" : "Send \(amount) to \(account)",
                    "tr_summary")
-            // Below the list's first two rows (2 × 64 pt), so under "Credit card".
             TextField("Amount", text: $amount)
                 .focused($amountFocused)
                 .onChange(of: amountFocused) { _, focused in
@@ -63,10 +54,8 @@ struct TransitionsScenario: View {
         }
     }
 
-    /// Picks an account and closes the list; a pick while it closes starts the 800 ms again.
     private func pick(_ name: String) {
         account = name
-        // The second dismissal can release the keyboard after the field gains focus.
         dismissNextAmountFocus = name == "Checking"
         closing = true
         removal?.cancel()
@@ -81,10 +70,6 @@ struct TransitionsScenario: View {
     }
 }
 
-/// The account list, in UIKit: SwiftUI's `accessibilityHidden` (and UIKit's
-/// `accessibilityElementsHidden` alone) still leave the rows in what XCUITest reads, so the
-/// list takes itself out of the tree by hand. Its rows are plain controls that draw no
-/// highlight, so nothing on screen changes between a pick and the list's removal.
 private struct AccountList: UIViewRepresentable {
     let closing: Bool
     let pick: (String) -> Void
@@ -128,7 +113,6 @@ final class AccountListView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let w = bounds.width
-        // Checking and Savings 64 pt each, Credit card the rest of the height.
         rows[0].frame = CGRect(x: 0, y: 0, width: w, height: 64)
         rows[1].frame = CGRect(x: 0, y: 64, width: w, height: 64)
         rows[2].frame = CGRect(x: 0, y: 128, width: w, height: max(0, bounds.height - 128))
@@ -137,8 +121,6 @@ final class AccountListView: UIView {
         separators[1].frame = CGRect(x: 0, y: 128 - hair, width: w, height: hair)
     }
 
-    /// Closing: out of the accessibility tree at once (no children, no id, rows no longer
-    /// elements), but drawn as it was and still taking touches.
     func setClosing(_ closing: Bool) {
         guard closing != accessibilityElementsHidden else { return }
         accessibilityElementsHidden = closing
@@ -149,7 +131,6 @@ final class AccountListView: UIView {
     }
 }
 
-/// A list row: a control with a label that looks the same pressed or not.
 final class AccountRow: UIControl {
     init(name: String, id: String) {
         super.init(frame: .zero)

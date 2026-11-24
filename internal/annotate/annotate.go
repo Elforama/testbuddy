@@ -1,17 +1,3 @@
-// Package annotate draws on a finished screen recording what a person watching it needs to
-// follow the run (`tb test --record --annotate`): a ring where each tap, double tap and long
-// press landed (a ring that moves along a swipe), and, in a band added below the recording,
-// the step that is running. The band keeps the text off the app's screen, so it hides nothing.
-//
-// tb draws the text itself (captionImage, with the Go fonts) and ffmpeg only places the images:
-// the video needs no subtitle support from ffmpeg (libass, freetype), which builds such as
-// Homebrew's may not have.
-//
-// The device records the screen as it is; tb's own taps and swipes are not drawn there (iOS
-// and Chrome have no setting for that, and Android's "show taps" draws a dot too small and
-// brief to see in a video). So tb draws them afterwards with ffmpeg, from what the runner
-// noted while it ran, the same on every platform. Burning them in, rather than a subtitle
-// track beside the video, is what keeps them in a video attached to a pull request.
 package annotate
 
 import (
@@ -31,21 +17,17 @@ import (
 	"time"
 )
 
-// Caption is a step's text, shown from Start to End (times from the video's start).
 type Caption struct {
 	Start, End time.Duration
 	Text       string
 }
 
-// Touch is a gesture: when it began (from the video's start), its kind (tap, doubleTap,
-// longPress, swipe) and its points as fractions of the screen's width and height.
 type Touch struct {
 	At   time.Duration
 	Kind string
 	Pts  [][2]float64
 }
 
-// FFmpegPath finds ffmpeg: TB_FFMPEG, else the PATH. A variable so tests need no ffmpeg.
 var FFmpegPath = func() (string, error) {
 	if p := os.Getenv("TB_FFMPEG"); p != "" {
 		return p, nil
@@ -53,8 +35,6 @@ var FFmpegPath = func() (string, error) {
 	return exec.LookPath("ffmpeg")
 }
 
-// runFFmpeg runs ffmpeg in dir and returns what it printed. A variable so tests can check
-// the arguments without ffmpeg.
 var runFFmpeg = func(ctx context.Context, dir, ffmpeg string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	if dir != "" {
@@ -64,14 +44,12 @@ var runFFmpeg = func(ctx context.Context, dir, ffmpeg string, args []string) ([]
 }
 
 const (
-	tapShown   = 600 * time.Millisecond  // how long a tap's ring stays
-	pressShown = 1200 * time.Millisecond // a long press's
-	swipeMove  = 500 * time.Millisecond  // how long a swipe's ring takes to travel
-	swipeShown = 800 * time.Millisecond  // and stays in all
+	tapShown   = 600 * time.Millisecond
+	pressShown = 1200 * time.Millisecond
+	swipeMove  = 500 * time.Millisecond
+	swipeShown = 800 * time.Millisecond
 )
 
-// Burn draws caps and touches onto the video at path, in place. The captions are also
-// written beside it (the video's name with .srt). On an error the video is left as it was.
 func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) error {
 	if len(caps) == 0 && len(touches) == 0 {
 		return nil
@@ -123,7 +101,6 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 		return append(a, "-pix_fmt", "yuv420p", "-movflags", "+faststart", out)
 	}
 	if o, err := runFFmpeg(ctx, tmp, ffmpeg, args("-c:v", "libx264", "-preset", "veryfast", "-crf", "23")); err != nil {
-		// No libx264 in this ffmpeg build: MPEG-4, which most players still play.
 		if o2, err2 := runFFmpeg(ctx, tmp, ffmpeg, args("-c:v", "mpeg4", "-q:v", "4")); err2 != nil {
 			return fmt.Errorf("ffmpeg could not draw on the video: %v: %s / %v: %s",
 				err, strings.TrimSpace(string(o)), err2, strings.TrimSpace(string(o2)))
@@ -137,10 +114,8 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 
 var sizeRE = regexp.MustCompile(`Video: .*?, (\d{2,5})x(\d{2,5})`)
 
-// videoSize reads the video's width and height from ffmpeg's description of it (ffprobe
-// may not be there when TB_FFMPEG names ffmpeg alone).
 func videoSize(ctx context.Context, dir, ffmpeg, path string) (int, int, error) {
-	out, _ := runFFmpeg(ctx, dir, ffmpeg, []string{"-hide_banner", "-i", path}) // exits 1: no output named
+	out, _ := runFFmpeg(ctx, dir, ffmpeg, []string{"-hide_banner", "-i", path})
 	m := sizeRE.FindStringSubmatch(string(out))
 	if m == nil {
 		return 0, 0, fmt.Errorf("ffmpeg did not give the video's size: %s", strings.TrimSpace(string(out)))
@@ -150,7 +125,6 @@ func videoSize(ctx context.Context, dir, ffmpeg, path string) (int, int, error) 
 	return w, h, nil
 }
 
-// SRT writes caps as SubRip subtitles.
 func SRT(caps []Caption) string {
 	var b strings.Builder
 	n := 0
@@ -172,7 +146,6 @@ func srtTime(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d,%03d", ms/3600000, ms/60000%60, ms/1000%60, ms%1000)
 }
 
-// oneLine keeps a caption to one paragraph: a blank line would end the subtitle.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > 120 {
@@ -181,15 +154,8 @@ func oneLine(s string) string {
 	return s
 }
 
-// outFPS is the drawn video's frame rate. A device that records only when the screen changes
-// (Android's screenrecord: a few frames a second on a still screen) would otherwise show a
-// caption or ring only at its next change, late, and keep a frame from between two captions.
 const outFPS = 30
 
-// Graph is the ffmpeg filter graph for a w×h video: the video at a steady outFPS, a ring
-// (input 1, when there are touches) over each touch, then, when there are captions, a band
-// band pixels high added below with each caption's image (the inputs after the ring, in
-// order) in it while its step runs. Its output is [v].
 func Graph(w, h, band int, caps []Caption, touches []Touch) string {
 	g := []string{fmt.Sprintf("[0:v]fps=%d,format=yuv420p[b]", outFPS)}
 	cur := "b"
@@ -222,8 +188,6 @@ func Graph(w, h, band int, caps []Caption, touches []Touch) string {
 	return strings.Join(g, ";")
 }
 
-// overlayAt places a touch's ring and says when it shows: on the point for a tap, moving
-// from the first point to the last for a swipe.
 func overlayAt(t Touch) string {
 	a := secs(t.At)
 	p0, p1 := t.Pts[0], t.Pts[len(t.Pts)-1]
@@ -247,14 +211,11 @@ func overlayAt(t Touch) string {
 func secs(d time.Duration) string { return strconv.FormatFloat(d.Seconds(), 'f', 3, 64) }
 func num(f float64) string        { return strconv.FormatFloat(f, 'f', 4, 64) }
 
-// ringSize is the ring's diameter for a w×h video: about a fingertip on a phone.
 func ringSize(w, h int) int {
 	d := min(w, h) / 9
 	return max(d, 24)
 }
 
-// writeRing draws the touch marker: a translucent disc with a white rim and a dark edge, so
-// it shows on light and dark screens alike.
 func writeRing(path string, d int) error {
 	img := image.NewNRGBA(image.Rect(0, 0, d, d))
 	c := float64(d) / 2

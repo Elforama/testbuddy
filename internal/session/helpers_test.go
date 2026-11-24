@@ -23,11 +23,7 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// TestMain makes the package hermetic: no real adb, xcrun or Chrome can be found (so
-// device.List finds nothing unless a test installs a fake adb), and TB_HOME is a temp folder.
 func TestMain(m *testing.M) {
-	// Device locks off: these tests make many pools and sessions for the same fake devices
-	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
 	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	dir, err := os.MkdirTemp("", "tb-session-test")
 	if err != nil {
@@ -51,7 +47,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// item is one node on the fake screen.
 type item struct {
 	text, id, class string
 	hint            string
@@ -66,30 +61,27 @@ func label(text string, top int) item {
 	return item{text: text, class: "android.widget.TextView", top: top}
 }
 
-// fakeDriver is a device whose screen and events the test controls.
 type fakeDriver struct {
 	info device.Info
 
-	mu         sync.Mutex
-	items      []item
-	seq        int64
-	subs       []chan driver.Event
-	w, h       int
-	fg         string
-	fgErr      error
-	screenErr  error
-	shotErr    error
-	shotW      int // screenshot width in pixels (0 = w)
-	shotScales []float64
-	taps       [][2]int
-	typed      []string
-	launched   []string
-	waits      int
-	closed     int
-	released   int
-	onType     func(string)
-	// onScreen and onShot run at the start of each Screen and Screenshot call, outside the
-	// lock (a test that checks what runs at the same time).
+	mu               sync.Mutex
+	items            []item
+	seq              int64
+	subs             []chan driver.Event
+	w, h             int
+	fg               string
+	fgErr            error
+	screenErr        error
+	shotErr          error
+	shotW            int
+	shotScales       []float64
+	taps             [][2]int
+	typed            []string
+	launched         []string
+	waits            int
+	closed           int
+	released         int
+	onType           func(string)
 	onScreen, onShot func()
 }
 
@@ -97,7 +89,6 @@ func newFake(serial, name string, plat device.Platform) *fakeDriver {
 	return &fakeDriver{info: device.Info{Platform: plat, Serial: serial, Name: name, Emulator: true, State: "device"}, w: 400, h: 800, fg: "com.app"}
 }
 
-// show replaces the screen and reports the change.
 func (f *fakeDriver) show(items ...item) {
 	f.mu.Lock()
 	f.items = items
@@ -105,15 +96,12 @@ func (f *fakeDriver) show(items ...item) {
 	f.mu.Unlock()
 }
 
-// showSilently replaces the screen without the device reporting it: the change counter stays
-// where it was, as when another process draws the content (iOS's embedded Safari view).
 func (f *fakeDriver) showSilently(items ...item) {
 	f.mu.Lock()
 	f.items = items
 	f.mu.Unlock()
 }
 
-// push delivers an event to every subscriber.
 func (f *fakeDriver) push(kind string) {
 	f.mu.Lock()
 	subs := append([]chan driver.Event(nil), f.subs...)
@@ -124,7 +112,6 @@ func (f *fakeDriver) push(kind string) {
 	}
 }
 
-// closeEvents ends every subscription (the connection went away).
 func (f *fakeDriver) closeEvents() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -287,7 +274,6 @@ func (f *fakeDriver) Close() error {
 	return nil
 }
 
-// Release stops the agent (and closes the connection): counted in released and closed.
 func (f *fakeDriver) Release(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -300,7 +286,6 @@ var _ driver.Driver = (*fakeDriver)(nil)
 
 var errBoom = errors.New("boom")
 
-// addDev opens a device in the service the way connect does, without a real driver.
 func addDev(s *Service, f *fakeDriver, name string) *Dev {
 	d := &Dev{Info: f.info, Name: name, Drv: f, refs: look.NewRefs()}
 	d.runner = engine.New(f, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts"),
@@ -316,7 +301,6 @@ func addDev(s *Service, f *fakeDriver, name string) *Dev {
 
 type handler func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response
 
-// call runs a handler with JSON args; it returns the final response and the streamed parts.
 func call(t *testing.T, h handler, args any, cwd string) (daemon.Response, []daemon.Response) {
 	t.Helper()
 	return callCtx(t, context.Background(), h, args, cwd)
@@ -369,7 +353,6 @@ func decodePNG(t *testing.T, b []byte) image.Image {
 	return img
 }
 
-// fakeADB installs body as adb under a fake ANDROID_HOME (device.List then uses it).
 func fakeADB(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -384,7 +367,6 @@ func fakeADB(t *testing.T, body string) {
 	}
 }
 
-// adbLists makes `adb devices -l` list these "serial model" pairs (models use _ for spaces).
 func adbLists(t *testing.T, devs ...string) {
 	out := "List of devices attached\n"
 	for _, d := range devs {

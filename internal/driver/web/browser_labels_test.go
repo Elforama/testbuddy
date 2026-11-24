@@ -15,11 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// Review of look-web-shot-speed: a control takes its label's text only when a person can see
-// it and tap it. A visually hidden input (sr-only: 1 px, clipped; or opacity: 0) under a
-// visible label keeps no text, so tapOn: "<label text>" finds the label a person sees, not the
-// hidden box (which outranked it: both clickable, in page order). Each case says what the
-// pointer went down on, and whether the control toggled.
 const labelsPage = `<!doctype html><html><head><style>
 body { margin: 0 }
 .row { display: block; margin: 10px; padding: 10px; width: 200px; background: #eee }
@@ -58,8 +53,6 @@ func TestPageJSLabelTextOnlyOnVisibleControls(t *testing.T) {
 	defer d.Close()
 	dir := t.TempDir()
 
-	// tap runs a tapOn the label text; it returns what the pointer went down on and whether
-	// the control is checked after.
 	tap := func(text, id string) (string, bool) {
 		t.Helper()
 		f, err := flow.ParseBytes(filepath.Join(dir, id+".yaml"), []byte("url: "+srv.URL+"/\n---\n- launchApp\n- assertVisible: ready\n- tapOn: \""+text+"\"\n"))
@@ -81,16 +74,15 @@ func TestPageJSLabelTextOnlyOnVisibleControls(t *testing.T) {
 		return got.Down, got.Checked
 	}
 	for _, c := range []struct{ text, id, want string }{
-		{"Dark mode", "dark", "span"}, // an sr-only input: the visible text is tapped
-		{"Wi-Fi", "wifi", "span"},     // an opacity: 0 input elsewhere: the visible text
-		{"Milk", "milk", "label"},     // an sr-only input with a for= label: the label
-		{"Faded", "faded", "span"},    // an input in an opacity: 0 wrapper: the visible text
+		{"Dark mode", "dark", "span"},
+		{"Wi-Fi", "wifi", "span"},
+		{"Milk", "milk", "label"},
+		{"Faded", "faded", "span"},
 	} {
 		if down, checked := tap(c.text, c.id); down != c.want || !checked {
 			t.Errorf("tapOn %q: the pointer went down on %q (want %s), #%s checked %v", c.text, down, c.want, c.id, checked)
 		}
 	}
-	// A visible input with a for= label: either is the control; it toggles.
 	if down, checked := tap("Eggs", "eggs"); !checked || (down != "eggs" && down != "label") {
 		t.Errorf("tapOn Eggs: down on %q, checked %v", down, checked)
 	}

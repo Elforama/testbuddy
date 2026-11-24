@@ -1,14 +1,4 @@
 #!/bin/bash
-# Checks that hideKeyboard closes an Android keyboard still on its way up (issue #175): it
-# opens the Keyboard scenario's autofocus screen, whose field asks for the keyboard as the
-# screen opens, and hides the keyboard at once. On a slow emulator the keyboard shows after
-# the tap returned; hideKeyboard must close it once it shows, not pass and let it stay up. A
-# flow cannot see whether the keyboard is up 3 s later, so this asks the device.
-#
-#   bench/checks/android-keyboard-late.sh <serial> [rounds]   (TB=path/to/tb, default bin/tb)
-#
-# The race shows on a loaded device (CI's x86 emulator; locally, busy loops in adb shell).
-# Needs the bench app on the device (bench/README.md).
 set -u
 cd "$(dirname "$0")/../.."
 TB=${TB:-bin/tb}
@@ -33,7 +23,7 @@ failed=0
 for i in $(seq 1 "$ROUNDS"); do
   "$TB" test "$tmp/setup.yaml" -d "$DEV" >/dev/null 2>&1 || { echo "FAIL  round $i: opening the Keyboard scenario"; failed=1; continue; }
   "$TB" test "$tmp/hide.yaml" -d "$DEV" >/dev/null 2>&1 || { echo "FAIL  round $i: hideKeyboard failed"; failed=1; continue; }
-  sleep 3 # the keyboard of the bug shows up to 2 s after hideKeyboard returned
+  sleep 3
   shown=$(adb -s "$DEV" shell dumpsys input_method | grep -o -m1 "mInputShown=[a-z]*")
   case "$shown" in
     mInputShown=false) echo "ok    round $i: the keyboard stayed hidden" ;;

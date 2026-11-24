@@ -9,14 +9,6 @@ import (
 	"testing"
 )
 
-// fakeDevice runs the commands the driver sends through the agent's sh in a real host shell,
-// with am, pidof, input and sleep stubbed to model one app on a device: a process (pid), its
-// task with the saved instance state (task) and whether it is in the foreground (fg), each a
-// file in a temp dir. `am kill` ends the process only when the app is in the background and
-// keeps the task; `am force-stop` ends the process and clears the task; Home sends the app to
-// the background unless stuck is set. Home is the home activity's start (`am start` with the
-// HOME category), or the Home key; Android handles the key later, after `input` returned, so
-// a key sent leaves a homeKey file: a Home still to come (issue #274).
 type fakeDevice struct {
 	dir string
 	a   *fakeAgent
@@ -83,9 +75,6 @@ func (f *fakeDevice) has(name string) bool {
 	return err == nil
 }
 
-// Issue #6: killApp is the system killing the app in the background: the process ends, the
-// task and its saved state stay, so the next launch restores where the user was. It must not
-// force-stop the app, which clears that state (that is stopApp).
 func TestKillAppKeepsSavedState(t *testing.T) {
 	cases := []struct {
 		name                string
@@ -112,10 +101,6 @@ func TestKillAppKeepsSavedState(t *testing.T) {
 	}
 }
 
-// Issue #274: killApp sends an app in the foreground to the background with the home
-// activity's start, which Android has handled when `am start` returns, not with the Home key,
-// which Android handles later: on a CI emulator it came 1.5 s late, after the next launchApp
-// had brought the app back, and put the launcher over it.
 func TestKillAppLeavesNoHomeKeyBehind(t *testing.T) {
 	dev := newFakeDevice(t, true, true, false)
 	d := newDriver(t, dev.a)
@@ -130,8 +115,6 @@ func TestKillAppLeavesNoHomeKeyBehind(t *testing.T) {
 	}
 }
 
-// Issue #6: when the process survives `am kill` even in the background, killApp says so
-// instead of force-stopping the app.
 func TestKillAppReportsSurvivingProcess(t *testing.T) {
 	dev := newFakeDevice(t, true, true, true)
 	d := newDriver(t, dev.a)

@@ -11,7 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// setLocation takes evaluated numbers; anything else is an error.
 func TestSetLocation(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- setLocation: {latitude: '52.5', longitude: \"${13 + 0.25}\"}"))
@@ -25,7 +24,6 @@ func TestSetLocation(t *testing.T) {
 	mustFail(t, runWith(t, f2, quick, "- setLocation: {latitude: '1', longitude: '2'}"), "no gps")
 }
 
-// travel sets the first point, then moves to each next one in 50 steps, timed by the speed.
 func TestTravel(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	start := time.Now()
@@ -42,19 +40,16 @@ func TestTravel(t *testing.T) {
 	if mid := f.locs[25]; mid[0] != 0 || mid[1] < 0.00049 || mid[1] > 0.00051 {
 		t.Errorf("halfway point %v", mid)
 	}
-	// A speed from ${...} is read when the step runs.
 	f1 := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f1, quick, "- travel: {points: ['0,0', '0,0.001'], speed: '${50 * 2000}'}"))
 	if len(f1.locs) != 51 {
 		t.Errorf("%d locations, want 51", len(f1.locs))
 	}
-	// No points: nothing to do.
 	f0 := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f0, quick, "- travel: {points: []}"))
 	if len(f0.locs) != 0 {
 		t.Errorf("locations %v", f0.locs)
 	}
-	// One point: just set it.
 	f2 := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f2, quick, "- travel: {points: ['1,2']}"))
 	if !reflect.DeepEqual(f2.locs, [][2]float64{{1, 2}}) {
@@ -62,19 +57,16 @@ func TestTravel(t *testing.T) {
 	}
 }
 
-// travel's simulated time is real: a slow walk takes about distance/speed.
 func TestTravelTiming(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
 	start := time.Now()
-	// ~11.1 m at 100 m/s: ~111 ms.
 	mustPass(t, runWith(t, f, quick, "- travel: {points: ['0,0', '0,0.0001'], speed: 100}"))
 	if d := time.Since(start); d < 90*time.Millisecond || d > time.Second {
 		t.Errorf("took %s, want ~111 ms", d)
 	}
 }
 
-// A location the device rejects stops the travel.
 func TestTravelErrors(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("SetLocation", errors.New("no gps"))
@@ -82,7 +74,6 @@ func TestTravelErrors(t *testing.T) {
 	if len(f.locs) != 1 {
 		t.Errorf("%d locations after the first failed", len(f.locs))
 	}
-	// Failing on the way, not at the start.
 	f2 := &fakeDriver{screen: static()}
 	n := 0
 	fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\n---\n- travel: {points: ['0,0', '0,0.0001'], speed: 100000}"))
@@ -94,7 +85,6 @@ func TestTravelErrors(t *testing.T) {
 	mustFail(t, res, "step 3 failed")
 }
 
-// stepFailDriver fails the n-th SetLocation.
 type stepFailDriver struct {
 	*fakeDriver
 	failAt int
@@ -109,7 +99,6 @@ func (d *stepFailDriver) SetLocation(ctx context.Context, la, lo float64) error 
 	return nil
 }
 
-// A travel is cut short when the run is cancelled.
 func TestTravelCancelled(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -129,10 +118,6 @@ func TestTravelCancelled(t *testing.T) {
 	}
 }
 
-// issue #44: travel with a speed that is not a finite number above 0 fails at once with the
-// value, before any location is sent. At speed 0 the wait between points was +Inf seconds:
-// on arm64 it never ended, on amd64 it was skipped; a negative speed skipped it too. A literal
-// is rejected when the flow is read; a value with ${...} when the step runs.
 func TestTravelBadSpeedFails(t *testing.T) {
 	for _, tc := range []struct{ speed, want string }{
 		{"0", `invalid speed "0"`},
@@ -149,14 +134,13 @@ func TestTravelBadSpeedFails(t *testing.T) {
 			t.Parallel()
 			src := "appId: app\n---\n- travel: {points: ['0,0', '0,0.001'], speed: " + tc.speed + "}"
 			fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte(src))
-			if err != nil { // a literal: caught when the flow is read
+			if err != nil {
 				if !contains(err.Error(), tc.want) {
 					t.Fatalf("parse error %q, want it to contain %q", err, tc.want)
 				}
 				return
 			}
 			f := &fakeDriver{screen: static()}
-			// Its own deadline, so a travel that never ends fails here instead of hanging.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			res := New(f, quick).RunFlow(ctx, fl)
@@ -171,10 +155,6 @@ func TestTravelBadSpeedFails(t *testing.T) {
 	}
 }
 
-// issue #113: setLocation with a latitude or longitude that is not a finite number in range
-// (latitude from -90 to 90, longitude from -180 to 180) fails with the value, before anything
-// is sent to the device. NaN and Inf were sent as they were. A literal is rejected when the
-// flow is read; a value with ${...} when the step runs.
 func TestSetLocationBadValueFails(t *testing.T) {
 	for _, tc := range []struct{ lat, lon, want string }{
 		{"NaN", "1", `invalid latitude "NaN"`},
@@ -198,7 +178,7 @@ func TestSetLocationBadValueFails(t *testing.T) {
 			t.Parallel()
 			src := "appId: app\n---\n- setLocation: {latitude: " + tc.lat + ", longitude: " + tc.lon + "}"
 			fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte(src))
-			if err != nil { // a literal: caught when the flow is read
+			if err != nil {
 				if !contains(err.Error(), tc.want) {
 					t.Fatalf("parse error %q, want it to contain %q", err, tc.want)
 				}
@@ -213,7 +193,6 @@ func TestSetLocationBadValueFails(t *testing.T) {
 	}
 }
 
-// issue #113: the edges of the ranges, and 0, are sent as they are, literal or from ${...}.
 func TestSetLocationEdges(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, `- setLocation: {latitude: 90, longitude: 180}

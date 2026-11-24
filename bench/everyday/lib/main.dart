@@ -182,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void openPage(String title) {
-    Navigator.pop(context); // close the drawer before pushing a page
+    Navigator.pop(context);
     Navigator.push(
       context,
       MaterialPageRoute<void>(

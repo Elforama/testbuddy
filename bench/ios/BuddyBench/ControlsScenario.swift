@@ -1,4 +1,3 @@
-// Scenario 5, Controls: every standard control, each with a status line showing its value.
 import SwiftUI
 import UIKit
 
@@ -35,7 +34,7 @@ struct ControlsScenario: View {
     @State private var placeholderDigits = ""
     @State private var plan = "Basic"
     @State private var planPresses = 0
-    @State private var planChangedAt = 0 // the press that last changed the plan (0: none)
+    @State private var planChangedAt = 0
     @State private var stallShortPresses = 0
     @State private var stallLongPresses = 0
 
@@ -79,13 +78,6 @@ struct ControlsScenario: View {
         }
     }
 
-    // MARK: Presses whose down stalls the app (issue #337)
-
-    /// Two press handlers whose touch-down blocks the main thread on purpose, as a busy app's
-    /// can: delivering the down takes 150 ms (the short one, a 75 ms press, like the reaction
-    /// box) or 2.2 s (the long one, a 1 s press). A lift sent before the block ends reaches the
-    /// app right after the down, so the press it sees is cut short. bench/checks/ios-press-stall.sh
-    /// checks that tb says so.
     private var stallingPresses: some View {
         VStack(alignment: .leading, spacing: 8) {
             StallingPress(title: "Stall 150 ms", id: "stall_short_box", stall: 0.15, minimum: 0.075) { stallShortPresses += 1 }
@@ -97,12 +89,6 @@ struct ControlsScenario: View {
         }
     }
 
-    // MARK: Custom-drawn options (issue #324)
-
-    /// Two options drawn by plain UIViews: a press shows nothing (no highlight, no dimming), so
-    /// pressing the one already selected changes nothing on screen. Presses are counted, and
-    /// the count shows only when the plan changes: "Plan: Pro (press 2)" after one press on
-    /// Basic and one on Pro.
     private var drawnOptions: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -120,8 +106,6 @@ struct ControlsScenario: View {
             status(planChangedAt == 0 ? "Plan: \(plan)" : "Plan: \(plan) (press \(planChangedAt))", "plan_status")
         }
     }
-
-    // MARK: Choices
 
     private var tabs: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -213,7 +197,6 @@ struct ControlsScenario: View {
 
     private var datePicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The compact picker's button shows a date; its label sits beside it.
             HStack {
                 Text(verbatim: "Pick a date")
                 Spacer()
@@ -273,8 +256,6 @@ struct ControlsScenario: View {
         }
     }
 
-    // MARK: Text
-
     private var fields: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Your name", text: $name)
@@ -324,8 +305,6 @@ struct ControlsScenario: View {
         }
     }
 
-    // MARK: Progress, disclosure, gestures
-
     private var progressBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             ProgressView(value: Double(progress), total: 100)
@@ -374,7 +353,6 @@ struct ControlsScenario: View {
 
     private var longPressButton: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The button's action runs on release; a hold of 500 ms or more fires first.
             Button("Hold me") {
                 if held { held = false } else { longPress = "Just tapped" }
             }
@@ -394,7 +372,6 @@ struct ControlsScenario: View {
                 .frame(maxWidth: .infinity, minHeight: 80)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
-                // Decided 300 ms after the last tap: two or more taps are a double tap.
                 .onTapGesture {
                     taps += 1
                     tapDecision?.cancel()
@@ -415,8 +392,6 @@ struct ControlsScenario: View {
                 .frame(maxWidth: .infinity, minHeight: 64)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
-                // Model a scrollable message row whose touch handler recognizes a press
-                // only after brief contact. Two recognized presses make one reaction.
                 .onLongPressGesture(minimumDuration: 0.075) {
                     let now = ProcessInfo.processInfo.systemUptime
                     if let previous = lastReactionPress, now - previous < 0.350 {
@@ -433,7 +408,6 @@ struct ControlsScenario: View {
     }
 }
 
-/// A checkbox (iOS has no native one): a box and a label, one button element.
 struct Checkbox: View {
     let label: String
     @Binding var isOn: Bool
@@ -450,8 +424,6 @@ struct Checkbox: View {
     }
 }
 
-/// A label and a switch: the id sits on the switch itself, so tapping the element flips it
-/// (a full-width Toggle's centre is empty space between its label and its switch).
 struct LabeledSwitch: View {
     let label: String
     @Binding var isOn: Bool
@@ -468,10 +440,6 @@ struct LabeledSwitch: View {
     }
 }
 
-/// A press handler whose touch-down blocks the main thread for `stall` seconds before its long
-/// press (of `minimum` seconds) sees it (issue #337). The block is in the recognizer, which gets
-/// the down at once (a scroll view delays only its view's touches): the down's delivery takes
-/// that long, as the app's did on CI.
 struct StallingPress: UIViewRepresentable {
     let title: String
     let id: String
@@ -482,7 +450,7 @@ struct StallingPress: UIViewRepresentable {
     final class Press: UILongPressGestureRecognizer {
         var stall: TimeInterval = 0
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-            Thread.sleep(forTimeInterval: stall) // a deliberate stall of the main thread
+            Thread.sleep(forTimeInterval: stall)
             super.touchesBegan(touches, with: event)
         }
     }
@@ -520,9 +488,6 @@ struct StallingPress: UIViewRepresentable {
     func updateUIView(_ v: View, context: Context) { v.onPress = onPress }
 }
 
-/// An option drawn by a plain UIView, as React Native, Flutter and custom-drawn controls are: a
-/// button to accessibility, whose press draws nothing (issue #324). Selected, it has a border;
-/// that is all that changes, and only when the selection does.
 struct DrawnOption: UIViewRepresentable {
     let title: String
     let selected: Bool
@@ -557,7 +522,7 @@ struct DrawnOption: UIViewRepresentable {
 
     func updateUIView(_ v: View, context: Context) {
         v.onTap = onTap
-        guard v.selected != selected else { return } // nothing drawn unless the selection changed
+        guard v.selected != selected else { return }
         v.selected = selected
         v.accessibilityTraits = selected ? [.button, .selected] : .button
         v.layer.borderWidth = selected ? 2 : 0

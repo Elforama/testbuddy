@@ -23,7 +23,6 @@ var (
 	chrome = device.WebDevice(1)
 )
 
-// A need matches on platform and on serial or (case-insensitive) name; empty fields match anything.
 func TestNeedFits(t *testing.T) {
 	cases := []struct {
 		name string
@@ -55,7 +54,6 @@ func TestNeedFits(t *testing.T) {
 	}
 }
 
-// The pool's fit also asks Installed, but only for needs with an app id.
 func TestPoolFitsAsksInstalled(t *testing.T) {
 	p := NewPool([]device.Info{pixel})
 	if !p.fits(Need{AppID: "com.app"}, pixel) {
@@ -84,7 +82,6 @@ func TestPoolFitsAsksInstalled(t *testing.T) {
 	}
 }
 
-// Devices returns the pool's devices in the order given.
 func TestPoolDevices(t *testing.T) {
 	devs := []device.Info{pixel, iphone}
 	if got := NewPool(devs).Devices(); !reflect.DeepEqual(got, devs) {
@@ -92,7 +89,6 @@ func TestPoolDevices(t *testing.T) {
 	}
 }
 
-// tryAlloc reserves every need or nothing: a partial fit leaves all devices free.
 func TestTryAllocAllOrNothing(t *testing.T) {
 	p := NewPool([]device.Info{pixel})
 	if got := p.tryAlloc([]Need{{Role: "a"}, {Role: "b"}}); got != nil {
@@ -110,7 +106,6 @@ func TestTryAllocAllOrNothing(t *testing.T) {
 	}
 }
 
-// Busy devices are skipped; release makes them available again.
 func TestTryAllocBusyAndRelease(t *testing.T) {
 	p := NewPool([]device.Info{pixel, galaxy})
 	a := p.tryAlloc([]Need{{}})
@@ -133,7 +128,6 @@ func TestTryAllocBusyAndRelease(t *testing.T) {
 	}
 }
 
-// Needs that pin a device are served before platform needs, which are served before "any".
 func TestTryAllocOrder(t *testing.T) {
 	t.Run("pinned before any", func(t *testing.T) {
 		p := NewPool([]device.Info{pixel, galaxy})
@@ -174,7 +168,6 @@ func TestTryAllocOrder(t *testing.T) {
 	})
 }
 
-// Installed steers allocation away from devices without the app.
 func TestTryAllocRespectsInstalled(t *testing.T) {
 	p := NewPool([]device.Info{pixel, galaxy})
 	p.Installed = func(serial, app string) bool { return serial == galaxy.Serial }
@@ -187,7 +180,6 @@ func TestTryAllocRespectsInstalled(t *testing.T) {
 	}
 }
 
-// Browsers are elastic: a web need with no free browser starts another one.
 func TestTryAllocAddsBrowsers(t *testing.T) {
 	p := NewPool([]device.Info{chrome})
 	got := p.tryAlloc([]Need{{Role: "a", Platform: "web"}, {Role: "b", Platform: "web"}, {Role: "c", Platform: "web"}})
@@ -208,7 +200,6 @@ func TestTryAllocAddsBrowsers(t *testing.T) {
 	if p.Devices()[2].Name != "Chrome 3" {
 		t.Errorf("third browser name = %q", p.Devices()[2].Name)
 	}
-	// Released browsers are reused rather than adding more.
 	p.release(got)
 	p.tryAlloc([]Need{{Platform: "web"}, {Platform: "web"}})
 	if n := len(p.Devices()); n != 3 {
@@ -216,7 +207,6 @@ func TestTryAllocAddsBrowsers(t *testing.T) {
 	}
 }
 
-// At most 8 browsers run at once.
 func TestTryAllocBrowserCap(t *testing.T) {
 	p := NewPool([]device.Info{chrome})
 	var needs []Need
@@ -243,7 +233,6 @@ func TestTryAllocBrowserCap(t *testing.T) {
 	}
 }
 
-// No browser is started from nothing (Chrome is missing), nor for a need that pins a device.
 func TestTryAllocBrowserNeedsChromeAndNoPin(t *testing.T) {
 	p := NewPool([]device.Info{pixel})
 	if got := p.tryAlloc([]Need{{Platform: "web"}}); got != nil {
@@ -262,7 +251,6 @@ func TestTryAllocBrowserNeedsChromeAndNoPin(t *testing.T) {
 	}
 }
 
-// addWeb numbers browsers after the ones already in the pool and refuses past 8.
 func TestAddWeb(t *testing.T) {
 	p := NewPool(nil)
 	if _, ok := p.addWeb(); ok {
@@ -283,13 +271,12 @@ func TestAddWeb(t *testing.T) {
 	}
 }
 
-// satisfiable explains, in the user's terms, what no connected device can provide.
 func TestSatisfiable(t *testing.T) {
 	cases := []struct {
 		name  string
 		devs  []device.Info
 		needs []Need
-		want  string // "" = satisfiable
+		want  string
 	}{
 		{"any device present", []device.Info{pixel}, []Need{{}}, ""},
 		{"no devices at all", nil, []Need{{}}, "needs a device, and none is connected"},
@@ -320,7 +307,6 @@ func TestSatisfiable(t *testing.T) {
 	}
 }
 
-// satisfiable ignores busy devices (it asks "ever", not "now") but honors Installed.
 func TestSatisfiableIgnoresBusyHonorsApps(t *testing.T) {
 	p := NewPool([]device.Info{pixel})
 	p.tryAlloc([]Need{{}})
@@ -334,8 +320,6 @@ func TestSatisfiableIgnoresBusyHonorsApps(t *testing.T) {
 	}
 }
 
-// NeedsFor turns a flow into pool needs: platform from -p or a URL app id, app id only when
-// it is known before the run.
 func TestNeedsFor(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -350,7 +334,6 @@ func TestNeedsFor(t *testing.T) {
 		{"url flow keeps -p", "url: https://example.com\n---\n- back\n", "android", []Need{{Platform: "android"}}, nil},
 		{"file url is web", "appId: file:///tmp/x.html\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
 		{"interpolated app id is decided at run time", "appId: ${APP}\n---\n- back\n", "", []Need{{}}, nil},
-		// maestro#2383: the header's variables are resolved before a device is picked.
 		{"url from -e is web", "url: ${URL}\n---\n- back\n", "", []Need{{Platform: "web"}},
 			[]flow.KV{{Key: "URL", Value: "http://x"}}},
 		{"url: header is web even unresolved", "url: ${URL}\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
@@ -410,8 +393,6 @@ devices:
 	}
 }
 
-// maestro#2383: with a phone and Chrome connected, a flow whose url: or appId: comes from
-// -e lands on the right one (phones are listed first, so a web flow used to get the phone).
 func TestNeedsForPlacesInterpolatedHeaders(t *testing.T) {
 	env := []flow.KV{{Key: "URL", Value: "http://x"}, {Key: "APP_ID", Value: "com.x"}}
 	for _, c := range []struct{ yaml, want string }{
@@ -425,7 +406,6 @@ func TestNeedsForPlacesInterpolatedHeaders(t *testing.T) {
 			t.Errorf("%q ran on %q, want %q", c.yaml, got[""].Serial, c.want)
 		}
 	}
-	// Only a browser: the phone flow is refused rather than run in Chrome.
 	p := NewPool([]device.Info{chrome})
 	needs := NeedsFor(parseFlow(t, "f", "appId: ${APP_ID}\n---\n- back\n"), "", env)
 	if got := p.tryAlloc(needs); got != nil {
@@ -433,7 +413,6 @@ func TestNeedsForPlacesInterpolatedHeaders(t *testing.T) {
 	}
 }
 
-// CheckApps does nothing for one device (the flow will say what is wrong) or no app ids.
 func TestCheckAppsSkips(t *testing.T) {
 	ctx := context.Background()
 	p := NewPool([]device.Info{chrome})
@@ -448,8 +427,6 @@ func TestCheckAppsSkips(t *testing.T) {
 	}
 }
 
-// CheckApps records which devices have each app: a URL is "installed" on a browser and never
-// on a phone.
 func TestCheckAppsWebAndMobile(t *testing.T) {
 	p := NewPool([]device.Info{pixel, chrome})
 	url := "https://example.com"
@@ -471,11 +448,9 @@ func TestCheckAppsWebAndMobile(t *testing.T) {
 	}
 }
 
-// When no device has an app, every device stays eligible so the flow fails with the
-// platform's own message instead of "no device".
 func TestCheckAppsNoDeviceHasApp(t *testing.T) {
 	p := NewPool([]device.Info{pixel, galaxy})
-	url := "https://example.com" // never installed on a phone; needs no adb call
+	url := "https://example.com"
 	p.CheckApps(context.Background(), []*Job{{Needs: []Need{{AppID: url}}}, {Needs: []Need{{AppID: url}}}})
 	for _, d := range p.Devices() {
 		if !p.Installed(d.Serial, url) {
@@ -484,7 +459,6 @@ func TestCheckAppsNoDeviceHasApp(t *testing.T) {
 	}
 }
 
-// CheckApps asks each Android device (via `adb shell pm path`) and keeps only those with the app.
 func TestCheckAppsAndroid(t *testing.T) {
 	log := fakeADB(t, `case "$*" in
   "-s emulator-5554 shell pm path com.app") echo "package:/data/app/com.app/base.apk" ;;
@@ -504,13 +478,11 @@ esac`)
 	if !reflect.DeepEqual(calls, want) {
 		t.Errorf("adb calls = %q, want %q (once per device and app)", calls, want)
 	}
-	// and the scheduler then puts the job on the device with the app
 	if got := p.tryAlloc([]Need{{AppID: "com.app"}}); got[""].Serial != pixel.Serial {
 		t.Errorf("alloc = %v", got)
 	}
 }
 
-// Driver returns an already-open driver without reopening it.
 func TestPoolDriverCached(t *testing.T) {
 	f := newFake("s1", "One", "android")
 	p := poolOf(f)
@@ -522,8 +494,6 @@ func TestPoolDriverCached(t *testing.T) {
 	}
 }
 
-// A device whose driver cannot open reports the error, is not cached, and leaves no
-// "opening" marker behind; concurrent callers all get the error.
 func TestPoolDriverOpenError(t *testing.T) {
 	info := device.Info{Platform: "fake", Serial: "f1", Name: "Fake"}
 	p := NewPool([]device.Info{info})
@@ -549,7 +519,6 @@ func TestPoolDriverOpenError(t *testing.T) {
 	}
 }
 
-// A caller that finds the driver being opened waits for that open instead of starting another.
 func TestPoolDriverWaitsForOpening(t *testing.T) {
 	f := newFake("s1", "One", "android")
 	p := NewPool([]device.Info{f.info()})
@@ -563,10 +532,7 @@ func TestPoolDriverWaitsForOpening(t *testing.T) {
 		}
 		got <- err
 	}()
-	// Give the waiter time to block on the open in progress (the result is the same if it
-	// arrives late; the wait path is what this aims at).
 	time.Sleep(30 * time.Millisecond)
-	// the other opener finishes
 	p.mu.Lock()
 	delete(p.opening, f.serial)
 	p.drivers[f.serial] = f
@@ -577,7 +543,6 @@ func TestPoolDriverWaitsForOpening(t *testing.T) {
 	}
 }
 
-// Close closes every opened driver once.
 func TestPoolClose(t *testing.T) {
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "ios")
 	p := poolOf(a, b)
@@ -587,11 +552,6 @@ func TestPoolClose(t *testing.T) {
 	}
 }
 
-// ---- fake adb ----
-
-// fakeADB installs a shell script as adb (via ANDROID_HOME) that logs its arguments, one
-// call per line, then runs body. It returns the log path. The test fails if the device
-// package would not pick it.
 func fakeADB(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()

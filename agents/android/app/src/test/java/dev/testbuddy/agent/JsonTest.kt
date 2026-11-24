@@ -3,8 +3,6 @@ package dev.testbuddy.agent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The agent's replies are written by [Json]: tb reads every screen through it, so a bad escape
- *  or a misplaced comma breaks every read. */
 class JsonTest {
     private val bs = '\\'
 
@@ -18,7 +16,7 @@ class JsonTest {
 
     @Test
     fun escapes() {
-        val lineSeparator = 0x2028.toChar() // some JSON readers take it for a line break
+        val lineSeparator = 0x2028.toChar()
         val j = Json().obj().put("t", "q\" b$bs n\n r\r t\t bell${0x07.toChar()} ls$lineSeparator é").endObj()
         val want = "{\"t\":\"q$bs\" b$bs$bs n${bs}n r${bs}r t${bs}t bell${bs}u0007 ls${bs}u2028 é\"}"
         assertEquals(want, j.toString())

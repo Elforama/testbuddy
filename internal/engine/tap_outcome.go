@@ -11,8 +11,6 @@ import (
 
 type tapAssertionKey struct{}
 
-// A static, immediate assertion can confirm an action's outcome without another
-// device read. Do not evaluate expressions early or carry a hint into a subflow.
 func tapAssertionContext(ctx context.Context, cmds []*flow.Command, i int) context.Context {
 	var next *flow.Command
 	if cmds[i].Name == "tapOn" && i+1 < len(cmds) {
@@ -75,12 +73,6 @@ func (r *Runner) tapAssertionChanged(ctx context.Context, before, after *ui.Scre
 	return changed
 }
 
-// A changed, existing result label beside a displaced control makes replay
-// unsafe even without a native click event. This is deliberately conservative:
-// it does not prove causality, and the flow must still assert its real outcome.
-// Do not treat new banners, text elsewhere, geometry or an unchanged label as a
-// result. Require the same uniquely identified leaf immediately after the same
-// control in the same window in both already-captured snapshots.
 func adjacentTapResultChanged(was *ui.Node, before *ui.Screen, now *ui.Node, after *ui.Screen) bool {
 	if was == nil || now == nil || before == nil || after == nil || was.ID == "" ||
 		!sameElementMoved(was, before, now, after) || was.Bounds == now.Bounds ||

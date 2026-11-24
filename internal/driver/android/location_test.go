@@ -7,32 +7,24 @@ import (
 	"time"
 )
 
-// After setLocation the driver sends nothing more on its own (issue #72). It used to send the
-// point again every second as an "sh" request for the rest of the run: the agent answers one
-// request at a time per connection, so taps and screen reads queued behind each resend, and
-// each resend took a slot in the agent's request-token cache. The span is real time: the
-// driver keeps no clock of its own for this any more (the agent repeats the fix).
 func TestSetLocationSendsNothingAfterwards(t *testing.T) {
-	a := newFakeAgent(t) // reports sdk 34: the test providers
+	a := newFakeAgent(t)
 	d := stubbedDriver(t, stubADB(t, nil), a)
 	if err := d.SetLocation(ctxT(t), 45.5, -73.5); err != nil {
 		t.Fatal(err)
 	}
 	a.reset()
-	span := 1500 * time.Millisecond // the old resend came every second
+	span := 1500 * time.Millisecond
 	time.Sleep(span)
 	if ops := a.ops(); len(ops) != 0 {
 		t.Errorf("%d requests in the %v after setLocation, want none: %q", len(ops), span, a.shCmds())
 	}
 }
 
-// Each point is one "location" request (setLocation, and each step of a travel); the agent adds
-// the providers and repeats the fix. Close turns it off: the agent stops the repeats and removes
-// the providers (issue #72).
 func TestSetLocationOneRequestPerPoint(t *testing.T) {
 	a := newFakeAgent(t)
 	d := stubbedDriver(t, stubADB(t, nil), a)
-	a.reset() // the connection's info and ping
+	a.reset()
 	points := [][2]float64{{45.5017, -73.5673}, {45.50175, -73.56735}, {45.5018, -73.5674}}
 	for _, p := range points {
 		if err := d.SetLocation(ctxT(t), p[0], p[1]); err != nil {
@@ -58,11 +50,10 @@ func TestSetLocationOneRequestPerPoint(t *testing.T) {
 	}
 }
 
-// An agent that cannot set the point fails setLocation.
 func TestSetLocationAgentError(t *testing.T) {
 	a := newFakeAgent(t)
 	a.mu.Lock()
-	delete(a.handlers, "location") // an error reply
+	delete(a.handlers, "location")
 	a.mu.Unlock()
 	d := stubbedDriver(t, stubADB(t, nil), a)
 	if err := d.SetLocation(ctxT(t), 1, 2); err == nil || !strings.Contains(err.Error(), "setLocation") {
@@ -70,7 +61,6 @@ func TestSetLocationAgentError(t *testing.T) {
 	}
 }
 
-// A driver with no point set sends no location request, not even at Close.
 func TestNoLocationNoRequest(t *testing.T) {
 	a := newFakeAgent(t)
 	d := stubbedDriver(t, stubADB(t, nil), a)
@@ -80,9 +70,6 @@ func TestNoLocationNoRequest(t *testing.T) {
 	}
 }
 
-// The agent ends the repeats when the connection that set the point closes; a reconnect (to
-// the same agent, or a restarted one) sets the point again on the new connection, so it holds
-// across the drop (issue #72).
 func TestLocationSetAgainAfterReconnect(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -103,7 +90,7 @@ func TestLocationSetAgainAfterReconnect(t *testing.T) {
 	if r := a2.last("location"); num(t, r, "lat") != 1.5 || num(t, r, "lon") != 2.5 {
 		t.Errorf("after the reconnect: %v", r)
 	}
-	if ops := a2.ops(); len(ops) != 3 { // info, ping, location
+	if ops := a2.ops(); len(ops) != 3 {
 		t.Errorf("the new connection got %v", ops)
 	}
 	d.Close()
@@ -112,10 +99,6 @@ func TestLocationSetAgainAfterReconnect(t *testing.T) {
 	}
 }
 
-// An agent that greets with a point on holds one this driver never set: a tb that was killed
-// or crashed set it, and the agent keeps it for its grace. The new run turns it off when it
-// connects, so its flows never see a location they did not set (issue #72, second review). A
-// greeting with no point on costs no request.
 func TestAdoptTurnsOffALocationLeftOn(t *testing.T) {
 	a := newFakeAgent(t)
 	a.greet(func(int) map[string]any {
@@ -128,13 +111,11 @@ func TestAdoptTurnsOffALocationLeftOn(t *testing.T) {
 
 	quiet := newFakeAgent(t)
 	newDriver(t, quiet)
-	if ops := quiet.ops(); len(ops) != 2 { // info, ping
+	if ops := quiet.ops(); len(ops) != 2 {
 		t.Errorf("a greeting with no point on: %v", ops)
 	}
 }
 
-// resumeAfterDrop sets a point, drops the connection and lets the reconnect's resumeLocation
-// run hook between reading the point and sending it. It returns the new agent.
 func resumeAfterDrop(t *testing.T, hook func(d *Driver)) (*Driver, *fakeAgent) {
 	t.Helper()
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
@@ -163,9 +144,6 @@ func resumeAfterDrop(t *testing.T, hook func(d *Driver)) (*Driver, *fakeAgent) {
 	return d, a2
 }
 
-// A Close while a reconnect resends the point: Close's "off" can reach the agent before the
-// resent point. The point must not outlive the Close: the last location request is off
-// (issue #72, review).
 func TestCloseDuringResumeEndsOff(t *testing.T) {
 	_, a2 := resumeAfterDrop(t, func(d *Driver) { d.stopLocation() })
 	eventually(t, "the resend", func() bool { return len(a2.requests("location")) >= 2 })
@@ -176,8 +154,6 @@ func TestCloseDuringResumeEndsOff(t *testing.T) {
 	}
 }
 
-// A setLocation while a reconnect resends the point: the new point must win, not the one the
-// resend read before it (issue #72, review).
 func TestSetLocationDuringResumeKeepsTheNewPoint(t *testing.T) {
 	_, a2 := resumeAfterDrop(t, func(d *Driver) {
 		if err := d.SetLocation(ctxT(t), 7, 8); err != nil {
@@ -192,12 +168,6 @@ func TestSetLocationDuringResumeKeepsTheNewPoint(t *testing.T) {
 	}
 }
 
-// Issue #335 (review): a Close after a reconnect's resent point reached the agent, while the
-// resend still waited for its answer, sent "off", and the resend, which then read no point,
-// sent a second "off" (TestLocationSetAgainAfterReconnect failed so under -cpu 1). The new
-// agent holds its answer to the resent point until Close's first step, stopLocation, has
-// cleared the point. Close's own connection close is left out: it raced the second "off" and
-// hid it now and then. The new connection must get the point and one "off", in that order.
 func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -207,7 +177,7 @@ func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 		if req["off"] == true {
 			return map[string]any{"off": true}
 		}
-		once.Do(func() { <-release }) // the resent point: answered once the point is cleared
+		once.Do(func() { <-release })
 		return map[string]any{"providers": []string{"gps"}}
 	})
 	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
@@ -232,7 +202,6 @@ func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("stopLocation did not return")
 	}
-	// The resend is done when the reconnect is: it runs in adopt, under connMu.
 	eventually(t, "the reconnect to end", func() bool {
 		if d.connMu.TryLock() {
 			d.connMu.Unlock()
@@ -246,9 +215,6 @@ func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 	}
 }
 
-// Issue #335 (review): Release waited for a resend of the point under way with no bound of its
-// own: with the new agent not answering it, Release ran past releaseWait (up to the resend's
-// 10 s and 5 s calls).
 func TestReleaseDoesNotWaitPastItsBoundForAResend(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	defer func(v time.Duration) { releaseWait = v }(releaseWait)
@@ -272,16 +238,11 @@ func TestReleaseDoesNotWaitPastItsBoundForAResend(t *testing.T) {
 	eventually(t, "the new connection", func() bool { return d.conn() != c1 })
 	start := time.Now()
 	d.Release(ctxT(t))
-	// releaseWait, then exit's own 2 s at most (unanswered behind the stuck resend)
 	if took := time.Since(start); took > releaseWait+3*time.Second {
 		t.Errorf("issue #335: Release took %s with a resend stuck, want about releaseWait (%s)", took.Round(100*time.Millisecond), releaseWait)
 	}
 }
 
-// Issue #335 (review): adopt checked for a closed driver only on entry. With the
-// accessibility service on, its "sh" takes up to 5 s: a Close then closed the connection
-// before, and adopt went on to make the new one current and start a pump on a closed driver.
-// The new agent holds its answer to that "sh" until Close has returned.
 func TestCloseDuringAdoptKeepsNothingOpen(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
@@ -302,7 +263,7 @@ func TestCloseDuringAdoptKeepsNothingOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TB_NO_A11Y_SERVICE", "") // adopt enables the accessibility service over c2
+	t.Setenv("TB_NO_A11Y_SERVICE", "")
 	adopted := make(chan error, 1)
 	go func() { adopted <- d.adopt(c2, a2.port(), h2) }()
 	select {

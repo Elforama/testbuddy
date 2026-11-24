@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// mockNetwork runs a mockNetwork step: the mock's values are interpolated and passed to a
-// driver that can mock requests (the web driver).
 func (r *Runner) mockNetwork(ctx context.Context, c *flow.Command) error {
 	nm, ok := r.Drv.(driver.NetworkMocker)
 	if !ok {
@@ -55,8 +53,6 @@ func (r *Runner) mockNetwork(ctx context.Context, c *flow.Command) error {
 	return nm.MockNetwork(ctx, out)
 }
 
-// guessContentType is the Content-Type of a mock body that names none: JSON for a .json
-// file or a body that parses as JSON, else plain text.
 func guessContentType(body, file string) string {
 	if strings.EqualFold(filepath.Ext(file), ".json") {
 		return "application/json"
@@ -75,8 +71,6 @@ func (r *Runner) clearNetworkMocks(ctx context.Context) error {
 	return nm.ClearNetworkMocks(ctx)
 }
 
-// resetNetworkMocks drops mocks left on the device, so a flow starts and ends without any
-// (an agent session's commands keep theirs until it clears them).
 func (r *Runner) resetNetworkMocks() {
 	if nm, ok := r.Drv.(driver.NetworkMocker); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

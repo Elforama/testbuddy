@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// --annotate holds the screen after each step that acts on the app, and only those: a check, a
-// script or a runFlow is not held (its steps are), and without --annotate nothing is.
 func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 	yaml := "- tapOn: Go\n- assertVisible: Go\n- evalScript: ${1}\n- runFlow:\n    commands:\n      - tapOn: Go\n"
 	for _, slow := range []bool{false, true} {
@@ -31,7 +29,7 @@ func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 		}
 		want := 0
 		if slow {
-			want = 2 // the two taps
+			want = 2
 		}
 		if len(holds) != want {
 			t.Errorf("slow=%v: %d holds %v, want %d", slow, len(holds), holds, want)
@@ -44,20 +42,15 @@ func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 	}
 }
 
-// A step that touched the screen is held until a second has passed since its touch, however
-// long the step waited for its target first; another step that acts is topped up to a second
-// from its start, and not lengthened once it took that long.
 func TestAnnotateHoldLength(t *testing.T) {
 	for _, c := range []struct {
 		took, sinceTouch time.Duration
 		touched          bool
 		want             time.Duration
 	}{
-		// a touch: a second from the touch
 		{120 * time.Millisecond, 20 * time.Millisecond, true, 980 * time.Millisecond},
-		{2200 * time.Millisecond, 40 * time.Millisecond, true, 960 * time.Millisecond}, // waited 2.1 s, then tapped
-		{3 * time.Second, 1500 * time.Millisecond, true, 0},                            // its result was up long enough
-		// no touch (typing, a launch): a second from the start
+		{2200 * time.Millisecond, 40 * time.Millisecond, true, 960 * time.Millisecond},
+		{3 * time.Second, 1500 * time.Millisecond, true, 0},
 		{0, 0, false, time.Second},
 		{120 * time.Millisecond, 0, false, 880 * time.Millisecond},
 		{time.Second, 0, false, 0},
@@ -69,9 +62,6 @@ func TestAnnotateHoldLength(t *testing.T) {
 	}
 }
 
-// The case CI's iOS and Android recordings showed: a tap whose target shows only after a
-// while. The step takes longer than a second, but its tap comes at its end, so it is held
-// about a second after the tap, and the tap's result shows under the tap's own caption.
 func TestAnnotateHoldsAfterALateTap(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	shown := time.Now().Add(1200 * time.Millisecond)
@@ -100,7 +90,6 @@ func TestAnnotateHoldsAfterALateTap(t *testing.T) {
 	}
 }
 
-// A failed step is not held: the flow ends there.
 func TestAnnotateDoesNotHoldAFailedStep(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -119,9 +108,6 @@ func TestAnnotateDoesNotHoldAFailedStep(t *testing.T) {
 	}
 }
 
-// --annotate draws on the recording a caption for each step and a ring where each touch went:
-// the burn gets the flow's steps (a runFlow's own steps, not the runFlow) and its tap, at
-// its place on the screen, in times within the video.
 func TestAnnotateCaptionsAndTouchesTheRecording(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -161,7 +147,6 @@ func TestAnnotateCaptionsAndTouchesTheRecording(t *testing.T) {
 	}
 }
 
-// Without --annotate the recording is left as the device made it.
 func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -177,15 +162,13 @@ func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 	}
 }
 
-// Captions close short gaps between steps, so the text does not flicker off, and the last
-// one stays a second after its step.
 func TestVideoNotesCaptions(t *testing.T) {
 	t0 := time.Now()
 	at := func(ms int) time.Time { return t0.Add(time.Duration(ms) * time.Millisecond) }
 	caps, _ := videoNotes([]stepNote{
 		{at(100), at(600), "a"},
-		{at(700), at(900), "b"},   // 100 ms after a: a runs up to it
-		{at(5000), at(5100), "c"}, // long after b: b ends at its own end
+		{at(700), at(900), "b"},
+		{at(5000), at(5100), "c"},
 	}, nil, t0, at(10000), time.Second)
 	want := []annotate.Caption{
 		{Start: 100 * time.Millisecond, End: 700 * time.Millisecond, Text: "a"},
@@ -202,9 +185,6 @@ func TestVideoNotesCaptions(t *testing.T) {
 	}
 }
 
-// The video began later than tb's clock says: the touches line up with the video's changes
-// only 800 ms later, so the captions and touches move by that much before they are drawn.
-// A video in sync is left alone.
 func TestAnnotateSyncsToTheVideo(t *testing.T) {
 	t0 := time.Now()
 	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(10 * time.Second)}
@@ -235,7 +215,6 @@ func TestAnnotateSyncsToTheVideo(t *testing.T) {
 	}
 }
 
-// The driver's word on when the video began wins over when StartRecording returned.
 func TestVideoStartFromTheDriver(t *testing.T) {
 	asked := time.Now()
 	early := asked.Add(-300 * time.Millisecond)
@@ -256,8 +235,6 @@ type clockDriver struct {
 
 func (d *clockDriver) RecordingStarted() time.Time { return d.t0 }
 
-// --annotate=TIME sets how long a step lasts at least: 1 s by default, the given time
-// otherwise (0.5 s, 3 s), none when negative (the CLI's 0): captions and touches only.
 func TestAnnotateStepIsSettable(t *testing.T) {
 	for _, c := range []struct {
 		set, want time.Duration
@@ -285,16 +262,12 @@ func TestAnnotateStepIsSettable(t *testing.T) {
 			}
 			continue
 		}
-		// the tap takes a little time of its own: the hold is the rest of the step time
 		if len(holds) != 1 || holds[0] > c.want || holds[0] < c.want-300*time.Millisecond {
 			t.Errorf("step %s: holds %v, want one just under %s", c.set, holds, c.want)
 		}
 	}
 }
 
-// A driver that takes its video's frames itself (the web) knows when the video began exactly:
-// its drawings are not shifted, whatever the changes in the picture suggest (CI, PR #391: a web
-// video was shifted 1060 ms off by touches that happened to line up with later changes).
 func TestAnnotateTrustsAnExactVideoClock(t *testing.T) {
 	t0 := time.Now()
 	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(10 * time.Second)}
@@ -315,10 +288,6 @@ type exactClockDriver struct{ *fakeDriver }
 
 func (d *exactClockDriver) RecordingClockExact() bool { return true }
 
-// CI, PR #393: the iOS simulator's video began 2.4 s before the status bar mark the driver
-// made at the start (driver.RecordingMark), and tb, taking the mark for the video's start, drew
-// every caption and touch 2.4 s early; the touches alone lined up too rarely to fix it. Found
-// in the video, the mark says exactly how far: everything moves by it, whatever the touches.
 func TestAnnotateTimesFromTheStartMark(t *testing.T) {
 	t0 := time.Now()
 	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(60 * time.Second)}
@@ -329,7 +298,7 @@ func TestAnnotateTimesFromTheStartMark(t *testing.T) {
 	r.annotateMarks = func(context.Context, string) ([]time.Duration, error) {
 		return []time.Duration{2433 * time.Millisecond, 3600 * time.Millisecond, 6167 * time.Millisecond, 17933 * time.Millisecond}, nil
 	}
-	r.annotateChanges = func(context.Context, string) ([]time.Duration, error) { return nil, nil } // the touches line up with nothing
+	r.annotateChanges = func(context.Context, string) ([]time.Duration, error) { return nil, nil }
 	gotCaps, got := r.syncToVideo(context.Background(), v, caps, touches)
 	for i := range touches {
 		if want := touches[i].At + 2433*time.Millisecond; i >= len(got) || got[i].At != want {
@@ -339,7 +308,6 @@ func TestAnnotateTimesFromTheStartMark(t *testing.T) {
 	if len(gotCaps) != 1 || gotCaps[0].Start != 4250*time.Millisecond {
 		t.Errorf("captions %v, want the first from 4.25 s", gotCaps)
 	}
-	// no mark in the video: the touches decide, as before
 	r.annotateMarks = func(context.Context, string) ([]time.Duration, error) { return nil, nil }
 	if _, got := r.syncToVideo(context.Background(), v, caps, touches); got[0].At != touches[0].At {
 		t.Errorf("with no mark found, touch 0 moved to %s", got[0].At)
@@ -354,10 +322,6 @@ type markDriver struct {
 
 func (d *markDriver) RecordingMark() (time.Time, time.Duration, bool) { return d.shown, d.held, true }
 
-// CI: an Android video's touches lined up with its changes too rarely (9-11 of 24) to check its
-// sync, and it was drawn by tb's guess of its start (when screenrecord said it started). The
-// video's own frame times (driver.VideoClock) say when its first frame showed: everything moves
-// by how far that is from the guess.
 func TestAnnotateTimesFromTheFrameClock(t *testing.T) {
 	t0 := time.Now()
 	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(60 * time.Second)}
@@ -371,12 +335,10 @@ func TestAnnotateTimesFromTheFrameClock(t *testing.T) {
 			t.Fatalf("touches %v, want each 0.7 s earlier", got)
 		}
 	}
-	// frame times far off (a clock that jumped) are not believed
 	d.first = t0.Add(-time.Minute)
 	if _, got := r.syncToVideo(context.Background(), v, nil, touches); got[0].At != touches[0].At {
 		t.Errorf("frame times a minute off moved touch 0 to %s", got[0].At)
 	}
-	// no frame times: as before
 	d.ok = false
 	if _, got := r.syncToVideo(context.Background(), v, nil, touches); got[0].At != touches[0].At {
 		t.Errorf("no frame times, touch 0 moved to %s", got[0].At)

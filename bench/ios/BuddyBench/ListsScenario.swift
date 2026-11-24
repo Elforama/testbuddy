@@ -1,5 +1,3 @@
-// Scenario 8, Lists: long, grid, carousel, two-pane, pull-to-refresh, swipe-to-delete,
-// reorder, endless and empty lists, each on its own pushed screen.
 import SwiftUI
 
 enum ListKind: String, CaseIterable, Hashable {
@@ -47,7 +45,6 @@ struct ListsScenario: View {
     }
 }
 
-/// A list sub-screen: Back, a title, and "Picked …" at the top.
 private struct ListScreen<Content: View>: View {
     let title: String
     var picked: String?
@@ -131,8 +128,6 @@ private struct CarouselsView: View {
 
     var body: some View {
         ListScreen(title: "Carousels", picked: picked) {
-            // A ScrollView, not a List: a List cell merges its children into one element
-            // ("Shelf 1, Card 1-1, …"), and each card must be its own button.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(1...10, id: \.self) { shelf in
@@ -256,7 +251,6 @@ private struct ReorderView: View {
     var body: some View {
         ListScreen(title: "Reorder") {
             status("Order: \(rows.joined())", "order_status").padding(.horizontal, 20)
-            // With onMove, a List row can be long-pressed and dragged without edit mode.
             List {
                 ForEach(rows, id: \.self) { row in
                     HStack {

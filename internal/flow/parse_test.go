@@ -119,8 +119,6 @@ func TestMultiDevice(t *testing.T) {
 	}
 }
 
-// TestCorpus parses every flow in a folder of real-world flows, when one is given
-// (TB_FLOW_CORPUS=/path/to/flows).
 func TestCorpus(t *testing.T) {
 	root := os.Getenv("TB_FLOW_CORPUS")
 	if root == "" {

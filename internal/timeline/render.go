@@ -16,9 +16,6 @@ import (
 	"time"
 )
 
-// WriteFile renders the recording to path (the folder is created). Each screenshot is
-// copied from the recorder's temp file to the page as it is written, so writing a page
-// holds about one copy buffer of them in memory, not all of them.
 func (r *Recorder) WriteFile(path string) error {
 	if r == nil {
 		return nil
@@ -35,12 +32,11 @@ func (r *Recorder) WriteFile(path string) error {
 		err = cerr
 	}
 	if err != nil {
-		os.Remove(path) // not half a page
+		os.Remove(path)
 	}
 	return err
 }
 
-// HTML renders the recording as one self-contained page: every screenshot is embedded once.
 func (r *Recorder) HTML() []byte {
 	if r == nil {
 		return nil
@@ -56,9 +52,6 @@ func errorPage(err error) []byte {
 	return []byte("<!doctype html><title>timeline</title><pre>" + template.HTMLEscapeString(err.Error()) + "</pre>")
 }
 
-// render writes the page for a file in dir ("" = links stay as recorded). The template runs
-// with a placeholder where the screenshots' CSS goes (html/template cannot run half a page
-// that ends inside <style>), and the screenshots are streamed in its place.
 func (r *Recorder) render(w io.Writer, dir string) error {
 	rec := r.snapshot()
 	rec.dir = dir
@@ -83,17 +76,14 @@ func (r *Recorder) render(w io.Writer, dir string) error {
 	return bw.Flush()
 }
 
-// placeholder is a CSS comment no flow can have written into the page.
 func placeholder() string {
 	var b [16]byte
 	rand.Read(b[:])
 	return "/*tb-shots-" + hex.EncodeToString(b[:]) + "*/"
 }
 
-// writeShots writes each screenshot's CSS class, its bytes base64-encoded from the temp file
-// (or memory) straight to w.
 func (r *Recorder) writeShots(w io.Writer, shots []*Shot) error {
-	r.files.RLock() // Close waits until the page is written
+	r.files.RLock()
 	defer r.files.RUnlock()
 	buf := make([]byte, 48<<10)
 	for _, s := range shots {
@@ -135,8 +125,8 @@ type view struct {
 	Started  string
 	Duration string
 	Counts   string
-	Failed   int          // the failing step's ID, 0 for none
-	Shots    template.CSS // a placeholder: render streams the screenshots in its place
+	Failed   int
+	Shots    template.CSS
 	Segments []segment
 	Rows     []row
 	RunLog   []string
@@ -172,16 +162,16 @@ type row struct {
 	Frames   []frame
 	Lines    []string
 	Gestures int
-	Video    int    // the recording showing this step, 0 for none
-	Seek     string // where in it the step starts, in seconds
+	Video    int
+	Seek     string
 }
 
 type frame struct {
 	Label   string
 	Shot    int
-	Ratio   template.CSS // CSS aspect-ratio, from numbers only
+	Ratio   template.CSS
 	Overlay template.HTML
-	Note    string // no screenshot: why
+	Note    string
 }
 
 func marks(status string) string {
@@ -232,14 +222,13 @@ func build(rec recording) view {
 
 	shots := map[int]*Shot{}
 	for _, s := range rec.shots {
-		shots[s.ID] = s // their CSS (v.Shots) is streamed by render
+		shots[s.ID] = s
 	}
 	gestures := map[int]*Gesture{}
 	for _, g := range rec.gestures {
 		gestures[g.ID] = g
 	}
 
-	// The overview: top-level steps, each as wide as its share of the run.
 	var total time.Duration
 	for _, s := range rec.steps {
 		if s.Parent == 0 {
@@ -322,7 +311,6 @@ func build(rec recording) view {
 	return v
 }
 
-// href links a file from a page in dir: relative when it is under dir, else a file URL.
 func href(dir, path string) string {
 	if dir != "" {
 		if rel, err := filepath.Rel(dir, path); err == nil && !strings.HasPrefix(rel, "..") {
@@ -335,9 +323,6 @@ func href(dir, path string) string {
 	return filepath.ToSlash(path)
 }
 
-// frames are the screenshots shown for a step: with a gesture, the screen it acted on with
-// the gesture drawn on it, then the screen after; otherwise the screen after it (or, when
-// the step changed nothing, the screen it ran on).
 func frames(s *Step, shots map[int]*Shot, gestures map[int]*Gesture) []frame {
 	mk := func(label string, id int, gs []*Gesture) frame {
 		sh := shots[id]
@@ -376,7 +361,6 @@ func frames(s *Step, shots map[int]*Shot, gestures map[int]*Gesture) []frame {
 	return nil
 }
 
-// merged draws a gesture repeated with the same points (a scroll's swipes) once, counted.
 func merged(gs []*Gesture) []*Gesture {
 	var out []*Gesture
 	for _, g := range gs {
@@ -403,9 +387,6 @@ func same(a, b *Gesture) bool {
 	return true
 }
 
-// overlay draws gestures over a screenshot, in the device's coordinates: a ring per tap
-// (two for a double tap, a filled one for a long press), an arrow per swipe, numbered when
-// a step made more than one.
 func overlay(sh *Shot, gs []*Gesture) template.HTML {
 	w, h := float64(max(sh.W, 1)), float64(max(sh.H, 1))
 	r := math.Min(w, h) * 0.035
@@ -413,7 +394,6 @@ func overlay(sh *Shot, gs []*Gesture) template.HTML {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg class="overlay" viewBox="0 0 %d %d" preserveAspectRatio="none" aria-hidden="true">`, sh.W, sh.H)
 	for i, g := range gs {
-		// A gesture recorded for another size (a rotation mid-step) is scaled to this shot.
 		sx, sy := 1.0, 1.0
 		if g.W > 0 && g.H > 0 {
 			sx, sy = w/float64(g.W), h/float64(g.H)
@@ -428,7 +408,6 @@ func overlay(sh *Shot, gs []*Gesture) template.HTML {
 			x2, y2 := p(len(g.Pts) - 1)
 			fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke-width="%.1f" class="g-line"/>`, x, y, x2, y2, sw*1.4)
 			fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="%.1f" class="g-start"/>`, x, y, r*0.45)
-			// Arrowhead at the end.
 			ang := math.Atan2(y2-y, x2-x)
 			a := r * 1.1
 			fmt.Fprintf(&b, `<polygon points="%.1f,%.1f %.1f,%.1f %.1f,%.1f" class="g-head"/>`, x2, y2,

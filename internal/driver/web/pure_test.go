@@ -12,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// sameSite compares the last two host labels, so an API subdomain counts as the page's own.
 func TestSameSite(t *testing.T) {
 	cases := []struct {
 		a, b string
@@ -34,7 +33,6 @@ func TestSameSite(t *testing.T) {
 	}
 }
 
-// Different IP hosts, and siblings under a two-label public suffix, are different sites.
 func TestSameSiteIPsAndPublicSuffixes(t *testing.T) {
 	for _, c := range [][2]string{{"http://10.0.0.1/api", "http://127.0.0.1/"}, {"https://tracker.co.uk/", "https://shop.co.uk/"}} {
 		if sameSite(c[0], c[1]) {
@@ -43,7 +41,6 @@ func TestSameSiteIPsAndPublicSuffixes(t *testing.T) {
 	}
 }
 
-// origin is scheme://host[:port] of an absolute URL, else "".
 func TestOrigin(t *testing.T) {
 	cases := map[string]string{
 		"https://example.com/path?q=1#x":   "https://example.com",
@@ -63,7 +60,6 @@ func TestOrigin(t *testing.T) {
 	}
 }
 
-// isURL accepts anything with a scheme separator, about: and data: URLs.
 func TestIsURL(t *testing.T) {
 	for in, want := range map[string]bool{
 		"https://example.com": true, "http://localhost:3000": true, "file:///x.html": true, "about:blank": true,
@@ -75,7 +71,6 @@ func TestIsURL(t *testing.T) {
 	}
 }
 
-// defaults: 500 ms to start reacting and a 5 s settle timeout, unless the caller says otherwise.
 func TestDefaults(t *testing.T) {
 	if o := defaults(driver.ActionOpts{}); o.NoChangeMs != 500 || o.Timeout != 5*time.Second {
 		t.Errorf("defaults = %+v", o)
@@ -86,7 +81,6 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-// The key table: DOM key/code names and Windows virtual key codes; only Enter produces text.
 func TestKeys(t *testing.T) {
 	want := map[string]keyDef{
 		"enter":     {"Enter", "Enter", 13, "\r"},
@@ -105,7 +99,6 @@ func TestKeys(t *testing.T) {
 	}
 }
 
-// The embedded page helper defines window.__tb with snapshot and css, and reports through __tbNotify.
 func TestPageJS(t *testing.T) {
 	for _, want := range []string{"window.__tb", "tb.snapshot", "tb.css", "__tbNotify", "MutationObserver"} {
 		if !strings.Contains(pageJS, want) {
@@ -117,7 +110,6 @@ func TestPageJS(t *testing.T) {
 	}
 }
 
-// TB_CHROME overrides the browser search; a found browser is a real file.
 func TestChromePath(t *testing.T) {
 	t.Setenv("TB_CHROME", "/opt/custom/chrome")
 	if got := ChromePath(); got != "/opt/custom/chrome" {
@@ -138,8 +130,6 @@ func TestChromePath(t *testing.T) {
 	}
 }
 
-// scrollByJS's JavaScript, run against a small fake DOM: it scrolls the nearest scrollable
-// ancestor of the point by (dx, dy), else the page, and says whether anything moved.
 func TestScrollByJS(t *testing.T) {
 	const dom = `
 function el(tag, o) {
@@ -166,7 +156,7 @@ function getComputedStyle(e) { return {overflowY: e.oy, overflowX: e.ox}; }
 		hit            string
 		dx, dy         int
 		want           string
-		scrolled, prop string // which element's property moved
+		scrolled, prop string
 		amount         int64
 	}{
 		{"nothing there", "null", 0, 300, "still", "", "", 0},
@@ -211,8 +201,6 @@ function getComputedStyle(e) { return {overflowY: e.oy, overflowX: e.ox}; }
 	}
 }
 
-// pageEnv is a fake window for page.js's change reporting: listeners by event name, the
-// MutationObserver's callback, a settable clock, and every __tbNotify payload.
 const pageEnv = `
 var listeners = {}, notes = [], now = 0, observed = null;
 var window = {
@@ -251,11 +239,8 @@ func jsInt(t *testing.T, vm *goja.Runtime, expr string) int64 {
 	return v.ToInteger()
 }
 
-// An element that keeps changing on its own for 500 ms is restless (a ticker); one that changes
-// right after each of the test's inputs (a list growing with every Enter) stays solid.
 func TestPageJSRestless(t *testing.T) {
 	vm := runPage(t)
-	// On its own: a change every 100 ms. From 500 ms on its changes are restless.
 	for ms := 0; ms <= 700; ms += 100 {
 		vm.RunString(fmt.Sprintf("now = %d; observed([{ target: list }]);", ms))
 	}
@@ -264,14 +249,12 @@ func TestPageJSRestless(t *testing.T) {
 	}
 
 	vm = runPage(t)
-	// The same pace, each change following a key press: never restless.
 	for ms := 0; ms <= 1500; ms += 100 {
 		vm.RunString(fmt.Sprintf("now = %d; fire('keydown', { isTrusted: true }); now += 5; observed([{ target: list }]);", ms))
 	}
 	if s := jsInt(t, vm, "last().s"); s != 1 {
 		t.Error("a list changing after each key press was taken for restless")
 	}
-	// A page's own synthetic events are not the test's input.
 	vm = runPage(t)
 	for ms := 0; ms <= 700; ms += 100 {
 		vm.RunString(fmt.Sprintf("now = %d; fire('keydown', { isTrusted: false }); observed([{ target: list }]);", ms))
@@ -279,7 +262,6 @@ func TestPageJSRestless(t *testing.T) {
 	if s := jsInt(t, vm, "last().s"); s != 0 {
 		t.Error("untrusted events kept a ticker solid")
 	}
-	// A drag (scrollByJS) marks input too, through window.__tb.acted.
 	vm = runPage(t)
 	for ms := 0; ms <= 1000; ms += 100 {
 		vm.RunString(fmt.Sprintf("now = %d; window.__tb.acted(); observed([{ target: list }]);", ms))
@@ -289,7 +271,6 @@ func TestPageJSRestless(t *testing.T) {
 	}
 }
 
-// A transition holds the page (its running count goes up) unless it only changes a color.
 func TestPageJSTransitions(t *testing.T) {
 	vm := runPage(t)
 	for _, prop := range []string{"color", "background-color", "border-top-color", "fill", "stroke", "box-shadow", "text-shadow"} {
@@ -308,16 +289,12 @@ func TestPageJSTransitions(t *testing.T) {
 			t.Errorf("%s transition ended: a = %d", prop, a)
 		}
 	}
-	// A color transition's end does not cancel another transition's count.
 	vm.RunString("fire('transitionrun', { propertyName: 'transform' }); fire('transitionend', { propertyName: 'color' });")
 	if a := jsInt(t, vm, "last().a"); a != 1 {
 		t.Errorf("a color end ended a transform: a = %d", a)
 	}
 }
 
-// An element removed while it transitions or animates (a toast an app unmounts mid-fade) gets
-// its cancel event while detached, where it never reaches the window: it stops being counted
-// once it is out of the page, while one still in the page keeps holding it (issue #75).
 func TestPageJSRemovedMidAnimation(t *testing.T) {
 	vm := runPage(t)
 	vm.RunString(`var toast = { nodeType: 1, isConnected: true }, modal = { nodeType: 1, isConnected: true };
@@ -337,8 +314,6 @@ fire('transitionrun', { propertyName: 'transform' });`)
 	}
 }
 
-// covered: ” when a click at the point reaches the node, something inside it or something
-// it is inside of; else a name for what is on top. Shadow roots are followed down.
 func TestPageJSCovered(t *testing.T) {
 	vm := runPage(t)
 	_, err := vm.RunString(`
@@ -368,11 +343,9 @@ var hit = null;
 			t.Errorf("hit %s: covered = %q, want %q", c.hit, v, c.want)
 		}
 	}
-	// A node in another (frame) document is not checked.
 	if v, _ := vm.RunString("hit = veil; window.__tb.covered(2, 10, 10)"); v.String() != "" {
 		t.Errorf("frame node: %q", v)
 	}
-	// A shadow host's inner element is followed down.
 	if v, _ := vm.RunString(`var inner = el('SPAN', { parentNode: null }); var root = { elementFromPoint: function () { return inner; } };
 		inner.parentNode = root; Object.setPrototypeOf(root, ShadowRoot.prototype); root.host = button;
 		var host = el('X-HOST', { parentNode: body, shadowRoot: root }); hit = host; window.__tb.covered(0, 10, 10)`); v.String() != "" {
@@ -386,7 +359,7 @@ func TestActivePortURL(t *testing.T) {
 		t.Errorf("no file: %q", got)
 	}
 	file := filepath.Join(dir, "DevToolsActivePort")
-	os.WriteFile(file, []byte("9222\n"), 0o644) // Chrome still writing it
+	os.WriteFile(file, []byte("9222\n"), 0o644)
 	if got := activePortURL(dir); got != "" {
 		t.Errorf("half-written file: %q", got)
 	}

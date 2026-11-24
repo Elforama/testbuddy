@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// dyingApp is a fakeApp whose connection dies for good during its first launch: the launch
-// fails, and every read after it fails as a dead driver's do (driver.LostChecker says why).
 type dyingApp struct {
 	*fakeApp
 	mu   sync.Mutex
@@ -50,19 +48,15 @@ func (a *dyingApp) Screen(ctx context.Context) (*ui.Screen, error) {
 	return a.fakeApp.Screen(ctx)
 }
 
-// animState is a device's animation setting, which outlives the drivers opened on it.
 type animState struct {
 	mu        sync.Mutex
 	scales    string
-	orig      string // the scales before the run, kept by the first disable ("" = none)
-	deadCalls int    // restores run through a driver that was dead by then
+	orig      string
+	deadCalls int
 }
 
 func (s *animState) get() string { s.mu.Lock(); defer s.mu.Unlock(); return s.scales }
 
-// disable is DisableAnimations as the Android driver does it: the first one in a run keeps the
-// scales it read; the restore of any of them puts those back (issue #101). dead: the driver
-// it runs on dies later in the run, so a restore through it is a call on a dead driver.
 func (s *animState) disable(dead bool) func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,8 +92,6 @@ func (a animatedDyingApp) DisableAnimations(context.Context) (func(), error) {
 	return a.state.disable(true), nil
 }
 
-// withDyingPhone makes tb see one Android device whose first driver dies during its first
-// launch; each later open gives a fresh, working one. opens counts the opens.
 func withDyingPhone(t *testing.T, anim *animState) (opens func() int) {
 	t.Helper()
 	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Fake phone", Emulator: true, State: "device"}
@@ -128,9 +120,6 @@ func withDyingPhone(t *testing.T, anim *animState) (opens func() int) {
 	return func() int { mu.Lock(); defer mu.Unlock(); return n }
 }
 
-// Issue #101: a flow that failed because the device's connection died got no screenshot: the
-// failure's files were read through the dead driver (pool.Driver hands out whatever is open),
-// whose reads fail. They must be read from the device opened again.
 func TestCmdTestFailureShotFromTheReopenedDevice(t *testing.T) {
 	opens := withDyingPhone(t, nil)
 	dir := t.TempDir()
@@ -161,7 +150,6 @@ func TestCmdTestFailureShotFromTheReopenedDevice(t *testing.T) {
 	if !strings.Contains(out+errOut, "opened it again") {
 		t.Errorf("the output does not say the device was opened again:\n%s%s", out, errOut)
 	}
-	// issue #101 (review): the log says the screen files are from after the reopen
 	logs, _ := filepath.Glob(filepath.Join(debug, "*", "log.txt"))
 	if more, _ := filepath.Glob(filepath.Join(debug, "log.txt")); len(more) > 0 {
 		logs = append(logs, more...)
@@ -174,9 +162,6 @@ func TestCmdTestFailureShotFromTheReopenedDevice(t *testing.T) {
 	}
 }
 
-// Issue #101: the setup step runs again on a device opened again, so animations are turned
-// off twice; the second time reads them already off. The run's end must still put back the
-// scales the device had before the run, not the zeros the second read saw.
 func TestCmdTestRestoresAnimationsAfterAReopen(t *testing.T) {
 	anim := &animState{scales: "1"}
 	withDyingPhone(t, anim)
@@ -193,8 +178,6 @@ func TestCmdTestRestoresAnimationsAfterAReopen(t *testing.T) {
 	if got := anim.get(); got != "1" {
 		t.Errorf("issue #101: the animation scales are %q after the run, want the %q the device had before it", got, "1")
 	}
-	// issue #101 (review): one restore per device, the latest driver's: the dead first
-	// driver's would reconnect (up to 5 s per reopen) and may leave a connection open
 	anim.mu.Lock()
 	dead := anim.deadCalls
 	anim.mu.Unlock()

@@ -22,7 +22,6 @@ func actionAgent(t *testing.T) *fakeAgent {
 	return a
 }
 
-// Each input op sends its own params plus the settle params, and decodes the action result.
 func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
 	a := actionAgent(t)
 	a.on("type", func(map[string]any) map[string]any {
@@ -34,7 +33,6 @@ func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
 	}
 }
 
-// Issue #279: the agent's reply says how checked typing put the keys in when not in chunks.
 func TestCheckedTypingReportsHowTheKeysWentIn(t *testing.T) {
 	a := actionAgent(t)
 	a.on("type", func(map[string]any) map[string]any {
@@ -46,29 +44,18 @@ func TestCheckedTypingReportsHowTheKeysWentIn(t *testing.T) {
 	}
 }
 
-// Issue #279 review: checked typing's reply time covers the agent's worst case, every key
-// waited for up to its cap three times (typed alone, deleted, typed again), in and out of CI mode.
 func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
-	text := strings.Repeat("ab cd ", 50) // 300 characters
+	text := strings.Repeat("ab cd ", 50)
 	for _, c := range []struct {
 		ci  bool
 		cap time.Duration
 	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
-		// The end of typing (issue #297): a loss seen is waited on for a still text, up to 7
-		// caps, twice when the repair is called off, then the repaired text once more.
-		// The first key (issue #299): 1 s, the proof it was lost (1 s and a cap), 1 s for
-		// the key typed again, 1 s after the rest; and one editor-settings read (2 s timeout).
 		firstKey := 4*time.Second + c.cap
 		settings := 2 * time.Second
-		// Issue #299, per character: a field that cannot be read is waited for before each key
-		// typed, and before each typed again in a repair (1 s each); each such key waits up to
-		// a cap and 1 s; a key sent again on proof waits as long and then a cap still; its DEL
-		// a cap. Once in a typing, the key after one that still does not show: a cap and 1 s.
-		perChar := time.Second + (c.cap + time.Second) + // typed
-			(c.cap + time.Second) + c.cap + // sent again, then held
-			c.cap + // its DEL in a repair
-			time.Second + (c.cap + time.Second) // typed again in the repair
-		// A field taken as full is held a cap (issue #299 review), once.
+		perChar := time.Second + (c.cap + time.Second) +
+			(c.cap + time.Second) + c.cap +
+			c.cap +
+			time.Second + (c.cap + time.Second)
 		worst := firstKey + settings + 300*perChar + (c.cap + time.Second) + c.cap + 15*c.cap
 		if old := 7*time.Second + 300*3*time.Second + (4*300+17)*c.cap; old >= worst {
 			t.Errorf("ci %v: the old budget %v covers %v: the test would not catch it", c.ci, old, worst)
@@ -82,9 +69,6 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 	}
 }
 
-// Issue #289: erasing tells the agent CI mode, which waits longer for the field to show the
-// DELs; and its reply time covers the agent's worst case: the field read up to the cap, its
-// repair deleting one DEL a character erased, each waited for up to the cap, and a read after.
 func TestEraseSendsCIModeAndItsBudgetCoversARepair(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -114,9 +98,6 @@ func TestEraseSendsCIModeAndItsBudgetCoversARepair(t *testing.T) {
 	}
 }
 
-// Issue #204: a tap tells the agent CI mode, which holds a touch into a window just added
-// longer; and the agent's reply says when the platform did not inject the touch, and how long the
-// touch was held for its window.
 func TestTapSendsCIModeAndReportsInjection(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -140,8 +121,6 @@ func TestTapSendsCIModeAndReportsInjection(t *testing.T) {
 	}
 }
 
-// Issue #280: a tap's reply says whether its touch was the first input the window under it ever
-// got, and that window's age; an older agent says neither, and no touch is then "first".
 func TestTapReportsFirstInputToItsWindow(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -167,9 +146,6 @@ func TestTapReportsFirstInputToItsWindow(t *testing.T) {
 	}
 }
 
-// Issue #321: a tap with an Aim asks the agent where that element is just before the touch,
-// and its reply says where (AimAt); none said (an older agent, or the element not found) is
-// unknown. No Aim, nothing asked.
 func TestTapAsksWhereItsTargetIsAtTheTouch(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -205,8 +181,6 @@ func TestTapAsksWhereItsTargetIsAtTheTouch(t *testing.T) {
 	}
 }
 
-// Checked typing tells the agent CI mode ("ci": true): only then does it wait for a field to
-// take the focus (issue #97). Outside CI nothing is sent for it, as before.
 func TestCheckedTypingSendsCIMode(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -251,8 +225,6 @@ func TestActions(t *testing.T) {
 		{"drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 0, driver.ActionOpts{Drag: true})
 		}, "swipe", map[string]any{"drag": true, "ms": 0.0}, nil},
-		// Issue #358: the flow's drag asks the agent to hold the finger still first, a press
-		// and hold; never a no-fling drag.
 		{"press-and-hold drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, time.Second, driver.ActionOpts{Hold: 800 * time.Millisecond, Drag: true})
 		}, "swipe", map[string]any{"hold": 800.0, "ms": 1000.0, "x2": 3.0}, []string{"drag"}},
@@ -293,7 +265,6 @@ func TestActions(t *testing.T) {
 	}
 }
 
-// An unknown key fails before anything is sent.
 func TestPressKeyUnknown(t *testing.T) {
 	a := actionAgent(t)
 	d := newDriver(t, a)
@@ -306,7 +277,6 @@ func TestPressKeyUnknown(t *testing.T) {
 	}
 }
 
-// An action the agent rejects returns its error and an empty result.
 func TestActionError(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tap", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "inject failed"} })
@@ -317,7 +287,6 @@ func TestActionError(t *testing.T) {
 	}
 }
 
-// The context's deadline caps a request's timeout: an unanswered request fails when the context ends.
 func TestCallUsesContextDeadline(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tap", func(map[string]any) map[string]any { return noReply })
@@ -334,7 +303,6 @@ func TestCallUsesContextDeadline(t *testing.T) {
 	}
 }
 
-// Settle sends since/noChange/timeout and returns the agent's result; WaitSettled sends quiet.
 func TestSettleAndWaitSettled(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "no_change", "seq": 3} })
@@ -361,8 +329,6 @@ func TestSettleAndWaitSettled(t *testing.T) {
 	}
 }
 
-// Keyboard detection and dismissal run together on the device, avoiding a
-// host round trip between detecting the IME and sending Back.
 func TestHideKeyboard(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -381,8 +347,6 @@ func TestHideKeyboard(t *testing.T) {
 	}
 }
 
-// Issue #175: the agent waits for a keyboard still coming up for the focused field, a
-// second after the last action, and longer in CI mode (a slow emulator shows it later).
 func TestHideKeyboardWaitsForAKeyboardComingUp(t *testing.T) {
 	for mode, want := range map[string]float64{"0": 1000, "1": 2500} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -402,8 +366,6 @@ func TestHideKeyboardWaitsForAKeyboardComingUp(t *testing.T) {
 	}
 }
 
-// Issue #175 (review): a keyboard the agent closed after it came up late shows in the run's
-// trace, and one that then stays up says so.
 func TestHideKeyboardLateKeyboard(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

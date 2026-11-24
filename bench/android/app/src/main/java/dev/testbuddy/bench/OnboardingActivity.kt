@@ -15,7 +15,6 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
 
-/** Scenario 7, "Onboarding and login": a pager (once per process), sign in, a 6-box OTP. */
 class OnboardingActivity : ScenarioActivity() {
     private lateinit var onboarding: LinearLayout
     private lateinit var signIn: LinearLayout
@@ -142,7 +141,6 @@ class OnboardingActivity : ScenarioActivity() {
             if (password.text.toString() == "wrong") {
                 showError("Wrong password")
             } else {
-                // No "Save password?" sheet over the bench (as on Login): drop the autofill session.
                 getSystemService(android.view.autofill.AutofillManager::class.java)?.cancel()
                 show(otp)
                 boxes[0].requestFocus()
@@ -188,7 +186,6 @@ class OnboardingActivity : ScenarioActivity() {
         }
     }
 
-    /** One digit per box: a digit moves on to the next box; several at once (a paste) spread out. */
     private fun onBoxText(i: Int, typed: String) {
         val digits = typed.filter { it.isDigit() }
         updatingBoxes = true
@@ -242,11 +239,6 @@ class OnboardingActivity : ScenarioActivity() {
     }
 }
 
-/**
- * Wraps a ViewPager2 so a drag of a quarter of its width turns the page, as most pagers feel.
- * ViewPager2 alone needs half the width or a fling, so an even, unhurried drag across ~40% of
- * the page springs back. A shorter drag still springs back.
- */
 class PageTurner(context: android.content.Context, private val pager: ViewPager2) : android.widget.FrameLayout(context) {
     private var downX = 0f
     private var startPage = 0

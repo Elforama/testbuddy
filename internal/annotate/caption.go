@@ -1,7 +1,5 @@
 package annotate
 
-// The caption band: the step that is running, as text in a band below the recording.
-
 import (
 	"image"
 	"image/color"
@@ -14,22 +12,16 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-// bandColor is the band's background (ffmpeg's 0xRRGGBB); captionImage paints the same.
 const bandColor = "1c1c1e"
 
 var bandRGB = color.RGBA{0x1c, 0x1c, 0x1e, 0xff}
 
-// captionLines is the most lines a caption takes; a longer one ends in "…".
 const captionLines = 2
 
-// captionSize is the text's size in pixels for a w×h video: readable on a phone held upright
-// (1080 wide: 49 px) and in a landscape browser window (656 high: 29 px).
 func captionSize(w, h int) int {
 	return min(max(min(w, h)/22, 14), 64)
 }
 
-// bandHeight is the band's height for a w×h video: two lines of text and a margin, even (the
-// encoder wants even sizes).
 func bandHeight(w, h int) int {
 	px := captionSize(w, h)
 	b := px*captionLines*13/10 + px
@@ -50,8 +42,6 @@ var fontFace = func() func(px int) font.Face {
 	}
 }()
 
-// captionImage is a w×band image of text, white on the band's color, in at most captionLines
-// centered lines of px pixels.
 func captionImage(text string, w, band, px int) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, w, band))
 	draw.Draw(img, img.Bounds(), &image.Uniform{bandRGB}, image.Point{}, draw.Src)
@@ -62,7 +52,7 @@ func captionImage(text string, w, band, px int) image.Image {
 	defer face.Close()
 	lines := wrap(face, text, fixed.I(w-2*px))
 	lineH := px * 13 / 10
-	top := (band-len(lines)*lineH)/2 + px // the first baseline
+	top := (band-len(lines)*lineH)/2 + px
 	d := &font.Drawer{Dst: img, Src: image.White, Face: face}
 	for i, l := range lines {
 		width := d.MeasureString(l)
@@ -72,8 +62,6 @@ func captionImage(text string, w, band, px int) image.Image {
 	return img
 }
 
-// wrap breaks text into lines no wider than max, at most captionLines; the last line of a
-// text that does not fit ends in "…". A word wider than a line is cut.
 func wrap(face font.Face, text string, max fixed.Int26_6) []string {
 	words := strings.Fields(text)
 	var lines []string
@@ -87,7 +75,7 @@ func wrap(face font.Face, text string, max fixed.Int26_6) []string {
 			cur, words = try, words[1:]
 			continue
 		}
-		if cur == "" { // one word wider than the line
+		if cur == "" {
 			cur, words = fitText(face, words[0], max), words[1:]
 		}
 		lines = append(lines, cur)
@@ -106,7 +94,6 @@ func wrap(face font.Face, text string, max fixed.Int26_6) []string {
 	return lines
 }
 
-// fitText cuts s to the most that, with "…" after it, is no wider than max (s itself when it fits).
 func fitText(face font.Face, s string, max fixed.Int26_6) string {
 	if font.MeasureString(face, s) <= max {
 		return s

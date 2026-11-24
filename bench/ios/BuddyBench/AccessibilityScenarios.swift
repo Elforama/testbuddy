@@ -1,10 +1,5 @@
-// Scenarios 9 and 10: the same small form built badly (no labels, no ids, no roles, merged
-// and tiny targets, text in a bitmap) and built right. The poor one is broken ON PURPOSE:
-// flows must reach its parts by text, position or point.
 import SwiftUI
 import UIKit
-
-// MARK: 9. Poor accessibility
 
 struct PoorAccessibilityScenario: View {
     @State private var result = "Nothing yet"
@@ -14,14 +9,12 @@ struct PoorAccessibilityScenario: View {
         ScenarioScreen(scenario: .a11y_poor, scrolls: true) {
             status(result, "poor_result")
 
-            // Icon-only "buttons": bitmaps with no label, no id, no button trait.
             HStack(spacing: 32) {
                 PlainIcon(symbol: "heart") { result = "Liked" }
                 PlainIcon(symbol: "square.and.arrow.up") { result = "Shared" }
                 PlainIcon(symbol: "trash") { result = "Trashed" }
             }
 
-            // A 5-segment volume bar drawn on one canvas: no accessibility children.
             GeometryReader { geo in
                 Canvas { context, size in
                     let w = size.width / 5
@@ -39,7 +32,6 @@ struct PoorAccessibilityScenario: View {
             }
             .frame(height: 44)
 
-            // A label that is not linked to its field; the field has no hint and no id.
             HStack {
                 Text(verbatim: "Nickname")
                 TextField("", text: $nickname)
@@ -49,12 +41,10 @@ struct PoorAccessibilityScenario: View {
                     .onChange(of: nickname) { result = "Nickname: \(nickname)" }
             }
 
-            // Text that is tappable but nothing says so.
             Text(verbatim: "Continue")
                 .foregroundStyle(.blue)
                 .onTapGesture { result = "Continued" }
 
-            // Three "Edit" buttons, no ids, told apart only by their row.
             ForEach(["Alpha", "Beta", "Gamma"], id: \.self) { row in
                 HStack {
                     Text(verbatim: row)
@@ -63,25 +53,21 @@ struct PoorAccessibilityScenario: View {
                 }
             }
 
-            // A card that is ONE accessibility element: its children are not exposed.
             MergedCard { result = "Tracking 42" }
                 .frame(height: 70)
 
-            // A 12x12 pt target.
             HStack(spacing: 8) {
                 Text(verbatim: "Tiny:")
                 Circle().fill(Color.red).frame(width: 12, height: 12)
                     .onTapGesture { result = "Tiny tapped" }
             }
 
-            // Words that exist only as pixels.
             Image(uiImage: textImage("Secret offer"))
                 .onTapGesture { result = "Offer opened" }
         }
     }
 }
 
-/// An SF Symbol rendered to a plain bitmap: no automatic label like `Image(systemName:)` has.
 private struct PlainIcon: View {
     let symbol: String
     let tap: () -> Void
@@ -98,7 +84,6 @@ private struct PlainIcon: View {
 }
 
 private extension UIImage {
-    /// The same pixels with every trace of the symbol (and its name) gone.
     var pngRoundTrip: UIImage {
         UIImage(data: UIGraphicsImageRenderer(size: size, format: pixelFormat)
             .pngData { _ in draw(at: .zero) }, scale: pixelFormat.scale)!
@@ -111,7 +96,6 @@ private let pixelFormat: UIGraphicsImageRendererFormat = {
     return format
 }()
 
-/// Renders `text` into a bitmap.
 private func textImage(_ text: String) -> UIImage {
     let attrs: [NSAttributedString.Key: Any] = [
         .font: UIFont.boldSystemFont(ofSize: 22), .foregroundColor: UIColor.white,
@@ -126,10 +110,6 @@ private func textImage(_ text: String) -> UIImage {
     return UIImage(data: data, scale: pixelFormat.scale)!
 }
 
-/// The "Order 42" card inside a UIKit view that is one accessibility element, the way the
-/// spec names it: `isAccessibilityElement = true` and `accessibilityElements = []`, so only
-/// its merged label is exposed (SwiftUI's `.combine` still leaks the children to XCTest).
-/// Touches still reach the SwiftUI "Track" button drawn inside.
 private struct MergedCard: UIViewRepresentable {
     let track: () -> Void
 
@@ -162,8 +142,6 @@ private struct OrderCard: View {
     let track: () -> Void
 
     var body: some View {
-        // As on every platform (SCENARIOS.md): the title, then a row with the count and,
-        // at its right end, Track.
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: "Order 42").font(.headline)
             HStack {
@@ -178,8 +156,6 @@ private struct OrderCard: View {
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
-
-// MARK: 10. Good accessibility
 
 struct GoodAccessibilityScenario: View {
     @State private var result = "Nothing yet"
@@ -267,7 +243,6 @@ struct GoodAccessibilityScenario: View {
                     saved = "Saving\u{2026}"
                     _ = after(1000) {
                         saved = "Saved"
-                        // iOS has no live regions: announce the change, as a live region would.
                         UIAccessibility.post(notification: .announcement, argument: "Saved")
                     }
                 }
@@ -277,8 +252,6 @@ struct GoodAccessibilityScenario: View {
                     .accessibilityAddTraits(.updatesFrequently)
             }
 
-            // Elements with an accessibility value as well as a label (tb issue #1): iOS reads
-            // them with the value as their text, so a listing must name them by the label.
             HStack(spacing: 16) {
                 Button(action: { quantity = max(0, quantity - 1); result = "Quantity \(quantity)" }) {
                     Text(verbatim: "\u{2212}").frame(width: 44, height: 44)

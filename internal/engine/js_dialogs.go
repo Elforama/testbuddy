@@ -9,9 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// answerDialogs runs an answerDialogs step (issue #91): the page's JavaScript confirm() and
-// prompt() dialogs are answered as the flow chose from then on, by a driver that can (the web
-// driver). The button and text are interpolated now.
 func (r *Runner) answerDialogs(ctx context.Context, c *flow.Command) error {
 	da, ok := r.Drv.(driver.DialogAnswerer)
 	if !ok {
@@ -46,8 +43,6 @@ func (r *Runner) answerDialogs(ctx context.Context, c *flow.Command) error {
 	return da.AnswerDialogs(ctx, a)
 }
 
-// resetDialogs puts the default answer back, so a flow starts and ends with it (an agent
-// session's commands keep their choice until they change it).
 func (r *Runner) resetDialogs() {
 	if da, ok := r.Drv.(driver.DialogAnswerer); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

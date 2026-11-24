@@ -22,8 +22,6 @@ func (d *mountedCoverDriver) AwaitCoverGone(context.Context, int, string, string
 	return d.await()
 }
 
-// AND-004: a cover omitted from the visible tree can still receive the touch.
-// Wait for its removal, and never inject through an observed cover on timeout.
 func TestTapWaitsForAnInvisibleMountedCover(t *testing.T) {
 	for _, gone := range []bool{true, false} {
 		t.Run(fmt.Sprintf("gone=%v", gone), func(t *testing.T) {
@@ -71,14 +69,12 @@ func TestTapWaitsForAnInvisibleMountedCover(t *testing.T) {
 	}
 }
 
-// clickable is a clickable node with bounds and depth.
 func clickable(depth, l, t, r, b int) *ui.Node {
 	n := at("View", depth, l, t, r, b)
 	n.Clickable = true
 	return n
 }
 
-// coverAt: what takes a tap at a point instead of the element, case by case.
 func TestCoverAt(t *testing.T) {
 	type tc struct {
 		name  string
@@ -89,7 +85,6 @@ func TestCoverAt(t *testing.T) {
 	}
 	var cases []tc
 	{
-		// Covers stick out of the element: one inside its frame is a part of it.
 		el, fab := clickable(0, 0, 100, 400, 200), clickable(0, 300, 150, 380, 250)
 		cases = append(cases, tc{"later clickable over it", linked("android", el, fab), el, 340, 175, true})
 		cases = append(cases, tc{"later clickable, elsewhere", linked("android", el, fab), el, 50, 175, false})
@@ -132,17 +127,17 @@ func TestCoverAt(t *testing.T) {
 	}
 	{
 		el := clickable(0, 0, 100, 400, 200)
-		part := clickable(0, 10, 110, 390, 190) // inside its frame: listed apart (React Native)
+		part := clickable(0, 10, 110, 390, 190)
 		cases = append(cases, tc{"a part of it", linked("android", el, part), el, 200, 150, false})
 	}
 	{
 		el := clickable(0, 0, 100, 400, 200)
-		overlay := clickable(0, 0, 0, 400, 500) // half the screen or more
+		overlay := clickable(0, 0, 0, 400, 500)
 		cases = append(cases, tc{"a screen-sized overlay", linked("android", el, overlay), el, 200, 150, false})
 	}
 	{
 		el := clickable(0, 0, 100, 400, 200)
-		drawer := at("Drawer", 0, 380, 0, 400, 800) // a closed drawer's list, its rows still placed
+		drawer := at("Drawer", 0, 380, 0, 400, 800)
 		drawer.Scrollable = true
 		item := clickable(1, 300, 150, 400, 250)
 		cases = append(cases, tc{"another list's row", linked("android", el, drawer, item), el, 340, 175, false})
@@ -177,8 +172,6 @@ func TestCoverAt(t *testing.T) {
 	}
 }
 
-// The keyboard window above the element's window covers it; a node in another window is
-// out of range.
 func TestCoverAtKeyboard(t *testing.T) {
 	el := clickable(0, 0, 600, 400, 700)
 	app := &ui.Window{Type: "app", Nodes: []*ui.Node{el}, Bounds: ui.Rect{R: 400, B: 800}}
@@ -198,9 +191,8 @@ func TestCoverAtKeyboard(t *testing.T) {
 	}
 }
 
-// A sticky section header (before the row in its list, spanning it) covers the row on Android.
 func TestStickyHeaderWideList(t *testing.T) {
-	list := at("Recycler", 0, 0, 0, 400, 300) // wider than tall
+	list := at("Recycler", 0, 0, 0, 400, 300)
 	list.Scrollable = true
 	header := at("Header", 1, 0, 0, 400, 60)
 	row := clickable(1, 0, 40, 400, 90)
@@ -211,17 +203,14 @@ func TestStickyHeaderWideList(t *testing.T) {
 	if c := coverAt(s, row, 200, 80); c != nil {
 		t.Errorf("below the header: %+v", c)
 	}
-	// A header narrower than the row is not one.
 	narrow := at("Header", 1, 0, 0, 200, 60)
 	s = linked("android", list, narrow, row)
 	if c := coverAt(s, row, 100, 50); c != nil {
 		t.Errorf("narrow header: %+v", c)
 	}
-	// Not in a list: none.
 	if c := stickyHeader(clickable(0, 0, 0, 10, 10), 1, 1); c != nil {
 		t.Errorf("no list: %+v", c)
 	}
-	// The row's own subtree climbs to the list's child.
 	inner := clickable(2, 10, 45, 100, 85)
 	rowBox := at("Row", 1, 0, 40, 400, 90)
 	s = linked("android", list, header, rowBox, inner)
@@ -230,14 +219,11 @@ func TestStickyHeaderWideList(t *testing.T) {
 	}
 }
 
-// Re-review: rows shorter than the header (32 px rows under a 56 px Compose stickyHeader): one
-// scrolled wholly under the header does not make the header a container. The next row, whose
-// top part is under it, is tapped on its clear strip, as before.
 func TestStickyHeaderOverShortRows(t *testing.T) {
 	list := at("Recycler", 0, 0, 0, 400, 800)
 	list.Scrollable = true
 	header := at("Header", 1, 0, 0, 400, 56)
-	rowA := clickable(1, 0, 2, 400, 34) // wholly under the header
+	rowA := clickable(1, 0, 2, 400, 34)
 	rowB := clickable(1, 0, 34, 400, 66)
 	s := linked("android", list, header, rowA, rowB)
 	if c := coverAt(s, rowB, 200, 50); c != header {
@@ -248,7 +234,6 @@ func TestStickyHeaderOverShortRows(t *testing.T) {
 	}
 }
 
-// A sticky header in an ordinary, full-height list covers the row under it too.
 func TestStickyHeaderTallList(t *testing.T) {
 	list := at("Recycler", 0, 0, 0, 400, 800)
 	list.Scrollable = true
@@ -260,12 +245,11 @@ func TestStickyHeaderTallList(t *testing.T) {
 	}
 }
 
-// visiblePart cuts the element to the screen and to the scroll views around it.
 func TestVisiblePart(t *testing.T) {
 	list := at("List", 0, 0, 100, 400, 600)
 	list.Scrollable = true
-	row := clickable(1, 0, 550, 400, 650) // half below the list's bottom
-	off := clickable(1, 0, 750, 400, 900) // below the screen, outside the list
+	row := clickable(1, 0, 550, 400, 650)
+	off := clickable(1, 0, 750, 400, 900)
 	s := linked("ios", list, row, off)
 	if v := visiblePart(s, row); v != (ui.Rect{T: 550, R: 400, B: 600}) {
 		t.Errorf("row %v", v)
@@ -279,56 +263,47 @@ func TestVisiblePart(t *testing.T) {
 	}
 }
 
-// uncoveredPoint: the middle, or the middle of the biggest part around a cover, or nothing.
 func TestUncoveredPoint(t *testing.T) {
-	// Nothing over it: the middle.
 	el := clickable(0, 0, 100, 400, 200)
 	x, y, cover, ok := uncoveredPoint(linked("android", el), el)
 	if x != 200 || y != 150 || cover != nil || !ok {
 		t.Errorf("plain: %d,%d %v %v", x, y, cover, ok)
 	}
-	// A bar over its lower half: the middle of the upper half.
 	el = clickable(0, 0, 100, 400, 200)
 	bar := clickable(0, 0, 140, 400, 300)
 	x, y, cover, ok = uncoveredPoint(linked("android", el, bar), el)
 	if x != 200 || y != 120 || cover != bar || !ok {
 		t.Errorf("bar below: %d,%d %v %v", x, y, cover, ok)
 	}
-	// A button over its right part: the left part.
 	el = clickable(0, 0, 100, 400, 200)
 	b := clickable(0, 150, 90, 400, 210)
 	x, y, cover, ok = uncoveredPoint(linked("android", el, b), el)
 	if x != 75 || y != 150 || cover != b || !ok {
 		t.Errorf("button right: %d,%d %v %v", x, y, cover, ok)
 	}
-	// Covered all over: no part shows.
 	el = clickable(0, 0, 100, 400, 200)
 	all := clickable(0, 0, 50, 400, 250)
 	x, y, cover, ok = uncoveredPoint(linked("android", el, all), el)
 	if x != 200 || y != 150 || cover != all || ok {
 		t.Errorf("all covered: %d,%d %v %v", x, y, cover, ok)
 	}
-	// What shows is a sliver: not good enough.
 	el = clickable(0, 0, 100, 400, 200)
 	almost := clickable(0, 0, 102, 400, 250)
 	if _, _, _, ok = uncoveredPoint(linked("android", el, almost), el); ok {
 		t.Error("a 2 px sliver counted as clear")
 	}
-	// The best part is itself covered by a second cover.
 	el = clickable(0, 0, 100, 400, 200)
 	low := clickable(0, 0, 140, 400, 300)
 	high := clickable(0, 0, 50, 400, 141)
 	if _, _, _, ok = uncoveredPoint(linked("android", el, low, high), el); ok {
 		t.Error("the part above was covered too")
 	}
-	// Off screen entirely: its own bounds' middle.
 	el = clickable(0, 0, 900, 400, 1000)
 	if x, y, _, _ = uncoveredPoint(linked("android", el), el); x != 200 || y != 950 {
 		t.Errorf("off screen: %d,%d", x, y)
 	}
 }
 
-// clearCover drags the element's list just clear of a bar, or says it cannot.
 func TestClearCover(t *testing.T) {
 	ctx := context.Background()
 	list := at("List", 0, 0, 0, 400, 800)
@@ -343,20 +318,17 @@ func TestClearCover(t *testing.T) {
 	if ok, err := r.clearCover(ctx, s, row, footer); !ok || err != nil {
 		t.Fatalf("footer: %v %v", ok, err)
 	}
-	// The list's clear part is 0-720 (middle 360); the row must rise 750-720+400/12 = 63 px.
 	if f.swipeAt[0] != [4]int{200, 360, 200, 297} || !f.swipes[0].Drag || !f.swipes[0].NoSettle {
 		t.Errorf("drag %v %+v", f.swipeAt[0], f.swipes[0])
 	}
 	if len(f.waitDur) != 1 {
 		t.Errorf("settle waits %v", f.waitDur)
 	}
-	// A bar at the top moves the content down.
 	top := clickable(1, 0, 40, 400, 90)
 	s2 := linked("android", list, top, header)
 	if ok, _ := r.clearCover(ctx, s2, top, header); !ok {
 		t.Fatal("header: no drag")
 	}
-	// Clear part 80-800 (middle 440); shift 80-40+33 = 73.
 	if f.swipeAt[1] != [4]int{200, 440, 200, 513} {
 		t.Errorf("drag %v", f.swipeAt[1])
 	}
@@ -374,7 +346,6 @@ func TestClearCover(t *testing.T) {
 			t.Errorf("%s: %v %v", tc.name, ok, err)
 		}
 	}
-	// A list that shows too little clear of the cover.
 	short := at("List", 0, 0, 500, 400, 800)
 	short.Scrollable = true
 	r2 := clickable(1, 0, 700, 400, 750)
@@ -383,21 +354,17 @@ func TestClearCover(t *testing.T) {
 	if ok, _ := r.clearCover(ctx, s3, r2, tall); ok {
 		t.Error("a 20 px clear part was dragged")
 	}
-	// A cover inside the list itself.
 	inList := clickable(1, 0, 720, 400, 800)
 	s4 := linked("android", list, row, inList)
 	if ok, _ := r.clearCover(ctx, s4, row, inList); ok {
 		t.Error("dragged a list whose cover moves along")
 	}
-	// A drag the device fails.
 	f.fail("Swipe", errors.New("no touch"))
 	if _, err := r.clearCover(ctx, s, row, footer); err == nil {
 		t.Error("swipe error lost")
 	}
 }
 
-// A row at a list's end that stays under the footer is tapped where it shows best; the drag
-// that moved nothing is not repeated.
 func TestTapCoveredAtListEnd(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = func() []*ui.Node {
@@ -406,7 +373,7 @@ func TestTapCoveredAtListEnd(t *testing.T) {
 		footer := &ui.Node{Text: "Pay", Bounds: ui.Rect{T: 700, R: 400, B: 800}, Enabled: true, Clickable: true}
 		return []*ui.Node{list, row, footer}
 	}
-	f.onSwipe = func(x1, y1, x2, y2 int) {} // the list is at its end
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
 	mustPass(t, runWith(t, f, quick, "- tapOn: Last"))
 	if len(f.swipeAt) != 1 {
 		t.Errorf("%d drags, want 1", len(f.swipeAt))
@@ -416,7 +383,6 @@ func TestTapCoveredAtListEnd(t *testing.T) {
 	}
 }
 
-// An element that vanishes after the clearing drag fails the tap.
 func TestTapCoveredVanishes(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -431,7 +397,7 @@ func TestTapCoveredVanishes(t *testing.T) {
 		return []*ui.Node{list, row, footer}
 	}
 	f.onSwipe = func(x1, y1, x2, y2 int) {
-		f.mu.Lock() // the screen func runs under f.mu
+		f.mu.Lock()
 		gone = true
 		f.mu.Unlock()
 		f.change(true)
@@ -439,7 +405,6 @@ func TestTapCoveredVanishes(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- tapOn: Row"), "Element not found")
 }
 
-// TB_DEBUG logs covers and dialogs to stderr.
 func TestDebugLogging(t *testing.T) {
 	defer func(d bool, e *os.File) { debug, os.Stderr = d, e }(debug, os.Stderr)
 	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
@@ -452,11 +417,9 @@ func TestDebugLogging(t *testing.T) {
 	TestAnswersAndroidErrorDialog(t)
 }
 
-// loadingCover: a spinner, or a layer holding one, over the element takes its taps (Android).
 func TestLoadingCover(t *testing.T) {
 	const pb = "android.widget.ProgressBar"
 	{
-		// A see-through overlay laid over the whole screen, its spinner stretched across it.
 		root := at("Frame", 0, 0, 0, 400, 800)
 		key := clickable(1, 50, 300, 150, 400)
 		veil := at("ViewGroup", 1, 0, 0, 400, 800)
@@ -470,7 +433,6 @@ func TestLoadingCover(t *testing.T) {
 		}
 	}
 	{
-		// A small spinner in a layer that covers the element: that layer holds a spinner.
 		key := clickable(0, 50, 300, 150, 400)
 		layer := at("ViewGroup", 0, 0, 0, 400, 800)
 		spin := at(pb, 1, 180, 380, 220, 420)
@@ -479,8 +441,6 @@ func TestLoadingCover(t *testing.T) {
 		}
 	}
 	{
-		// The element's own spinner (a button showing progress), and a container of the
-		// element that holds a spinner elsewhere (a list loading more): no cover.
 		list := at("RecyclerView", 0, 0, 0, 400, 800)
 		btn := clickable(1, 50, 300, 150, 400)
 		own := at(pb, 2, 60, 310, 80, 330)
@@ -490,7 +450,6 @@ func TestLoadingCover(t *testing.T) {
 		}
 	}
 	{
-		// A spinner elsewhere on screen, not over the element: no cover.
 		key := clickable(0, 50, 300, 150, 400)
 		spin := at(pb, 0, 180, 700, 220, 740)
 		if c := loadingCover(linked("android", key, spin), key); c != nil {
@@ -511,23 +470,18 @@ func TestIOSLoadingCoverWithCompactSpinner(t *testing.T) {
 		t.Fatalf("cover = %v, want the loading layer", cover)
 	}
 
-	// A small spinner inside the scroll content or alongside its controls
-	// does not make the enclosing page a touch cover.
 	spinner.Depth = 2
 	if cover := loadingCover(linked("ios", root, scroll, key, spinner), key); cover != nil {
 		t.Fatalf("ordinary scroll spinner was treated as a cover: %v", cover)
 	}
 }
 
-// sidewaysList: a sideways scrollUntilVisible drags the sideways list, not the middle of the
-// screen, when the middle has none.
 func TestSidewaysList(t *testing.T) {
 	scroll := func(n *ui.Node) *ui.Node { n.Scrollable = true; return n }
 	{
-		// A vertical screen with a carousel above its middle.
 		page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
 		cards := scroll(at("android.widget.HorizontalScrollView", 1, 0, 100, 400, 250))
-		card := at("View", 2, 500, 110, 650, 240) // listed, off screen to the right
+		card := at("View", 2, 500, 110, 650, 240)
 		s := linked("android", page, cards, card)
 		if got := sidewaysList(s, nil, 200, 400, ""); got != cards {
 			t.Errorf("carousel above the middle: %v", got)
@@ -537,14 +491,12 @@ func TestSidewaysList(t *testing.T) {
 		}
 	}
 	{
-		// A wide list across the middle: dragged where it is, as before.
 		page := scroll(at("ScrollView", 0, 0, 300, 400, 500))
 		if got := sidewaysList(linked("ios", page), nil, 200, 400, ""); got != nil {
 			t.Errorf("sideways list at the middle: %v", got)
 		}
 	}
 	{
-		// No sideways list at all: the middle, as before.
 		page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
 		if got := sidewaysList(linked("android", page), nil, 200, 400, ""); got != nil {
 			t.Errorf("no sideways list: %v", got)
@@ -552,8 +504,6 @@ func TestSidewaysList(t *testing.T) {
 	}
 }
 
-// A tap under a loading overlay (a see-through layer with a spinner) waits for it to go, then
-// taps the element: a tap on the overlay would be lost.
 func TestTapWaitsOutLoadingOverlay(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -586,9 +536,6 @@ func TestTapWaitsOutLoadingOverlay(t *testing.T) {
 	}
 }
 
-// A keyboard window covers only what it draws: Gboard's floating toolbar (shown with a
-// hardware keyboard) sits in a window as large as the screen. A keyboard that lists nothing
-// smaller than its window covers all of it.
 func TestCoverAtKeyboardParts(t *testing.T) {
 	screen := func(kb *ui.Window, el *ui.Node) *ui.Screen {
 		app := &ui.Window{Type: "app", Bounds: ui.Rect{R: 1080, B: 2400}, Nodes: []*ui.Node{el}}
@@ -600,7 +547,7 @@ func TestCoverAtKeyboardParts(t *testing.T) {
 	toolbar := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 63, R: 1080, B: 2400}, Nodes: []*ui.Node{
 		at("FrameLayout", 0, 0, 63, 1080, 2400),
 		at("FrameLayout", 1, 911, 863, 1080, 2400),
-		clickable(2, 922, 873, 1048, 999), // voice typing
+		clickable(2, 922, 873, 1048, 999),
 	}}
 	if c := coverAt(screen(toolbar, next), next, 540, 967); c != nil {
 		t.Errorf("toolbar: the button's middle is clear, got cover %v", c.Bounds)
@@ -619,8 +566,6 @@ func TestCoverAtKeyboardParts(t *testing.T) {
 	}
 }
 
-// Lazy shelves list only the cards that show: a sideways scroll to "Card 6-12" drags the shelf
-// whose cards look like it, not the largest or the middle one.
 func TestSidewaysListBySimilarItems(t *testing.T) {
 	scroll := func(n *ui.Node) *ui.Node { n.Scrollable = true; return n }
 	page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
@@ -637,11 +582,9 @@ func TestSidewaysListBySimilarItems(t *testing.T) {
 	if got := sidewaysList(s, nil, 200, 400, "Card 5-9"); got != shelf5 {
 		t.Errorf("for Card 5-9: %v", got)
 	}
-	// Equally alike everywhere: as before, the shelf at the middle (shelf 5 holds y=400).
 	if got := sidewaysList(s, nil, 200, 400, "Card 7-1"); got != nil {
 		t.Errorf("for an unlike target: %v, want nil (the middle's shelf)", got)
 	}
-	// Up and down, a shelf is not the element's list: the page is.
 	if got := ownList(s, c61, 200, 400); got != nil {
 		t.Errorf("ownList for a card = %v, want the page (at the middle: nil)", got)
 	}

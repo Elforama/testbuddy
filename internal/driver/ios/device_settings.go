@@ -20,14 +20,13 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 	if to == "" {
 		to = orientation
 	}
-	// A cancelled run turns nothing: call bounds the request by a deadline only (issue #115).
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if _, err := d.call(ctx, "rotate", map[string]any{"to": to}, 10*time.Second); err != nil {
 		return err
 	}
-	return ctx.Err() // cancelled while the runner turned it: report that, not success
+	return ctx.Err()
 }
 
 var errAirplane = errors.New("airplane mode is not supported on iOS simulators (they share the Mac's network)")
@@ -71,7 +70,6 @@ func (d *Driver) Foreground(ctx context.Context) (string, error) {
 	return r.Pkg, nil
 }
 
-// SetDarkMode switches the simulator's appearance (`simctl ui <udid> appearance dark|light`).
 func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
 	v := "light"
 	if on {
@@ -81,7 +79,6 @@ func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
 	return err
 }
 
-// DarkMode reads the simulator's appearance: "dark" or "light".
 func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
 	out, err := d.simctl(ctx, "ui", d.info.Serial, "appearance")
 	if err != nil {

@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// switcherNodes is what the iOS agent reported in issue #142: SpringBoard's app switcher, with
-// the flow's app as a card.
 func switcherNodes() []*ui.Node {
 	return []*ui.Node{
 		{ID: "SBSwitcherWindow:Main", Class: "View", Depth: 0, Visible: true, Bounds: ui.Rect{R: 400, B: 800}},
@@ -22,8 +20,6 @@ func switcherNodes() []*ui.Node {
 	}
 }
 
-// awayFake is an iOS device whose foreground app the test switches: front holds the bundle
-// id in front, and the screen shows the app's own nodes, or other's for any other app.
 func awayFake(app []*ui.Node, other func() []*ui.Node) (*fakeDriver, *atomic.Value) {
 	var front atomic.Value
 	front.Store("app")
@@ -38,7 +34,6 @@ func awayFake(app []*ui.Node, other func() []*ui.Node) (*fakeDriver, *atomic.Val
 	return f, &front
 }
 
-// after makes fn the device's next change, d from now.
 func after(f *fakeDriver, d time.Duration, fn func()) {
 	time.AfterFunc(d, func() {
 		fn()
@@ -46,10 +41,6 @@ func after(f *fakeDriver, d time.Duration, fn func()) {
 	})
 }
 
-// Issue #142: after a tap, SpringBoard's app switcher was in front instead of the flow's app,
-// and the next assertVisible waited out its whole timeout (28.6 s) on it without saying so. A
-// wait that finds SpringBoard alone in front, with no alert of its own, fails once that has
-// lasted a short grace, and names what is in front.
 func TestAssertFailsPromptlyWhenSpringBoardIsInFront(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	f, front := awayFake([]*ui.Node{btn("Slow list", "slow_list_open", 500)}, switcherNodes)
@@ -70,9 +61,6 @@ func TestAssertFailsPromptlyWhenSpringBoardIsInFront(t *testing.T) {
 	}
 }
 
-// Issue #142: a wait for an element to go never passes on SpringBoard alone in front, in or
-// out of CI mode: outside CI too an app that crashed or was sent home would pass it falsely,
-// and the rule adds no wait. Outside CI the step fails after the 5 s grace.
 func TestAbsenceNeverPassesOnSpringBoardOutsideCI(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	f, front := awayFake([]*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}, switcherNodes)
@@ -87,8 +75,6 @@ func TestAbsenceNeverPassesOnSpringBoardOutsideCI(t *testing.T) {
 	}
 }
 
-// The grace is 5 s, and 10 s in CI mode (a CI allowance: a busy runner's SpringBoard can be
-// slow to hand the screen back).
 func TestAwayGraceIsLongerInCI(t *testing.T) {
 	for mode, want := range map[string]time.Duration{"0": 5 * time.Second, "1": 10 * time.Second} {
 		t.Setenv("TB_CI", mode)
@@ -98,7 +84,6 @@ func TestAwayGraceIsLongerInCI(t *testing.T) {
 	}
 }
 
-// Issue #142: an app that comes back within the grace is waited for, and found.
 func TestAnAppBackWithinTheGraceIsFound(t *testing.T) {
 	var items atomic.Bool
 	f, front := awayFake(nil, switcherNodes)
@@ -123,10 +108,8 @@ func TestAnAppBackWithinTheGraceIsFound(t *testing.T) {
 `))
 }
 
-// Guards for issue #142: what is in front of the flow's app on purpose, or as the system's own
-// part of a flow, is waited on as before, however short the grace.
 func TestAwayGuards(t *testing.T) {
-	const sheet = "com.apple.springboard/sheet" // SpringBoard alone, showing a sheet
+	const sheet = "com.apple.springboard/sheet"
 	alert := func(class string) []*ui.Node {
 		return []*ui.Node{
 			{Class: class, Text: "Allow “Buddy Bench” to use your location?", Depth: 0, Bounds: ui.Rect{L: 40, T: 300, R: 360, B: 500}},
@@ -134,8 +117,6 @@ func TestAwayGuards(t *testing.T) {
 		}
 	}
 	home := []*ui.Node{{ID: "SBHomeScreenWindow", Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
-	// Each case's action puts SpringBoard (or another app) in front for 600 ms; the app is then
-	// back, showing "Allowed".
 	type device struct {
 		f     *fakeDriver
 		front *atomic.Value
@@ -223,11 +204,6 @@ func TestAwayGuards(t *testing.T) {
 	}
 }
 
-// Issue #142's own reads: the two that showed SpringBoard took 5.4 and 9.9 s, while the agent
-// failed to list the active apps (an accessibility timeout): a starved simulator can be misread
-// as SpringBoard alone. Slow reads do not fail the step early: it waits its full time and finds
-// the app if it is there after all; if not, its message says what the reads showed, and that
-// they were slow.
 func TestSlowReadsOfSpringBoardDoNotFailEarly(t *testing.T) {
 	defer func(v time.Duration) { awayRead = v }(awayRead)
 	awayRead = 50 * time.Millisecond
@@ -267,10 +243,6 @@ func TestSlowReadsOfSpringBoardDoNotFailEarly(t *testing.T) {
 	}
 }
 
-// Issue #142, the other side: SpringBoard in front shows none of the flow's app's elements, so
-// a wait for one to be gone (assertNotVisible, extendedWaitUntil notVisible) passed on it at
-// once. It is never taken for their absence: the step fails saying what is in front (after the
-// grace; at its deadline when the reads were slow), as does a wait for one to be visible.
 func TestWaitsDoNotPassOnSpringBoard(t *testing.T) {
 	spinner := []*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}
 	cases := []struct {
@@ -317,9 +289,6 @@ func TestWaitsDoNotPassOnSpringBoard(t *testing.T) {
 	}
 }
 
-// Guards for the waits for absence (issue #142): the app back without the element within the
-// grace passes; so does a flow that went home itself, and a `when` that SpringBoard in front
-// for a moment leaves unmet.
 func TestWaitsForAbsenceStillPass(t *testing.T) {
 	t.Run("the app back without the element", func(t *testing.T) {
 		var done atomic.Bool
@@ -372,10 +341,6 @@ func TestWaitsForAbsenceStillPass(t *testing.T) {
 	})
 }
 
-// Review of #142: a when/while condition never fails because SpringBoard is in front, however
-// long it stays (the grace, 5 s locally, is shorter than a condition's 7 s; locally it failed
-// the flow, in CI it skipped the block): the condition is not met, its block skipped. Only
-// assertions fail.
 func TestConditionsAreNotMetOnSpringBoardNeverFailed(t *testing.T) {
 	f, front := awayFake([]*ui.Node{btn("Open", "open", 500)}, switcherNodes)
 	f.onTap = func(x, y int) {
@@ -401,9 +366,6 @@ func TestConditionsAreNotMetOnSpringBoardNeverFailed(t *testing.T) {
 	}
 }
 
-// Review of #142: the Runner is kept across flows, and across a session's command batches.
-// What one saw in front is not the next one's: a flow, or a batch after a person pressed home,
-// that starts on SpringBoard and waits there is not failed for it.
 func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
 	var shown atomic.Bool
 	home := func() []*ui.Node {
@@ -427,7 +389,7 @@ func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
 			return fl
 		}
 		mustPass(t, r.RunFlow(context.Background(), parse("- assertVisible: Open\n")))
-		front.Store("com.apple.springboard") // flow A's app left: flow B starts on the home screen
+		front.Store("com.apple.springboard")
 		f.change(true)
 		after(f, 600*time.Millisecond, func() { shown.Store(true) })
 		mustPass(t, r.RunFlow(context.Background(), parse("- assertVisible: Settings\n")))
@@ -446,7 +408,7 @@ func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
 		if err := batch("- assertVisible: Open\n"); err != nil {
 			t.Fatal(err)
 		}
-		front.Store("com.apple.springboard") // a person pressed home between the batches
+		front.Store("com.apple.springboard")
 		f.change(true)
 		after(f, 600*time.Millisecond, func() { shown.Store(true) })
 		if err := batch("- assertVisible: Settings\n"); err != nil {
@@ -455,9 +417,6 @@ func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
 	})
 }
 
-// contactsPicker is SpringBoard's tree while iOS's contacts access picker is up, as read on an
-// iOS 27 simulator (bench permissions scenario): the picker is inside the app's card in
-// SpringBoard's switcher.
 func contactsPicker() []*ui.Node {
 	return []*ui.Node{
 		{ID: "SBSwitcherWindow:Main", Class: "View", Depth: 0, Bounds: ui.Rect{R: 400, B: 800}},
@@ -471,10 +430,6 @@ func contactsPicker() []*ui.Node {
 	}
 }
 
-// Review of #142: only screens tb knows count as the app gone (the home screen, the app
-// switcher with bare cards). SpringBoard's other trees, such as the contacts access picker it
-// shows over the app, are not judged: a wait on the app is not failed early on them, and a
-// wait for an element to go does not pass on them either.
 func TestSystemUIOverTheAppIsNotJudged(t *testing.T) {
 	t.Run("a wait on the app outlasts the grace", func(t *testing.T) {
 		var granted atomic.Bool

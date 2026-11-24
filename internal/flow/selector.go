@@ -10,12 +10,9 @@ var selectorKeys = []string{"text", "id", "index", "width", "height", "tolerance
 	"checked", "focused", "below", "above", "leftOf", "rightOf", "containsChild", "containsDescendants",
 	"childOf", "traits", "css"}
 
-// Command options that live inside a selector map. Accepted (and ignored) in nested selectors.
 var tapOptionKeys = []string{"optional", "label", "point", "retryTapIfNoChange", "waitUntilVisible",
 	"repeat", "delay", "waitToSettleTimeoutMs"}
 
-// selector parses a selector: a scalar is a text regex; a map has selector keys.
-// Command options found in the map are left unread for the caller.
 func (p *parser) selector(n *yaml.Node) (*Selector, *mapView, error) {
 	if n.Kind == yaml.ScalarNode {
 		return &Selector{Text: n.Value}, nil, nil
@@ -103,7 +100,6 @@ func (p *parser) selector(n *yaml.Node) (*Selector, *mapView, error) {
 	return s, m, nil
 }
 
-// nestedSelector parses a selector used as a value (element:, from:, cropOn:, visible:).
 func (p *parser) nestedSelector(n *yaml.Node, where string) (*Selector, error) {
 	s, m, err := p.selector(n)
 	if err != nil {
@@ -127,7 +123,7 @@ func (p *parser) condition(n *yaml.Node) (*Condition, error) {
 	m := p.mapOf(n)
 	c := &Condition{Label: m.str("label")}
 	m.get("optional")
-	c.Timeout = m.str("timeout") // Test Buddy extension: the condition's own wait
+	c.Timeout = m.str("timeout")
 	if v := m.get("platform"); v != nil && !isNull(v) {
 		pl := strings.ToLower(v.Value)
 		if pl != "android" && pl != "ios" && pl != "web" {

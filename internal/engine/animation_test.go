@@ -13,10 +13,6 @@ import (
 	"time"
 )
 
-// fakeClock is a clock that moves only when the wait sleeps (to its next tick) or a
-// screenshot takes time. The timings the tests check are then exact, however slow or loaded
-// the machine running them: on a real clock a CI runner's late ticks stretched them (issue
-// #188).
 type fakeClock struct {
 	mu        sync.Mutex
 	now       time.Time
@@ -36,10 +32,8 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
-// Advance moves the clock on by d, ending the contexts whose timeouts it passes.
 func (c *fakeClock) Advance(d time.Duration) { c.advanceTo(c.Now().Add(d), false) }
 
-// advanceTo moves the clock on to t, or (stopAtDeadline) to the first timeout before it.
 func (c *fakeClock) advanceTo(t time.Time, stopAtDeadline bool) {
 	c.mu.Lock()
 	if stopAtDeadline {
@@ -73,7 +67,7 @@ func (c *fakeClock) WithTimeout(ctx context.Context, d time.Duration) (context.C
 	c.mu.Lock()
 	c.deadlines = append(c.deadlines, fakeDeadline{c.now.Add(d), cancel})
 	c.mu.Unlock()
-	c.advanceTo(c.Now(), false) // a timeout of 0 or less has ended already
+	c.advanceTo(c.Now(), false)
 	return ctx, cancel
 }
 
@@ -81,8 +75,6 @@ func (c *fakeClock) NewTicker(d time.Duration) animationTicker {
 	return &fakeTicker{clock: c, period: d, next: c.Now().Add(d)}
 }
 
-// fakeTicker ticks at its start plus each period. As with a time.Ticker, a tick that came
-// while the wait was busy is there at once, and the ones after it are dropped.
 type fakeTicker struct {
 	clock  *fakeClock
 	period time.Duration
@@ -106,9 +98,6 @@ func (t *fakeTicker) Wait(ctx context.Context) bool {
 
 func (t *fakeTicker) Stop() {}
 
-// A part of a motionScreen that repaints while it moves: from..until after the start
-// (until 0: forever), one gray level every msPerLevel (0: 4 ms, 20 levels a sample). With a
-// cycle, it rests for the last pause of each one (the slow moments of a pulse).
 type motionPart struct {
 	rect         image.Rectangle
 	from, until  time.Duration
@@ -116,8 +105,6 @@ type motionPart struct {
 	cycle, pause time.Duration
 }
 
-// motionScreen draws a phone's screen (1200x2600 pixels, 400x866 points at 3x) in white,
-// with each part filled in a gray that changes with the clock's time while the part moves.
 func motionScreen(clock *fakeClock, parts ...motionPart) func() *image.RGBA {
 	start := clock.Now()
 	return func() *image.RGBA {
@@ -129,7 +116,7 @@ func motionScreen(clock *fakeClock, parts ...motionPart) func() *image.RGBA {
 			if p.until > 0 {
 				at = min(at, p.until)
 			}
-			if p.cycle > 0 { // cycles from p.from
+			if p.cycle > 0 {
 				rel := at - p.from
 				at = p.from + rel/p.cycle*p.cycle + min(rel%p.cycle, p.cycle-p.pause)
 			}
@@ -144,8 +131,6 @@ func motionScreen(clock *fakeClock, parts ...motionPart) func() *image.RGBA {
 	}
 }
 
-// timeAnimationWait runs waitForAnimation on an iOS fake drawing the parts, each screenshot
-// taking shotTime, and returns how long it took on its fake clock.
 func timeAnimationWait(t *testing.T, timeout, shotTime time.Duration, parts ...motionPart) time.Duration {
 	t.Helper()
 	clock := newFakeClock()
@@ -159,14 +144,11 @@ func timeAnimationWait(t *testing.T, timeout, shotTime time.Duration, parts ...m
 	return clock.Now().Sub(start)
 }
 
-// A spinner-sized part (80x50 points, 1.2 % of the screen: more than the 1 % that counts as
-// a change) and a progress bar across the bottom (8 points high).
 var (
 	spinnerPart = motionPart{rect: image.Rect(60, 300, 300, 450)}
 	barPart     = motionPart{rect: image.Rect(0, 2400, 1200, 2424)}
 )
 
-// A still screen is still after the first 250 ms (at the 80 ms tick after it: 320 ms).
 func TestWaitForAnimationStillScreen(t *testing.T) {
 	t.Parallel()
 	if got := timeAnimationWait(t, 6*time.Second, 0); got < 250*time.Millisecond || got > 350*time.Millisecond {
@@ -174,8 +156,6 @@ func TestWaitForAnimationStillScreen(t *testing.T) {
 	}
 }
 
-// issue #168: a small part that never stops moving (a spinner, a marquee, a pulsing button)
-// does not hold waitForAnimationToEnd to its timeout once it has moved for 3 s.
 func TestWaitForAnimationSetsAsideALoop(t *testing.T) {
 	t.Parallel()
 	if got := timeAnimationWait(t, 8*time.Second, 0, spinnerPart); got < 3*time.Second || got > 3500*time.Millisecond {
@@ -183,8 +163,6 @@ func TestWaitForAnimationSetsAsideALoop(t *testing.T) {
 	}
 }
 
-// issue #168: two loops apart (a spinner at the top, a progress bar at the bottom) are set
-// aside too.
 func TestWaitForAnimationSetsAsideTwoLoops(t *testing.T) {
 	t.Parallel()
 	if got := timeAnimationWait(t, 8*time.Second, 0, spinnerPart, barPart); got < 3*time.Second || got > 3500*time.Millisecond {
@@ -192,8 +170,6 @@ func TestWaitForAnimationSetsAsideTwoLoops(t *testing.T) {
 	}
 }
 
-// issue #168 review: a slow loop (a breathing glow: 3 gray levels a sample, too little to
-// count from one sample to the next, enough over 250 ms) is set aside too.
 func TestWaitForAnimationSetsAsideASlowLoop(t *testing.T) {
 	t.Parallel()
 	glow := spinnerPart
@@ -203,10 +179,6 @@ func TestWaitForAnimationSetsAsideASlowLoop(t *testing.T) {
 	}
 }
 
-// issue #168: dots that pulse in turn (a typing indicator) are loops that rest while the
-// other moves. Each dot's rests (no change seen for about 0.2-0.4 s, while the screen is not
-// still) do not make it a new motion, so both are set aside (issue #188 review: this pins
-// loopGap; a lone loop's rests short enough not to look still stay within two samples).
 func TestWaitForAnimationSetsAsideLoopsThatRest(t *testing.T) {
 	t.Parallel()
 	dot1 := motionPart{rect: image.Rect(60, 300, 300, 450), cycle: 1100 * time.Millisecond, pause: 550 * time.Millisecond}
@@ -217,8 +189,6 @@ func TestWaitForAnimationSetsAsideLoopsThatRest(t *testing.T) {
 	}
 }
 
-// issue #188 review: a timeout that passes during a slow screenshot ends the wait after that
-// screenshot, not a tick later.
 func TestWaitForAnimationTimesOutDuringASlowScreenshot(t *testing.T) {
 	t.Parallel()
 	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
@@ -227,7 +197,6 @@ func TestWaitForAnimationTimesOutDuringASlowScreenshot(t *testing.T) {
 	}
 }
 
-// issue #188 review: a context ended from outside (the flow stopped) ends the wait at once.
 func TestWaitForAnimationStopsWhenCancelled(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
@@ -242,14 +211,11 @@ func TestWaitForAnimationStopsWhenCancelled(t *testing.T) {
 		return screen()
 	}}
 	waitForAnimationOn(ctx, f, 8*time.Second, clock, false)
-	// The first screenshot from 1 s on, at the tick at 1.04 s, ends the flow.
 	if got := clock.Now().Sub(start); got != 1040*time.Millisecond {
 		t.Fatalf("returned after %s, want 1.04 s, when the flow stopped", got)
 	}
 }
 
-// issue #168 review: with slow screenshots (450 ms each: a slow runner, a large screen) a
-// loop is still found.
 func TestWaitForAnimationSetsAsideALoopWithSlowScreenshots(t *testing.T) {
 	t.Parallel()
 	if got := timeAnimationWait(t, 10*time.Second, 450*time.Millisecond, spinnerPart); got < 3*time.Second || got > 5*time.Second {
@@ -257,13 +223,9 @@ func TestWaitForAnimationSetsAsideALoopWithSlowScreenshots(t *testing.T) {
 	}
 }
 
-// A large part that keeps repainting in new colors (like the Flutter regression 07 panel, a
-// quarter of the screen fading for 4 s) is not a loop to set aside: the wait runs to its
-// timeout. (One that cycles through the same colors is, issue #83: see
-// TestWaitForAnimationSetsAsideALargeLoop.)
 func TestWaitForAnimationWaitsOnALargeRepaint(t *testing.T) {
 	t.Parallel()
-	for _, ms := range []int64{20, 27} { // new grays for 5.1 and 6.9 s
+	for _, ms := range []int64{20, 27} {
 		panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: ms}
 		if got := timeAnimationWait(t, 5*time.Second, 0, panel); got != 5*time.Second {
 			t.Errorf("returned after %s while a quarter of the screen repainted (a gray level every %d ms), want the 5 s timeout", got, ms)
@@ -271,8 +233,6 @@ func TestWaitForAnimationWaitsOnALargeRepaint(t *testing.T) {
 	}
 }
 
-// One-shot animations, even small ones, are waited out: a 0.8 s badge, a 1.5 s fade-in (the
-// bench's anim_faded) and a 2.5 s reveal (issue #168 review).
 func TestWaitForAnimationWaitsOutOneShotAnimations(t *testing.T) {
 	t.Parallel()
 	for _, d := range []time.Duration{800 * time.Millisecond, 1500 * time.Millisecond, 2500 * time.Millisecond} {
@@ -286,8 +246,6 @@ func TestWaitForAnimationWaitsOutOneShotAnimations(t *testing.T) {
 	}
 }
 
-// issue #168: a loop set aside does not hide other motion. A card sliding down the screen
-// for 4.5 s (each part of the screen changes only while the card passes) is waited out.
 func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
@@ -295,7 +253,7 @@ func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
 	loop := motionScreen(clock, spinnerPart)
 	f := &fakeDriver{screen: static(), plat: "ios", draw: func() image.Image {
 		img := loop()
-		y := 600 + int(min(clock.Now().Sub(start), 4500*time.Millisecond).Milliseconds()*3/10) // 100 points/s
+		y := 600 + int(min(clock.Now().Sub(start), 4500*time.Millisecond).Milliseconds()*3/10)
 		draw.Draw(img, image.Rect(450, y, 750, y+300), image.Black, image.Point{}, draw.Src)
 		return img
 	}}
@@ -305,20 +263,14 @@ func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
 	}
 }
 
-// shotWait is a waitForAnimation on an Android fake drawing the parts, with the i-th
-// screenshot (from 0) taking shotTime(i).
 type shotWait struct {
-	timeout  time.Duration
-	shotTime func(i int) time.Duration
-	// The screen is captured when it is asked for (as Android's agent does: it captures the
-	// display, then scales, encodes and sends it), not when the reply comes.
-	atAsk bool
-	// The app stops presenting frames (a starved emulator) from freezeAt for freezeFor.
+	timeout             time.Duration
+	shotTime            func(i int) time.Duration
+	atAsk               bool
 	freezeAt, freezeFor time.Duration
 	ciMode              bool
 }
 
-// run returns how long the wait took on its fake clock.
 func (w shotWait) run(parts ...motionPart) time.Duration {
 	clock := newFakeClock()
 	start := clock.Now()
@@ -351,17 +303,12 @@ func (w shotWait) run(parts ...motionPart) time.Duration {
 
 func every(d time.Duration) func(int) time.Duration { return func(int) time.Duration { return d } }
 
-// cycle takes the screenshot times in ms in turn.
 func cycle(ms ...int) func(int) time.Duration {
 	return func(i int) time.Duration { return time.Duration(ms[i%len(ms)]) * time.Millisecond }
 }
 
-// The Flutter regression 07 panel: a quarter of the screen fading slowly (4 s from purple to
-// yellow): less change than counts from one 80 ms sample to the next, enough over 250 ms.
 var fadePart = motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 27}
 
-// issue #136 review: outside CI, a still screen ends as on main whatever the screenshot time:
-// at the first sample asked for 250 ms after the first one.
 func TestWaitForAnimationStillScreenWithSlowScreenshots(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -373,14 +320,10 @@ func TestWaitForAnimationStillScreenWithSlowScreenshots(t *testing.T) {
 	}
 }
 
-// issue #136: a screenshot shows the screen when it was asked for, and its reply can come
-// late on a slow runner. One reply 300 ms late made two screenshots taken 80 ms apart look
-// 250 ms apart (the still span was counted between replies), and the wait ended in the middle
-// of the fade. It runs to its timeout.
 func TestWaitForAnimationLateScreenshotIsNotStillness(t *testing.T) {
 	t.Parallel()
 	late := func(i int) time.Duration {
-		if i == 14 { // about 1.2 s in
+		if i == 14 {
 			return 300 * time.Millisecond
 		}
 		return 20 * time.Millisecond
@@ -390,11 +333,6 @@ func TestWaitForAnimationLateScreenshotIsNotStillness(t *testing.T) {
 	}
 }
 
-// issue #136: on CI's starved emulator the screenshots of the moving panel came 140-310 ms
-// apart, and the app stopped presenting frames for longer than one of those gaps: the panel
-// looked still for 250 ms, and the wait ended in the middle of the fade. In CI mode the screen
-// must be still for 3 times the longest gap, so a 350 ms freeze, wherever it falls, is not
-// stillness. Outside CI it is (the screen did not change for 250 ms).
 func TestWaitForAnimationAppFreezeIsNotStillnessInCI(t *testing.T) {
 	t.Parallel()
 	early := map[bool]int{}
@@ -415,9 +353,6 @@ func TestWaitForAnimationAppFreezeIsNotStillnessInCI(t *testing.T) {
 	}
 }
 
-// issue #136 review: dots that pulse in turn are set aside as loops with slow screenshots too
-// (on main they held the wait to its timeout at 150 ms, or 60-300 ms, a screenshot): a rest
-// is seen up to a sample late at each end, which the gap that keeps a loop going allows for.
 func TestWaitForAnimationSetsAsideLoopsThatRestWithSlowScreenshots(t *testing.T) {
 	t.Parallel()
 	dot1 := motionPart{rect: image.Rect(60, 300, 300, 450), cycle: 1100 * time.Millisecond, pause: 550 * time.Millisecond}
@@ -430,8 +365,6 @@ func TestWaitForAnimationSetsAsideLoopsThatRestWithSlowScreenshots(t *testing.T)
 	}
 }
 
-// issue #136 review: the trace says how the wait ended, with the screenshots' times and the
-// longest gap between two of them (a late reply, or a stalled app).
 func TestWaitForAnimationTrace(t *testing.T) {
 	t.Parallel()
 	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
@@ -442,7 +375,7 @@ func TestWaitForAnimationTrace(t *testing.T) {
 			clock.Advance(shot)
 			return screen()
 		}}
-		if settle { // the event-driven settle takes the whole timeout
+		if settle {
 			f.onWait = func() { clock.Advance(timeout) }
 		}
 		return waitForAnimationOn(ctx, f, timeout, clock, false)
@@ -462,9 +395,6 @@ func TestWaitForAnimationTrace(t *testing.T) {
 	}
 }
 
-// staged is a transition in stages, each a part of the screen of its own (a band across
-// it, from y in steps of 2600/n), changing for each before resting for gap; it returns
-// the parts and when the last one stops.
 func staged(n int, each, gap time.Duration) ([]motionPart, time.Duration) {
 	var parts []motionPart
 	h := 2600 / n
@@ -475,10 +405,6 @@ func staged(n int, each, gap time.Duration) ([]motionPart, time.Duration) {
 	return parts, time.Duration(n)*(each+gap) - gap
 }
 
-// issue #83 review: transitions whose pauses are shorter than the 250 ms still span are waited
-// out to the end of their motion plus the still span, whether each stage changes a new part
-// of the screen or the same part again (an early end at such a pause was tried for #83 and
-// dropped: these cases ended it early). Pauses of 160-249 ms are the risky band.
 func TestWaitForAnimationWaitsOutTransitionsWithShortPauses(t *testing.T) {
 	t.Parallel()
 	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -502,10 +428,6 @@ func TestWaitForAnimationWaitsOutTransitionsWithShortPauses(t *testing.T) {
 	check(t, "3 stages, the first 1.1 s long", []motionPart{band(300, 0, ms(1100)),
 		band(900, ms(1300), ms(1500)), band(1500, ms(1700), ms(2000))}, ms(2000))
 
-	// The same part, again and again: a counter ticking in place (40 ms of change, 200 ms
-	// rests; its last tick ends at 1.72 s), and a progress bar filling in 11 steps with its
-	// "%" label ticking beside it (until 2.44 s). Under 3 s each: a part that keeps moving
-	// longer is a loop, set aside (issue #168).
 	counter := motionPart{rect: image.Rect(300, 1000, 900, 1300), cycle: ms(240), pause: ms(200), until: ms(1720)}
 	check(t, "a counter ticking in place", []motionPart{counter}, ms(1720))
 	var progress []motionPart
@@ -516,16 +438,12 @@ func TestWaitForAnimationWaitsOutTransitionsWithShortPauses(t *testing.T) {
 	label := motionPart{rect: image.Rect(900, 1200, 1200, 1500), cycle: ms(240), pause: ms(200), until: ms(2440)}
 	check(t, "a progress fill with its % label", append(progress, label), ms(2440))
 
-	// A full-screen fade (0-0.3 s), a small title (0.5-0.7 s), a full-screen fade again
-	// (0.9-1.2 s), then the content (1.4-1.59 s).
 	fade := motionPart{rect: image.Rect(0, 0, 1200, 2600), cycle: ms(900), pause: ms(600), until: ms(1200)}
 	title := motionPart{rect: image.Rect(100, 200, 1100, 350), from: ms(500), until: ms(700)}
 	content := band(1600, ms(1400), ms(1590))
 	check(t, "full fade, title, full fade, content", []motionPart{fade, title, content}, ms(1590))
 }
 
-// issue #83: when the wait runs to its timeout, the trace says what kept changing: where on
-// the screen (in screen pixels) and how much of it.
 func TestWaitForAnimationTraceSaysWhatKeptChanging(t *testing.T) {
 	t.Parallel()
 	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
@@ -542,9 +460,6 @@ func TestWaitForAnimationTraceSaysWhatKeptChanging(t *testing.T) {
 	}
 }
 
-// issue #83: the trace says when a loop was set aside, and where it is, in the screen's
-// units: on iOS, points (the spinner covers x 20-100, y 100-150 points; the loop is the grid
-// cells it touches, about 18 points each).
 func TestWaitForAnimationTraceSaysWhatWasSetAside(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
@@ -556,8 +471,6 @@ func TestWaitForAnimationTraceSaysWhatWasSetAside(t *testing.T) {
 	}
 }
 
-// screenFunc is an image whose pixels a function draws: the fakes' screenshots read only the
-// pixels they keep, so a screen drawn this way costs little per sample.
 type screenFunc struct {
 	w, h int
 	at   func(x, y int) color.RGBA
@@ -567,19 +480,15 @@ func (s screenFunc) ColorModel() color.Model { return color.RGBAModel }
 func (s screenFunc) Bounds() image.Rectangle { return image.Rect(0, 0, s.w, s.h) }
 func (s screenFunc) At(x, y int) color.Color { return s.at(x, y) }
 
-// feedScreen is a phone's home feed (1200x2600 pixels): a static title bar, a static tab bar
-// and floating button, and between them the feed, from y 800 to 2400 (61 % of the screen),
-// which content draws at each time since the start (ok false: the feed's static look, white
-// with gray post lines).
 func feedScreen(content func(at time.Duration, x, y int) (c color.RGBA, ok bool)) func(at time.Duration) image.Image {
 	return func(at time.Duration) image.Image {
 		return screenFunc{1200, 2600, func(x, y int) color.RGBA {
 			switch {
-			case y < 300: // the title bar
+			case y < 300:
 				return color.RGBA{30, 60, 160, 255}
-			case y >= 2400: // the tab bar
+			case y >= 2400:
 				return color.RGBA{240, 240, 240, 255}
-			case x >= 1000 && x < 1150 && y >= 2200 && y < 2350: // the floating button
+			case x >= 1000 && x < 1150 && y >= 2200 && y < 2350:
 				return color.RGBA{200, 30, 30, 255}
 			case y >= 800:
 				if c, ok := content(at, x, y); ok {
@@ -596,23 +505,17 @@ func feedScreen(content func(at time.Duration, x, y int) (c color.RGBA, ok bool)
 
 func grayRGBA(v int) color.RGBA { return color.RGBA{uint8(v), uint8(v), uint8(v), 255} }
 
-// shimmer is a skeleton placeholder's shimmer: a light band sweeping across the feed every
-// 1.3 s, from gray 222 to 248, smoothly (the samples catch it at a new place each sweep).
 func shimmer(at time.Duration, x, y int) color.RGBA {
 	center := float64(at.Milliseconds()%1300)/1300*1800 - 300
 	d := math.Abs(float64(x) - center)
 	return grayRGBA(222 + int(26*math.Max(0, 1-d/300)))
 }
 
-// gifLoop is a looping animated image across the feed: 7 frames of 140 ms, each a pattern of
-// colored stripes of its own.
 func gifLoop(at time.Duration, x, y int) color.RGBA {
 	f := int(at.Milliseconds()/140) % 7
 	return color.RGBA{uint8((x/40 + f*3) % 7 * 36), uint8((y/50 + f) % 5 * 60), uint8(f * 36), 255}
 }
 
-// feedWait runs the wait on an Android fake showing screen, each screenshot taking 20 ms,
-// and returns how long it took on its fake clock and how it ended.
 func feedWait(timeout time.Duration, screen func(at time.Duration) image.Image) (time.Duration, string) {
 	clock := newFakeClock()
 	start := clock.Now()
@@ -625,11 +528,6 @@ func feedWait(timeout time.Duration, screen func(at time.Duration) image.Image) 
 	return clock.Now().Sub(start), how
 }
 
-// issue #83: a loop too large for the 10 % cap (a shimmer over a loading feed, a looping
-// animated image in a post) held waitForAnimationToEnd to its 15 s timeout, while the rest
-// of the screen (title bar, tab bar, floating button) was still. A part that keeps cycling
-// through the same pixels is a loop whatever its size: once it has moved for 3 s, it is set
-// aside.
 func TestWaitForAnimationSetsAsideALargeLoop(t *testing.T) {
 	t.Parallel()
 	for name, content := range map[string]func(time.Duration, int, int) color.RGBA{"a shimmer": shimmer, "a looping image": gifLoop} {
@@ -645,9 +543,6 @@ func TestWaitForAnimationSetsAsideALargeLoop(t *testing.T) {
 	}
 }
 
-// issue #83: a large loop set aside does not hide what comes in its place. The shimmer gives
-// way to the feed's posts, fading in over 600 ms from 2.5 s (before it is a loop) or 3.2 s
-// (just after); the wait ends once they are in.
 func TestWaitForAnimationLargeLoopDoesNotHideWhatReplacesIt(t *testing.T) {
 	t.Parallel()
 	for _, arrive := range []time.Duration{2500 * time.Millisecond, 3200 * time.Millisecond} {
@@ -656,7 +551,6 @@ func TestWaitForAnimationLargeLoopDoesNotHideWhatReplacesIt(t *testing.T) {
 			if at < arrive {
 				return shimmer(at, x, y), true
 			}
-			// A post: a photo above two lines of black text, fading in from white.
 			k := math.Min(1, float64(at-arrive)/float64(fade))
 			var c color.RGBA
 			switch r := y % 400; {
@@ -676,8 +570,6 @@ func TestWaitForAnimationLargeLoopDoesNotHideWhatReplacesIt(t *testing.T) {
 	}
 }
 
-// issue #83: a screen transition is waited out while a large loop runs: from 2.6 s to 3.8 s
-// the next screen (a dark list) slides in from the right over the feed and its shimmer.
 func TestWaitForAnimationLargeLoopDoesNotHideATransition(t *testing.T) {
 	t.Parallel()
 	const from, until = 2600 * time.Millisecond, 3800 * time.Millisecond
@@ -703,11 +595,9 @@ func TestWaitForAnimationLargeLoopDoesNotHideATransition(t *testing.T) {
 	}
 }
 
-// issue #83: while the wait goes on, the trace says what keeps it going: once, 1 s in, which
-// part of the screen keeps changing (then the timeout says it again).
 func TestWaitForAnimationNotesWhatKeepsItWaiting(t *testing.T) {
 	t.Parallel()
-	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20} // new grays for 5 s: no loop
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20}
 	clock := newFakeClock()
 	start := clock.Now()
 	screen := motionScreen(clock, panel)
@@ -730,7 +620,6 @@ func TestWaitForAnimationNotesWhatKeepsItWaiting(t *testing.T) {
 	}
 }
 
-// hash32 mixes its arguments into a number that does not repeat with them.
 func hash32(v ...int) uint32 {
 	h := uint32(2166136261)
 	for _, x := range v {
@@ -743,9 +632,6 @@ func hash32(v ...int) uint32 {
 	return h
 }
 
-// issue #83 review: what never returns to an earlier frame is no loop, however long it moves
-// and whatever colors it uses: each of these is waited out (435b456 took the range of colors
-// a part had shown for a loop, and set them aside early).
 func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 	t.Parallel()
 	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -759,8 +645,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		}
 	}
 
-	// A grayscale list scrolling (a fling, an auto-scroll) at 400 pixels/s until 6 s: rows
-	// 60 pixels high, each its own gray with a bar of its own length.
 	check("a list scrolling for 6 s", 15*time.Second, ms(6000), ms(6500), func(at time.Duration, x, y int) color.RGBA {
 		off := int(min(at, ms(6000)).Milliseconds() * 400 / 1000)
 		row := (y + off) / 60
@@ -770,7 +654,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		return grayRGBA(140 + int(hash32(row)%110))
 	})
 
-	// A looping image until 3 s, then a picture cross-fading over it until 3.8 s.
 	picture := func(x, y int) color.RGBA { return color.RGBA{uint8(x / 5), uint8(y / 11), uint8((x + y) / 15), 255} }
 	check("a looping image, then a picture cross-fading over it", 15*time.Second, ms(3800), ms(4300), func(at time.Duration, x, y int) color.RGBA {
 		const from, fade = 3000 * time.Millisecond, 800 * time.Millisecond
@@ -783,11 +666,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		return color.RGBA{mix(a.R, b.R), mix(a.G, b.G), mix(a.B, b.B), 255}
 	})
 
-	// A shimmer, then light gray cards (#ECECEC: within the shimmer's grays) fading in over
-	// 600 ms from the shimmer as it was, at 2.5 s (before the shimmer is a loop), 3.2 or
-	// 3.6 s (about when it becomes one). The wait may end before they come (on the shimmer
-	// set aside), or as they start (their first 150 ms change the screen too little to see),
-	// but never while they visibly fade in.
 	for _, arrive := range []time.Duration{ms(2500), ms(3200), ms(3600)} {
 		const fade = 600 * time.Millisecond
 		got, how := feedWait(15*time.Second, feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) {
@@ -798,7 +676,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 			g := int(shimmer(arrive, x, y).R)
 			return grayRGBA(g + int(k*float64(236-g))), true
 		}))
-		// Their first 150 ms change the screen too little to see (under 12 levels).
 		early := arrive < ms(3000) && got < arrive+fade
 		if early || (got >= arrive+ms(150) && got < arrive+fade) || got > arrive+fade+ms(500) {
 			t.Errorf("a shimmer, then light gray cards fading in at %s: waited %s (%s), want it to end before they come (from 3 s on) or at the end of their fade (%s) plus up to 0.5 s",
@@ -806,8 +683,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		}
 	}
 
-	// A video: 30 frames a second, none like another. It runs to the 8 s timeout, and one last
-	// screenshot (20 ms here) at it.
 	check("a video", 8*time.Second, ms(8000), ms(8100), func(at time.Duration, x, y int) color.RGBA {
 		f := int(at.Milliseconds() / 33)
 		v := hash32(x/40, y/40, f)
@@ -815,10 +690,6 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 	})
 }
 
-// issue #83 review: a part that moves, rests 0.4-0.6 s and moves again in the same two colors
-// (a new pattern each time) is no loop: above a shimmer that is set aside (apart from it: a
-// motion next to a loop delays its proof), its move from 2.1 to 3.9 s holds the wait to its
-// end, plus the still span.
 func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
 	t.Parallel()
 	moves := [][2]time.Duration{{0, 400 * time.Millisecond}, {800 * time.Millisecond, 1600 * time.Millisecond},
@@ -826,7 +697,7 @@ func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
 	feed := feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) { return shimmer(at, x, y), true })
 	got, how := feedWait(15*time.Second, func(at time.Duration) image.Image {
 		img := feed(at)
-		var moved time.Duration // how long the part has moved: it moves only during the moves
+		var moved time.Duration
 		for _, m := range moves {
 			moved += max(0, min(at, m[1])-m[0])
 		}
@@ -846,11 +717,6 @@ func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
 	}
 }
 
-// Maestro's e2e flow waitForAnimationToEnd: an animation that never stops, then
-// waitForAnimationToEnd with timeout: 1000, then assertTrue endTime - startTime > 1000. A wait
-// that times out ends after a last screenshot taken at its timeout, so more than the timeout
-// has passed when it returns (on main it returned at the timeout itself, 1000 ms, and the
-// flow's strict check failed).
 func TestWaitForAnimationTimeoutEndsAfterALastScreenshot(t *testing.T) {
 	t.Parallel()
 	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20}
@@ -859,8 +725,6 @@ func TestWaitForAnimationTimeoutEndsAfterALastScreenshot(t *testing.T) {
 	}
 }
 
-// shotCut is a fake whose screenshots take shot on the clock and are cut short by the end of
-// their context, as a real driver's are.
 type shotCut struct {
 	*fakeDriver
 	clock *fakeClock
@@ -876,9 +740,6 @@ func (s shotCut) Screenshot(ctx context.Context, scale float64, f string) ([]byt
 	return s.fakeDriver.Screenshot(ctx, scale, f)
 }
 
-// Review of the fix above: on Android a screenshot takes 50-150 ms, so the timeout often falls
-// in one, which the driver then cuts short. The last screenshot still follows, and the wait
-// still ends after its timeout.
 func TestWaitForAnimationTimeoutInACutScreenshotStillTakesALastOne(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()

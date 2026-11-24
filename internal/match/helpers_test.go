@@ -10,21 +10,18 @@ func rect(l, t, r, b int) ui.Rect { return ui.Rect{L: l, T: t, R: r, B: b} }
 
 func ptr[T any](v T) *T { return &v }
 
-// mkScreen links nodes (pre-order, Depth set) into one app window of a 1000x2000 screen.
 func mkScreen(nodes ...*ui.Node) *ui.Screen {
 	s := &ui.Screen{Platform: "android", Width: 1000, Height: 2000, Windows: []*ui.Window{{Type: "app", Active: true, Nodes: nodes}}}
 	s.Link()
 	return s
 }
 
-// leaf is an enabled node with text at the given bounds.
 func leaf(depth int, text string, b ui.Rect) *ui.Node {
 	return &ui.Node{Depth: depth, Text: text, Bounds: b, Enabled: true}
 }
 
 func root() *ui.Node { return &ui.Node{Depth: 0, Bounds: rect(0, 0, 1000, 2000), Enabled: true} }
 
-// mustFind runs Find and fails the test on an error.
 func mustFind(t *testing.T, s *ui.Screen, sel *Selector) *ui.Node {
 	t.Helper()
 	got, _, err := Find(s, sel)
@@ -67,7 +64,6 @@ func sameNames(a, b []string) bool {
 	return true
 }
 
-// at names a node by its bounds (for nodes that share a text).
 func at(n *ui.Node) string {
 	if n == nil {
 		return "<nil>"

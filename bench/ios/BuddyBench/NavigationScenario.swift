@@ -1,5 +1,3 @@
-// Scenario 6, Navigation and back stack: pushed levels, tabs with their own stacks, a dialog
-// before leaving, an unsaved-changes guard, and the deep link bench://level/3.
 import SwiftUI
 import UIKit
 
@@ -39,7 +37,6 @@ struct NavigationScenario: View {
     }
 }
 
-/// "Level N": pushes up to depth 5, pops one, or pops back to the scenario screen (depth 0).
 struct LevelView: View {
     @EnvironmentObject private var router: Router
     let depth: Int
@@ -68,7 +65,6 @@ struct LevelView: View {
     }
 }
 
-/// A screen with a bottom tab bar; each tab keeps its own navigation stack.
 private struct TabbedScreens: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tab = "feed"
@@ -76,8 +72,6 @@ private struct TabbedScreens: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            // Keeps the system navigation bar (no .toolbar(.hidden)): its back button
-            // (BackButton) pops Post, as navigation.yaml taps it on iOS (SCENARIOS.md, issue #213).
             NavigationStack(path: $feedPath) {
                 VStack(spacing: 16) {
                     Text(verbatim: "Feed").font(.title.bold())
@@ -112,7 +106,6 @@ private struct TabbedScreens: View {
     }
 }
 
-/// A form that asks before throwing away what was typed.
 struct NavFormView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
@@ -132,7 +125,6 @@ struct NavFormView: View {
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .toolbar(.hidden, for: .navigationBar)
-        // No swipe-back past unsaved changes: the Back button asks first.
         .background(PopGestureBlocker(blocked: !title.isEmpty))
         .overlay {
             if asking {
@@ -148,7 +140,6 @@ struct NavFormView: View {
     }
 }
 
-/// Turns the navigation controller's swipe-back gesture off while `blocked`.
 struct PopGestureBlocker: UIViewControllerRepresentable {
     let blocked: Bool
 
@@ -177,7 +168,6 @@ struct PopGestureBlocker: UIViewControllerRepresentable {
     }
 }
 
-/// An in-app dialog: a card over a dimmed screen, with an id on the card and each button.
 struct InAppDialog: View {
     let id: String
     let title: String

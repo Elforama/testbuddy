@@ -9,7 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// The URL pattern is Chrome's: * is any run of characters, ? one character, \ escapes.
 func TestGlobMatch(t *testing.T) {
 	for _, tc := range []struct {
 		pat, s string
@@ -39,7 +38,6 @@ func TestGlobMatch(t *testing.T) {
 	}
 }
 
-// patterns lists the Fetch.enable url patterns sent in session ("" = the page).
 func fetchPatterns(page *fakeCDP, session string) [][]string {
 	var out [][]string
 	for _, m := range page.calls("Fetch.enable") {
@@ -60,22 +58,15 @@ func fetchPatterns(page *fakeCDP, session string) [][]string {
 	return out
 }
 
-// paused pushes a Fetch.requestPaused event, as Chrome does for an intercepted request.
 func paused(page *fakeCDP, session, id, method, url string) {
 	pausedWith(page, session, id, method, url, map[string]string{})
 }
 
-// pausedWith is paused for a request with these headers.
 func pausedWith(page *fakeCDP, session, id, method, url string, headers map[string]string) {
 	page.event("Fetch.requestPaused", map[string]any{"requestId": id, "networkId": "n" + id,
 		"request": map[string]any{"url": url, "method": method, "headers": headers}, "resourceType": "Fetch"}, session)
 }
 
-// Issue #77: a cross-origin request (its Origin is not the URL's) gets the CORS headers it
-// needs from a mock that sets none: its origin echoed (not *, so credentialed requests pass),
-// credentials allowed and the mock's headers exposed. A request without an Origin, or a
-// same-origin one (Chrome sends Origin on a same-origin POST), gets the mock's headers alone.
-// A mock that sets its own CORS headers keeps them as written; its own Vary gains Origin once.
 func TestMockNetworkAddsCORS(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -124,10 +115,6 @@ func TestMockNetworkAddsCORS(t *testing.T) {
 	}
 }
 
-// Issue #77: a CORS preflight (OPTIONS) for a mocked request is answered at once, allowing
-// the method and headers it asks for, whatever the mock's method; a delayed mock does not
-// hold it back. A preflight for an unmocked method or URL goes on to the network, a mock for
-// OPTIONS itself answers as written, and a mock with its own CORS headers answers with those.
 func TestMockNetworkAnswersPreflight(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -164,7 +151,6 @@ func TestMockNetworkAnswersPreflight(t *testing.T) {
 	}
 }
 
-// answer waits for the reply to paused request id (fulfill, fail or continue) and returns it.
 func answer(t *testing.T, page *fakeCDP, id string) cdpMsg {
 	t.Helper()
 	var got cdpMsg
@@ -200,8 +186,6 @@ func body(t *testing.T, m cdpMsg) string {
 	return string(b)
 }
 
-// Each mock adds its pattern to the Fetch interception of the page and of every attached
-// cross-origin frame; the same pattern is sent once.
 func TestMockNetworkEnablesFetch(t *testing.T) {
 	page, d := inputPage(t)
 	d.mu.Lock()
@@ -225,7 +209,6 @@ func TestMockNetworkEnablesFetch(t *testing.T) {
 	}
 }
 
-// A paused request that matches is answered with the mock: status, headers and body.
 func TestMockNetworkFulfills(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -247,8 +230,6 @@ func TestMockNetworkFulfills(t *testing.T) {
 	}
 }
 
-// The latest matching mock wins; a mock for another method lets the request through; an
-// unmatched request goes on to the network.
 func TestMockNetworkPicksTheLatestMatch(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -281,7 +262,6 @@ func TestMockNetworkPicksTheLatestMatch(t *testing.T) {
 	}
 }
 
-// fail: true fails the request as a network error.
 func TestMockNetworkFails(t *testing.T) {
 	page, d := inputPage(t)
 	d.MockNetwork(ctxT(t), driver.NetworkMock{URL: "*/ads/*", Fail: true})
@@ -292,7 +272,6 @@ func TestMockNetworkFails(t *testing.T) {
 	}
 }
 
-// A request paused in a cross-origin frame is answered in that frame's session.
 func TestMockNetworkInFrame(t *testing.T) {
 	page, d := inputPage(t)
 	d.MockNetwork(ctxT(t), driver.NetworkMock{URL: "*", Status: 200, Body: []byte("framed")})
@@ -302,7 +281,6 @@ func TestMockNetworkInFrame(t *testing.T) {
 	}
 }
 
-// A frame attached while mocks are active intercepts too, before it is let run.
 func TestMockNetworkFrameAttachedLater(t *testing.T) {
 	page, d := inputPage(t)
 	d.MockNetwork(ctxT(t), driver.NetworkMock{URL: "*/api/*", Status: 200})
@@ -332,8 +310,6 @@ func TestMockNetworkFrameAttachedLater(t *testing.T) {
 	}
 }
 
-// delay holds the response back; clearing the mocks lets a held request go on to the network
-// at once, stops interception, and the held response is never sent.
 func TestMockNetworkDelayAndClear(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -357,14 +333,12 @@ func TestMockNetworkDelayAndClear(t *testing.T) {
 	if n := len(page.calls("Fetch.disable")); n != 1 {
 		t.Errorf("Fetch.disable sent %d times", n)
 	}
-	// Nothing is mocked now: a request still paused (sent before the disable) goes on.
 	paused(page, "", "r3", "GET", "https://x/c")
 	if m := answer(t, page, "r3"); m.Method != "Fetch.continueRequest" {
 		t.Errorf("after clear: %s", m.Method)
 	}
 }
 
-// Clearing with nothing mocked sends nothing.
 func TestClearNetworkMocksIdle(t *testing.T) {
 	page, d := inputPage(t)
 	if err := d.ClearNetworkMocks(ctxT(t)); err != nil {
@@ -375,7 +349,6 @@ func TestClearNetworkMocksIdle(t *testing.T) {
 	}
 }
 
-// Closing the driver drops held responses without sending them.
 func TestMockNetworkCloseDropsHeld(t *testing.T) {
 	page, d := inputPage(t)
 	d.MockNetwork(ctxT(t), driver.NetworkMock{URL: "*", Status: 200, Delay: 50 * time.Millisecond})

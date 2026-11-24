@@ -1,5 +1,3 @@
-// Screen 4, Live: a stress screen where something always moves (a stopwatch redrawn every
-// frame and a ball bouncing forever), plus a counter button and a switch.
 import SwiftUI
 
 struct LiveView: View {
@@ -39,14 +37,12 @@ struct LiveView: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 
-    /// "mm:ss.SSS".
     static func elapsed(_ seconds: TimeInterval) -> String {
         let ms = Int((max(0, seconds) * 1000).rounded(.down))
         return String(format: "%02d:%02d.%03d", ms / 60_000, (ms / 1000) % 60, ms % 1000)
     }
 }
 
-/// A small circle moving back and forth across a 280 pt track forever.
 private struct Ball: View {
     private static let size: CGFloat = 24
     private static let track: CGFloat = 280

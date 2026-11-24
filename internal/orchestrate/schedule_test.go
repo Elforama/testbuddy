@@ -24,7 +24,6 @@ func names(n int, prefix string) []string {
 	return out
 }
 
-// Every job runs once and is reported once, with Started before Finished.
 func TestScheduleRunsEveryJob(t *testing.T) {
 	a, b, c := newFake("a", "A", "android"), newFake("b", "B", "android"), newFake("c", "C", "android")
 	pool := poolOf(a, b, c)
@@ -52,7 +51,6 @@ func TestScheduleRunsEveryJob(t *testing.T) {
 	if len(rec.Started()) != 6 || len(rec.Finished()) != 6 {
 		t.Errorf("started %d finished %d", len(rec.Started()), len(rec.Finished()))
 	}
-	// each flow typed its name on exactly the device its result names
 	for _, r := range res {
 		drv := map[string]*fakeDriver{"a": a, "b": b, "c": c}[r.Devices[""].Serial]
 		found := false
@@ -63,14 +61,12 @@ func TestScheduleRunsEveryJob(t *testing.T) {
 			t.Errorf("%s did not run on %s", r.Job.Flow.Name(), r.Devices[""].Serial)
 		}
 	}
-	// and the app was launched once per flow, across devices
 	total := len(a.Launched()) + len(b.Launched()) + len(c.Launched())
 	if total != 6 {
 		t.Errorf("%d launches, want 6", total)
 	}
 }
 
-// No jobs: nothing to report, no hooks called.
 func TestScheduleNoJobs(t *testing.T) {
 	rec := newRecorder(t)
 	if res := Schedule(context.Background(), poolOf(newFake("a", "A", "android")), nil, 0, 0, false, rec.hooks()); len(res) != 0 {
@@ -81,7 +77,6 @@ func TestScheduleNoJobs(t *testing.T) {
 	}
 }
 
-// maxParallel caps how many jobs run at once, even with more free devices.
 func TestScheduleMaxParallel(t *testing.T) {
 	g := newGauge()
 	var drvs []*fakeDriver
@@ -103,7 +98,6 @@ func TestScheduleMaxParallel(t *testing.T) {
 	}
 }
 
-// maxParallel 0 means one job per device, all at the same time.
 func TestScheduleParallelPerDevice(t *testing.T) {
 	g := newGauge()
 	var drvs []*fakeDriver
@@ -111,7 +105,7 @@ func TestScheduleParallelPerDevice(t *testing.T) {
 		d := newFake(s, strings.ToUpper(s), "android")
 		d.onType = func(string) {
 			g.enter()
-			g.waitFor(2, 5*time.Second) // both devices must be busy at once
+			g.waitFor(2, 5*time.Second)
 			g.exit()
 		}
 		drvs = append(drvs, d)
@@ -131,8 +125,6 @@ func TestScheduleParallelPerDevice(t *testing.T) {
 	}
 }
 
-// A work queue, not a fixed split: while one device is stuck on a slow flow, the other
-// device takes every remaining job.
 func TestScheduleWorkQueue(t *testing.T) {
 	release := make(chan struct{})
 	slow, fast := newFake("slow", "Slow", "android"), newFake("fast", "Fast", "android")
@@ -165,14 +157,11 @@ func TestScheduleWorkQueue(t *testing.T) {
 	if count["slow"] != 1 || count["fast"] != 4 {
 		t.Errorf("jobs per device %v, want slow=1 fast=4", count)
 	}
-	// the last result is the slow one: it was released only after the fast device emptied the queue
 	if res[len(res)-1].Devices[""].Serial != "slow" {
 		t.Errorf("last finished on %s", res[len(res)-1].Devices[""].Serial)
 	}
 }
 
-// A failed job is retried up to `retries` times; Finished sees every attempt, the results
-// hold only the final one.
 func TestScheduleRetriesUntilLimit(t *testing.T) {
 	bad := newFake("bad", "Bad", "android")
 	bad.launchFails = -1
@@ -208,17 +197,15 @@ func TestScheduleRetriesUntilLimit(t *testing.T) {
 	}
 }
 
-// A flaky job that passes on retry is reported as passed.
 func TestScheduleRetryPasses(t *testing.T) {
 	d := newFake("d", "D", "android")
-	d.launchFails = 1 // only the first launch fails
+	d.launchFails = 1
 	res := Schedule(context.Background(), poolOf(d), []*Job{job(typingFlow(t, "flaky"))}, 1, 0, false, newRecorder(t).hooks())
 	if len(res) != 1 || res[0].Status != engine.Passed || res[0].Job.Attempt != 1 {
 		t.Fatalf("results %+v", res)
 	}
 }
 
-// No retries: a failure is final.
 func TestScheduleNoRetries(t *testing.T) {
 	d := newFake("d", "D", "android")
 	d.launchFails = 1
@@ -229,13 +216,12 @@ func TestScheduleNoRetries(t *testing.T) {
 	}
 }
 
-// A retry goes to another device when one is free while other jobs run.
 func TestScheduleRetryMovesToAnotherDevice(t *testing.T) {
 	bad, good, slow := newFake("bad", "Bad", "android"), newFake("good", "Good", "android"), newFake("slow", "Slow", "android")
 	goodDone, retryDone := make(chan struct{}), make(chan struct{})
 	bad.launchFails = -1
-	bad.onLaunch = func(string) { <-goodDone } // fail only after good's first job finished
-	slow.onType = func(string) {               // keep a job running until the retry is done
+	bad.onLaunch = func(string) { <-goodDone }
+	slow.onType = func(string) {
 		select {
 		case <-retryDone:
 		case <-time.After(5 * time.Second):
@@ -263,8 +249,6 @@ func TestScheduleRetryMovesToAnotherDevice(t *testing.T) {
 	}
 }
 
-// With every device idle, a retry should still prefer a device other than the one that
-// failed it ("on another device when one is free").
 func TestScheduleRetryAvoidsFailedDeviceWhenIdle(t *testing.T) {
 	bad, good := newFake("bad", "Bad", "android"), newFake("good", "Good", "android")
 	bad.launchFails = -1
@@ -277,7 +261,6 @@ func TestScheduleRetryAvoidsFailedDeviceWhenIdle(t *testing.T) {
 	}
 }
 
-// A cancelled run is not retried; a flow it kept from starting is skipped (issue #189).
 func TestScheduleNoRetryAfterCancel(t *testing.T) {
 	d := newFake("d", "D", "android")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -295,8 +278,6 @@ func TestScheduleNoRetryAfterCancel(t *testing.T) {
 	}
 }
 
-// A job no device can ever serve fails at once with the reason; it never starts, and the
-// other jobs still run.
 func TestScheduleUnsatisfiableJob(t *testing.T) {
 	d := newFake("d", "D", "android")
 	rec := newRecorder(t)
@@ -317,7 +298,6 @@ func TestScheduleUnsatisfiableJob(t *testing.T) {
 	}
 }
 
-// A job whose device's driver will not open fails with the device name and the reason.
 func TestScheduleDriverOpenFails(t *testing.T) {
 	info := device.Info{Platform: "fake", Serial: "f1", Name: "Fakephone"}
 	pool := NewPool([]device.Info{info})
@@ -333,8 +313,6 @@ func TestScheduleDriverOpenFails(t *testing.T) {
 	}
 }
 
-// More browsers than can be started: the job is satisfiable on paper but never fits, so it
-// fails instead of hanging.
 func TestScheduleTooManyBrowsers(t *testing.T) {
 	var needs []Need
 	for _, n := range names(9, "r") {
@@ -350,7 +328,6 @@ func TestScheduleTooManyBrowsers(t *testing.T) {
 	}
 }
 
-// Prepare runs once per device, before its first flow, with that device's driver.
 func TestSchedulePrepareOncePerDevice(t *testing.T) {
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
 	rec := newRecorder(t)
@@ -366,7 +343,6 @@ func TestSchedulePrepareOncePerDevice(t *testing.T) {
 	}
 }
 
-// A nil Prepare hook is allowed.
 func TestScheduleNilPrepare(t *testing.T) {
 	h := newRecorder(t).hooks()
 	h.Prepare = nil
@@ -376,7 +352,6 @@ func TestScheduleNilPrepare(t *testing.T) {
 	}
 }
 
-// The Options hook's engine options reach the flow (here, its env).
 func TestScheduleOptionsReachFlow(t *testing.T) {
 	d := newFake("d", "D", "android")
 	rec := newRecorder(t)
@@ -398,7 +373,6 @@ func TestScheduleOptionsReachFlow(t *testing.T) {
 	}
 }
 
-// Multi-device jobs start first: they need the most devices at once.
 func TestScheduleMultiDeviceFirst(t *testing.T) {
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
 	multi := parseFlow(t, "multi", "appId: com.app\ndevices:\n  alice: android\n  bob: android\n---\n- alice: [{inputText: m-alice}]\n- bob: [{inputText: m-bob}]\n")
@@ -425,7 +399,6 @@ func TestScheduleMultiDeviceFirst(t *testing.T) {
 	if m.Duration <= 0 {
 		t.Error("multi duration not set")
 	}
-	// each role's commands ran on the device the result names for it
 	drv := map[string]*fakeDriver{"a": a, "b": b}
 	for role, want := range map[string]string{"alice": "m-alice", "bob": "m-bob"} {
 		typed := drv[m.Devices[role].Serial].Typed()
@@ -439,7 +412,6 @@ func TestScheduleMultiDeviceFirst(t *testing.T) {
 	}
 }
 
-// A multi-device job waits until enough devices are free together.
 func TestScheduleMultiWaitsForDevices(t *testing.T) {
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
 	multi := parseFlow(t, "multi", "appId: com.app\ndevices:\n  alice: android\n  bob: android\n---\n- alice: [{inputText: x}]\n")
@@ -447,8 +419,6 @@ func TestScheduleMultiWaitsForDevices(t *testing.T) {
 	for _, d := range []*fakeDriver{a, b} {
 		d.onType = func(string) { g.enter(); time.Sleep(10 * time.Millisecond); g.exit() }
 	}
-	// singles first in the list; the sort puts the multi job first anyway, and then the
-	// singles run after it frees both devices
 	jobs := []*Job{job(typingFlow(t, "s1")), job(typingFlow(t, "s2")), job(multi, NeedsFor(multi, "", nil)...)}
 	res := Schedule(context.Background(), poolOf(a, b), jobs, 0, 0, false, newRecorder(t).hooks())
 	for _, r := range res {
@@ -463,7 +433,6 @@ func TestScheduleMultiWaitsForDevices(t *testing.T) {
 
 func seqJob(f *flow.Flow) *Job { j := job(f); j.Seq = true; return j }
 
-// Ordered (executionOrder) flows run first, one at a time, in their order; the rest follow.
 func TestScheduleSequenceFirstInOrder(t *testing.T) {
 	g := newGauge()
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
@@ -502,10 +471,9 @@ func TestScheduleSequenceFirstInOrder(t *testing.T) {
 	}
 }
 
-// An ordered flow that fails stops the run: every flow after it is reported skipped.
 func TestScheduleSequenceFailureSkipsRest(t *testing.T) {
 	d := newFake("d", "D", "android")
-	d.launchFails = 1 // the first flow to launch fails
+	d.launchFails = 1
 	rec := newRecorder(t)
 	jobs := []*Job{seqJob(typingFlow(t, "seq1")), job(typingFlow(t, "rest1")), job(typingFlow(t, "rest2"))}
 	res := byName(Schedule(context.Background(), poolOf(d), jobs, 0, 0, false, rec.hooks()))
@@ -526,7 +494,6 @@ func TestScheduleSequenceFailureSkipsRest(t *testing.T) {
 	}
 }
 
-// The ordered flows after a failed one are reported too (skipped), not dropped.
 func TestScheduleSequenceFailureReportsLaterOrderedFlows(t *testing.T) {
 	d := newFake("d", "D", "android")
 	d.launchFails = 1
@@ -540,7 +507,6 @@ func TestScheduleSequenceFailureReportsLaterOrderedFlows(t *testing.T) {
 	}
 }
 
-// continueOnFailure: an ordered flow's failure does not stop the others.
 func TestScheduleSequenceContinueOnFailure(t *testing.T) {
 	d := newFake("d", "D", "android")
 	d.launchFails = 1
@@ -554,7 +520,6 @@ func TestScheduleSequenceContinueOnFailure(t *testing.T) {
 	}
 }
 
-// An ordered flow no device can run is reported failed without starting.
 func TestScheduleSequenceUnsatisfiable(t *testing.T) {
 	d := newFake("d", "D", "android")
 	rec := newRecorder(t)
@@ -572,8 +537,6 @@ func TestScheduleSequenceUnsatisfiable(t *testing.T) {
 	}
 }
 
-// Without continueOnFailure, an ordered flow that cannot run at all stops the sequence like
-// any other failed ordered flow.
 func TestScheduleSequenceUnsatisfiableStops(t *testing.T) {
 	d := newFake("d", "D", "android")
 	jobs := []*Job{seqJob(typingFlow(t, "needs-ios")), job(typingFlow(t, "rest"))}
@@ -584,7 +547,6 @@ func TestScheduleSequenceUnsatisfiableStops(t *testing.T) {
 	}
 }
 
-// withAvoid pins a single-device retry to another fitting device; other needs pass through.
 func TestWithAvoid(t *testing.T) {
 	pool := NewPool([]device.Info{pixel, iphone, galaxy})
 	cases := []struct {
@@ -609,7 +571,6 @@ func TestWithAvoid(t *testing.T) {
 	}
 }
 
-// DeviceLabel is the device name for single-device runs and sorted role=name pairs otherwise.
 func TestDeviceLabel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -631,7 +592,6 @@ func TestDeviceLabel(t *testing.T) {
 	}
 }
 
-// Results come back for every job even when many jobs race for few devices.
 func TestScheduleManyJobsFewDevices(t *testing.T) {
 	var drvs []*fakeDriver
 	for _, s := range []string{"a", "b", "c"} {
@@ -660,9 +620,6 @@ func TestScheduleManyJobsFewDevices(t *testing.T) {
 	}
 }
 
-// Device locks: a device another process holds (another tb test, an agent's session) is
-// passed over for a free one; a job only held devices can run fails naming the holder, or
-// waits for it with WaitForDevice. The run's own locks are freed when the pool closes.
 func TestPoolLocks(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -671,7 +628,6 @@ func TestPoolLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Passed over: the free device runs the job.
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
 	pool := poolOf(a, b)
 	var res []Result
@@ -681,7 +637,6 @@ func TestPoolLocks(t *testing.T) {
 	if res[0].Status != engine.Passed || res[0].Devices[""].Serial != "b" {
 		t.Errorf("free device: %s on %v (%v)", res[0].Status, res[0].Devices, res[0].Err)
 	}
-	// While this run holds b, another process cannot take it.
 	if _, err := devlock.TryAcquire("b", "tb test"); err == nil {
 		t.Error("the run's device was not locked")
 	}
@@ -692,7 +647,6 @@ func TestPoolLocks(t *testing.T) {
 		l.Release()
 	}
 
-	// Only the held device fits (pinned): fails at once, naming the holder.
 	pool = poolOf(newFake("a", "A", "android"))
 	j := job(typingFlow(t, "f2"))
 	j.Needs = []Need{{Device: "a"}}
@@ -710,7 +664,6 @@ func TestPoolLocks(t *testing.T) {
 	}
 	pool.Close()
 
-	// With a wait: the holder lets go, and the job runs.
 	pool = poolOf(newFake("a", "A", "android"))
 	pool.WaitForDevice = 5 * time.Second
 	go func() {
@@ -727,7 +680,6 @@ func TestPoolLocks(t *testing.T) {
 	}
 	pool.Close()
 
-	// The ordered sequence waits and reports the same way.
 	held, _ := devlock.TryAcquire("a", "tb test other/")
 	defer held.Release()
 	pool = poolOf(newFake("a", "A", "android"))
@@ -743,8 +695,6 @@ func TestPoolLocks(t *testing.T) {
 	pool.Close()
 }
 
-// Closing the pool stops each device's agent (freeing it for other tools), unless the run
-// keeps them (--keep-agents).
 func TestPoolReleasesAgents(t *testing.T) {
 	a := newFake("a", "A", "android")
 	pool := poolOf(a)
@@ -770,8 +720,6 @@ func TestPoolReleasesAgents(t *testing.T) {
 	}
 }
 
-// A job that crashes (a panic) fails with the crash, and the run goes on: the process does
-// not die with its devices' agents still running.
 func TestRunSafelyTurnsAPanicIntoAFailure(t *testing.T) {
 	j := &Job{}
 	devs := map[string]device.Info{"": {Serial: "a"}}
@@ -782,12 +730,9 @@ func TestRunSafelyTurnsAPanicIntoAFailure(t *testing.T) {
 	}
 }
 
-// issue #55: an ordered (executionOrder) flow is retried like any other: with --retries, a
-// flow that fails once and passes on its retry is reported passed, Finished sees both
-// attempts, and the sequence goes on.
 func TestScheduleSequenceRetries(t *testing.T) {
 	d := newFake("d", "D", "android")
-	d.launchFails = 1 // only the first launch fails
+	d.launchFails = 1
 	rec := newRecorder(t)
 	jobs := []*Job{seqJob(typingFlow(t, "seq1")), seqJob(typingFlow(t, "seq2")), job(typingFlow(t, "rest"))}
 	var res []Result
@@ -821,8 +766,6 @@ func TestScheduleSequenceRetries(t *testing.T) {
 	}
 }
 
-// issue #55: an ordered flow that fails every attempt is retried up to the limit; its last
-// attempt is its result, and only then does the sequence stop (continueOnFailure off).
 func TestScheduleSequenceRetriesUntilLimitThenStops(t *testing.T) {
 	d := newFake("d", "D", "android")
 	d.launchFails = -1
@@ -843,7 +786,6 @@ func TestScheduleSequenceRetriesUntilLimitThenStops(t *testing.T) {
 	}
 }
 
-// issue #55: a retry of an ordered flow prefers another device, as the queue's retries do.
 func TestScheduleSequenceRetryAvoidsFailedDevice(t *testing.T) {
 	bad, good := newFake("bad", "Bad", "android"), newFake("good", "Good", "android")
 	bad.launchFails = -1
@@ -856,8 +798,6 @@ func TestScheduleSequenceRetryAvoidsFailedDevice(t *testing.T) {
 	}
 }
 
-// panicOn makes the Options hook panic for the jobs crash picks: a crash inside the run of
-// one flow.
 func panicOn(h Hooks, crash func(*Job) bool) Hooks {
 	opts := h.Options
 	h.Options = func(j *Job, devs map[string]device.Info) engine.Options {
@@ -869,8 +809,6 @@ func panicOn(h Hooks, crash func(*Job) bool) Hooks {
 	return h
 }
 
-// scheduleNoPanic runs Schedule, failing the test (not crashing the test binary) if a panic
-// escapes it.
 func scheduleNoPanic(t *testing.T, pool *Pool, jobs []*Job, retries int, continueSeq bool, h Hooks) (res []Result) {
 	t.Helper()
 	within(t, 10*time.Second, func() {
@@ -884,8 +822,6 @@ func scheduleNoPanic(t *testing.T, pool *Pool, jobs []*Job, retries int, continu
 	return res
 }
 
-// issue #55: a panic while an ordered flow runs fails that flow with the panic's message and
-// stack, its device is released, and the run goes on (continueOnFailure: the next flows run).
 func TestScheduleSequencePanicIsAFailure(t *testing.T) {
 	d := newFake("d", "D", "android")
 	h := panicOn(newRecorder(t).hooks(), func(j *Job) bool { return j.Flow.Name() == "seq1" })
@@ -903,8 +839,6 @@ func TestScheduleSequencePanicIsAFailure(t *testing.T) {
 	}
 }
 
-// issue #55: a crashed ordered flow is a failure like any other: without continueOnFailure
-// the flows after it are reported skipped, and with --retries it is retried.
 func TestScheduleSequencePanicStopsOrRetries(t *testing.T) {
 	jobs := func() []*Job { return []*Job{seqJob(typingFlow(t, "seq1")), job(typingFlow(t, "rest"))} }
 	first := func(j *Job) bool { return j.Flow.Name() == "seq1" && j.Attempt == 0 }

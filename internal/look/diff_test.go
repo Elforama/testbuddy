@@ -8,10 +8,8 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// slot is the i-th compact 40 px row (room for 52 rows on a phone screen).
 func slot(i int) ui.Rect { return rect(0, 50+i*45, 1080, 90+i*45) }
 
-// textScreen is an Android screen with one TextView per label, top to bottom.
 func textScreen(labels ...string) *ui.Screen {
 	var ns []*ui.Node
 	for i, l := range labels {
@@ -28,8 +26,6 @@ func numbered(prefix string, n int) []string {
 	return out
 }
 
-// The same element keeps its ref across reads; a new one gets the next number, even when
-// it appears above the others.
 func TestRefsStableAcrossReads(t *testing.T) {
 	refs := NewRefs()
 	first := Build(textScreen("A", "B"), refs)
@@ -41,7 +37,6 @@ func TestRefsStableAcrossReads(t *testing.T) {
 	checkLines(t, lines(inserted), []string{`@3 Text "New"`, `@1 Text "A"`, `@2 Text "B"`})
 }
 
-// Refs are never reused: a gone element's number stays reserved and comes back with it.
 func TestRefsNotReused(t *testing.T) {
 	refs := NewRefs()
 	Build(textScreen("A", "B"), refs)
@@ -50,8 +45,6 @@ func TestRefsNotReused(t *testing.T) {
 	checkLines(t, lines(Build(textScreen("B"), refs)), []string{`@2 Text "B"`})
 }
 
-// Identity is the id when there is one (so a relabelled element keeps its ref), else the
-// kind and label; equal elements are told apart by rank.
 func TestRefsIdentity(t *testing.T) {
 	refs := NewRefs()
 	follow := func(label string) *ui.Screen {
@@ -60,19 +53,16 @@ func TestRefsIdentity(t *testing.T) {
 	checkLines(t, lines(Build(follow("Follow"), refs)), []string{`@1 Button "Follow" #follow`})
 	checkLines(t, lines(Build(follow("Following"), refs)), []string{`@1 Button "Following" #follow`})
 
-	// Without an id a new label is a new element; so is a new kind.
 	refs = NewRefs()
 	Build(textScreen("Save"), refs)
 	checkLines(t, lines(Build(textScreen("Saved"), refs)), []string{`@2 Text "Saved"`})
 	checkLines(t, lines(Build(android(nd(1, "android.widget.Button", slot(0), text("Save"))), refs)), []string{`@3 Button "Save"`})
 
-	// Equal elements get one ref per rank: when the first goes, the second takes its ref.
 	refs = NewRefs()
 	checkLines(t, lines(Build(textScreen("Delete", "Delete"), refs)), []string{`@1 Text "Delete"`, `@2 Text "Delete"`})
 	checkLines(t, lines(Build(textScreen("Delete"), refs)), []string{`@1 Text "Delete"`})
 }
 
-// Each Refs counts on its own.
 func TestRefsIndependent(t *testing.T) {
 	a, b := NewRefs(), NewRefs()
 	Build(textScreen("x", "y", "z"), a)
@@ -80,7 +70,6 @@ func TestRefsIndependent(t *testing.T) {
 	checkLines(t, lines(Build(textScreen("z"), a)), []string{`@3 Text "z"`})
 }
 
-// Diff describes a change: "+" new elements, "~" changed ones, "-" gone ones, in that order.
 func TestDiffChanges(t *testing.T) {
 	wifi := func(on bool, extra string) *ui.Screen {
 		opts := []opt{text("Wi-Fi"), click, checkable}
@@ -107,8 +96,6 @@ func TestDiffChanges(t *testing.T) {
 			nd(1, "android.widget.Switch", slot(1), text("Wi-Fi"), click, checked),
 			nd(1, "android.widget.Button", slot(2), text("New"), click),
 		), "+ @4 Button \"New\"\n~ @2 Switch \"Wi-Fi\" checked\n- @3 Text \"Old\"\n"},
-		// A text with no id that changed in its place is a change (its new label is a new ref),
-		// when it keeps its first word; another text there (a tab switch) is not.
 		{"text changed in place", wifi(false, "Status: old"), wifi(false, "Status: new"), "~ @4 Text \"Status: new\"\n"},
 		{"another text in its place", wifi(false, "Inbox"), wifi(false, "Archive"), "+ @4 Text \"Archive\"\n- @3 Text \"Inbox\"\n"},
 		{"everything gone", textScreen("A", "B"), textScreen(), "- @1 Text \"A\"\n- @2 Text \"B\"\n"},
@@ -124,7 +111,6 @@ func TestDiffChanges(t *testing.T) {
 	}
 }
 
-// A relabelled element with an id is a change, not a new element.
 func TestDiffRelabelWithID(t *testing.T) {
 	refs := NewRefs()
 	btn := func(label string) *ui.Screen {
@@ -139,7 +125,6 @@ func TestDiffRelabelWithID(t *testing.T) {
 	}
 }
 
-// The keyboard showing or hiding is its own line.
 func TestDiffKeyboard(t *testing.T) {
 	refs := NewRefs()
 	without := Build(textScreen("A"), refs)
@@ -159,7 +144,6 @@ func TestDiffKeyboard(t *testing.T) {
 	}
 }
 
-// At most 8 gone elements are listed, then a count of the rest.
 func TestDiffCapsRemoved(t *testing.T) {
 	refs := NewRefs()
 	prev := Build(textScreen(append([]string{"K1", "K2"}, numbered("R", 10)...)...), refs)
@@ -168,7 +152,6 @@ func TestDiffCapsRemoved(t *testing.T) {
 	if len(gotLines) != 9 || gotLines[0] != `- @3 Text "R 1"` || gotLines[7] != `- @10 Text "R 8"` || gotLines[8] != "- (2 more)" {
 		t.Errorf("Diff =\n%s", got)
 	}
-	// Exactly 8 gone: no count line.
 	refs = NewRefs()
 	prev = Build(textScreen(append([]string{"K"}, numbered("R", 8)...)...), refs)
 	if got := Diff(prev, Build(textScreen("K"), refs)); strings.Contains(got, "more") || strings.Count(got, "\n") != 8 {
@@ -176,8 +159,6 @@ func TestDiffCapsRemoved(t *testing.T) {
 	}
 }
 
-// When most of the screen is new (more than 12 new elements, over two thirds new, or
-// another app) the whole listing is cheaper to read than a diff.
 func TestDiffWholeNewScreen(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -204,8 +185,6 @@ func TestDiffWholeNewScreen(t *testing.T) {
 	}
 }
 
-// Another app in front means a whole new screen, even with the same elements; with no
-// previous listing there is nothing to diff against.
 func TestDiffAppChangeAndFirstRead(t *testing.T) {
 	refs := NewRefs()
 	prev := Build(textScreen("A", "B"), refs)
@@ -220,8 +199,6 @@ func TestDiffAppChangeAndFirstRead(t *testing.T) {
 	}
 }
 
-// Similar suggests up to 5 elements whose label or id contains a 4+ letter word of the
-// query, case-insensitively, in listing order.
 func TestSimilar(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", slot(0), text("Sign in")),
@@ -239,11 +216,11 @@ func TestSimilar(t *testing.T) {
 	}{
 		{"Sign In", []string{"Sign in", "Sign up", "#signin_help"}},
 		{"SIGN", []string{"Sign in", "Sign up", "#signin_help"}},
-		{"password", []string{"#password"}}, // a field found by its id
-		{"Log out", nil},                    // words under 4 letters are ignored
-		{"Logout?", []string{"Logout"}},     // punctuation splits words
-		{"setting", []string{"Settings"}},   // a word inside a longer label
-		{"2024", []string{"Report 2024"}},   // digits count
+		{"password", []string{"#password"}},
+		{"Log out", nil},
+		{"Logout?", []string{"Logout"}},
+		{"setting", []string{"Settings"}},
+		{"2024", []string{"Report 2024"}},
 		{"Nothing like it", nil},
 		{"", nil},
 		{"ok", nil},

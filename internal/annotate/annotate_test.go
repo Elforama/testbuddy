@@ -27,8 +27,6 @@ func TestSRT(t *testing.T) {
 	}
 }
 
-// The graph steadies the frame rate, draws the rings on the recording, then adds the band
-// below it and shows each caption's image there while its step runs.
 func TestGraph(t *testing.T) {
 	caps := []Caption{{Start: 0, End: time.Second, Text: "a"}, {Start: time.Second, End: 2 * time.Second, Text: "b"}}
 	g := Graph(1080, 2400, 182, caps, []Touch{
@@ -48,20 +46,17 @@ func TestGraph(t *testing.T) {
 			t.Errorf("graph lacks %q:\n%s", want, g)
 		}
 	}
-	// the rings go on before the band: their H is the recording's height, not the band's too
 	if strings.Index(g, "pad=") < strings.Index(g, "[r1]overlay") {
 		t.Errorf("the band comes before the rings:\n%s", g)
 	}
 	if g := Graph(400, 800, 0, nil, nil); g != "[0:v]fps=30,format=yuv420p[v]" {
 		t.Errorf("empty graph %q", g)
 	}
-	// rings only: no band
 	if g := Graph(400, 800, 0, nil, []Touch{{At: 0, Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}}); strings.Contains(g, "pad=") || !strings.HasSuffix(g, "[v]") {
 		t.Errorf("rings-only graph %q", g)
 	}
 }
 
-// A caption wraps to two lines at most; a longer one ends in "…" on the second.
 func TestCaptionWrap(t *testing.T) {
 	face := fontFace(40)
 	if face == nil {
@@ -87,7 +82,6 @@ func TestCaptionWrap(t *testing.T) {
 	}
 }
 
-// The caption image is the band: its size, the band's color at the edge, white text inside.
 func TestCaptionImage(t *testing.T) {
 	img := captionImage("Tap on id: login", 1080, bandHeight(1080, 2400), captionSize(1080, 2400))
 	b := img.Bounds()
@@ -110,7 +104,6 @@ func TestCaptionImage(t *testing.T) {
 	}
 }
 
-// With a real ffmpeg: the video keeps its size and length, and the captions are kept beside it.
 func TestBurnWithFFmpeg(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -145,7 +138,6 @@ func TestBurnWithFFmpeg(t *testing.T) {
 	}
 }
 
-// Without ffmpeg Burn says so and leaves the video alone.
 func TestBurnWithoutFFmpeg(t *testing.T) {
 	old := FFmpegPath
 	defer func() { FFmpegPath = old }()
@@ -160,9 +152,6 @@ func TestBurnWithoutFFmpeg(t *testing.T) {
 	}
 }
 
-// A video recorded only when the screen changed (Android: a few frames a second) comes out at
-// a steady 30 frames a second, so a caption or ring changes when it should, not at the next
-// change on screen.
 func TestBurnSteadiesASparseVideo(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -170,7 +159,6 @@ func TestBurnSteadiesASparseVideo(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "recording.mp4")
-	// 3 s at 25 fps, keeping one frame a second, with their times: 3 frames in all
 	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x640:rate=25:duration=3",
 		"-vf", "select='not(mod(n,25))'", "-fps_mode", "vfr", "-pix_fmt", "yuv420p", path).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg cannot make a sparse video: %v %s", err, out)

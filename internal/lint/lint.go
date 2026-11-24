@@ -1,7 +1,3 @@
-// Package lint finds flow steps that run but are fragile: coordinates, match-order
-// indexes, text that reads as an unintended regex, assertions that cannot fail, and flows
-// that assert nothing, header keys tb does not read and keys written twice. It reads a parsed
-// flow; no device is needed.
 package lint
 
 import (
@@ -15,17 +11,14 @@ import (
 	"github.com/elforama/testbuddy/internal/match"
 )
 
-// Warning is one fragile step (or, with no Line, the flow as a whole).
 type Warning struct {
 	Code    string `json:"code"`
 	File    string `json:"file,omitempty"`
 	Line    int    `json:"line,omitempty"`
-	Step    int    `json:"step,omitempty"` // 1-based top-level step; 0 for nested commands and hooks
+	Step    int    `json:"step,omitempty"`
 	Message string `json:"message"`
 }
 
-// Flow lints a parsed flow: its hooks, its commands and their inline nested commands. The
-// commands of a runFlow file are not included (lint that file on its own).
 func Flow(f *flow.Flow) []Warning {
 	l := &linter{out: keys(f)}
 	l.commands(f.Config.OnFlowStart, false)
@@ -38,8 +31,6 @@ func Flow(f *flow.Flow) []Warning {
 	return l.out
 }
 
-// keys warns about header keys tb does not read (a mistyped tags: drops the flow from
-// --include-tags runs) and keys written twice in a map (YAML keeps the last), in line order.
 func keys(f *flow.Flow) []Warning {
 	var out []Warning
 	for k := range f.Config.Ext {
@@ -118,7 +109,6 @@ func (l *linter) command(c *flow.Command, step int) {
 		add("indexed_selector", "Selector depends on match order. Prefer a unique selector.")
 	}
 	for _, r := range regexes {
-		// Single-quoted: YAML keeps backslashes there as written.
 		esc := "'" + strings.ReplaceAll(regexp.QuoteMeta(r.v), "'", "''") + "'"
 		if r.id {
 			add("regex_text", fmt.Sprintf("id %q is read as a regex that does not match itself, so it never finds an element with that id. Escape it (single-quoted in YAML): %s.", r.v, esc))
@@ -138,7 +128,6 @@ func (l *linter) command(c *flow.Command, step int) {
 	}
 }
 
-// sel is a selector to walk with its nested relations.
 type sel struct{ *flow.Selector }
 
 func (s sel) walk(fn func(*flow.Selector)) {
@@ -154,8 +143,6 @@ func (s sel) walk(fn func(*flow.Selector)) {
 	}
 }
 
-// selectors are every selector a command holds: its target, a swipe's anchor, a drag's ends, a
-// scroll's list, a screenshot's crop, and those of its conditions.
 func selectors(c *flow.Command) []sel {
 	out := []sel{{c.Selector}, {c.From}, {c.To}, {c.In}, {c.CropOn}}
 	for _, cond := range []*flow.Condition{c.Cond, c.When, c.While} {
@@ -166,14 +153,8 @@ func selectors(c *flow.Command) []sel {
 	return out
 }
 
-// intendedRegex: signs that a text was written as a regex on purpose.
 var intendedRegex = regexp.MustCompile(`\.[*+?]|\\|\[|\||^\^|\$$|\{\d|\(\?`)
 
-// unintendedRegex reports a value that tb reads as a regex which, as a regex, does not
-// match the value itself, written with no sign of meaning a regex: "Sign in?" matches
-// "Sign in" and "Sign i". A text selector still finds its literal text (texts also match
-// as written); an id selector does not. Interpolated values are skipped: they are known
-// only when the flow runs.
 func unintendedRegex(v string) bool {
 	if v == "" || strings.Contains(v, "${") || !strings.ContainsAny(v, `.+*?()[]{}|^$\`) {
 		return false

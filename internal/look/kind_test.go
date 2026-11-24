@@ -6,7 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Android kinds come from the class (full or short name) plus the clickable/checkable flags.
 func TestKindAndroid(t *testing.T) {
 	cases := []struct {
 		class string
@@ -63,8 +62,6 @@ func flags(n *ui.Node) []string {
 	return f
 }
 
-// iOS kinds come from the element type; only control types are actionable (the clickable
-// flag is ignored), so static text is never a Button.
 func TestKindIOS(t *testing.T) {
 	cases := []struct {
 		class string
@@ -106,14 +103,12 @@ func TestKindIOS(t *testing.T) {
 	}
 }
 
-// Web kinds come from the ARIA role first, then the tag (and input type), then the flags.
 func TestWebKind(t *testing.T) {
 	cases := []struct {
 		class string
 		opts  []opt
 		want  string
 	}{
-		// roles win over tags
 		{"div[button]", nil, "Button"},
 		{"a[button]", nil, "Button"},
 		{"li[menuitem]", nil, "Button"},
@@ -123,9 +118,8 @@ func TestWebKind(t *testing.T) {
 		{"button[switch]", nil, "Switch"},
 		{"div[radio]", nil, "Radio"},
 		{"div[heading]", nil, "Heading"},
-		{"div[navigation]", nil, "View"}, // unknown role: falls through to the tag
+		{"div[navigation]", nil, "View"},
 		{"p[presentation]", nil, "Text"},
-		// tags
 		{"a", nil, "Link"},
 		{"button", nil, "Button"},
 		{"summary", nil, "Button"},
@@ -146,7 +140,6 @@ func TestWebKind(t *testing.T) {
 		{"h1", nil, "Heading"},
 		{"h6", nil, "Heading"},
 		{"h7", nil, "View"},
-		// text tags
 		{"p", nil, "Text"},
 		{"span", nil, "Text"},
 		{"label", nil, "Text"},
@@ -155,7 +148,6 @@ func TestWebKind(t *testing.T) {
 		{"code", nil, "Text"},
 		{"span", []opt{click}, "Button"},
 		{"li", []opt{click}, "Button"},
-		// other tags fall back to the flags
 		{"div", []opt{editable}, "Field"},
 		{"div", []opt{click}, "Button"},
 		{"div", []opt{text("Hello")}, "Text"},
@@ -175,7 +167,6 @@ func TestWebKind(t *testing.T) {
 	}
 }
 
-// On the web only the clickable flag makes an element actionable.
 func TestActionable(t *testing.T) {
 	cases := []struct {
 		platform, class string
@@ -200,7 +191,6 @@ func TestActionable(t *testing.T) {
 	}
 }
 
-// Small helpers: ids worth showing, Android id shortening, clipping, letters/digits.
 func TestHelpers(t *testing.T) {
 	for id, want := range map[string]bool{
 		"":                     false,
@@ -249,8 +239,6 @@ func TestHelpers(t *testing.T) {
 	}
 }
 
-// A bar window is a thin non-app window along the top or bottom edge (status and
-// navigation bars); anything else is not.
 func TestBarWindow(t *testing.T) {
 	s := &ui.Screen{Width: phoneW, Height: phoneH}
 	cases := []struct {

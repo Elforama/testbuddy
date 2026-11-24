@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// A prior lookup saw Target, but Shift pushes it out before its own tap lookup starts.
 func TestTapRecoversPreviouslySeenTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name                            string

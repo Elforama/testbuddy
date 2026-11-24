@@ -1,11 +1,7 @@
-// A small app the agent's measurements run against (not shipped with tb): each button makes
-// one kind of UI change, so docs/research/ios-events.md can say which changes the XCUITest
-// runner hears about (accessibility notifications) and which it does not.
 import SwiftUI
 import UIKit
 import UserNotifications
 
-// iOS 27 requires the scene lifecycle: a SwiftUI App hosting the UIKit screens.
 @main
 struct FixtureApp: App {
     var body: some Scene {
@@ -117,7 +113,6 @@ final class FixtureViewController: UIViewController {
         button("Hide box") { [unowned self] in self.box.isHidden.toggle() }
         button("Color") { [unowned self] in self.box.backgroundColor = self.box.backgroundColor == .systemBlue ? .systemRed : .systemBlue }
         button("Ask notifications") {
-            // A SpringBoard alert over the app (the first time only).
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
         }
         button("SwiftUI") { [unowned self] in

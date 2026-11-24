@@ -1,5 +1,3 @@
-// tb is Test Buddy: a fast, event-driven mobile UI test runner that runs Maestro-compatible YAML flows,
-// drives several devices at once, and is built for AI agents to use from a shell.
 package main
 
 import (
@@ -172,7 +170,6 @@ Exit status: 0 ok, 1 a flow does not parse (or has warnings, with --fail-on warn
 2 bad input.
 `
 
-// checkResult is one flow's outcome in tb check --json.
 type checkResult struct {
 	File     string         `json:"file"`
 	OK       bool           `json:"ok"`
@@ -258,8 +255,6 @@ func cmdCheck(argv []string) int {
 	return 0
 }
 
-// lintWhere is where a warning is: ":7 " in the flow itself, "other.yaml:7 " elsewhere,
-// nothing for the flow as a whole.
 func lintWhere(w lint.Warning, flowPath string) string {
 	if w.Line == 0 {
 		return ""
@@ -270,9 +265,6 @@ func lintWhere(w lint.Warning, flowPath string) string {
 	return fmt.Sprintf(":%d ", w.Line)
 }
 
-// checkFiles expands folders to the flow files in them, sub-folders included: every .yaml or
-// .yml file but a workspace's config.yaml. A folder that cannot be read stays as given, so
-// its error shows.
 func checkFiles(argv []string) []string {
 	var files []string
 	for _, a := range argv {
@@ -298,19 +290,17 @@ func checkFiles(argv []string) []string {
 	return files
 }
 
-// listDevices finds the connected devices (a variable so tests can give their own).
 var listDevices = device.List
 
 func cmdDevices(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
 	if err == nil {
-		err = a.noPos() // issue #249
+		err = a.noPos()
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	// Ask the daemon if it runs (it knows sessions); else list directly.
 	if daemon.Running() {
 		return agentCall("devices", argv, []flagSpec{{[]string{"json"}, boolFlag}})
 	}
@@ -330,7 +320,6 @@ func cmdDevices(argv []string) int {
 	return 0
 }
 
-// The flags of the device commands that take more than -d and -p.
 var (
 	lookFlags = []flagSpec{{[]string{"shot"}, boolFlag}, {[]string{"all"}, boolFlag},
 		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
@@ -338,10 +327,6 @@ var (
 	shotFlags  = []flagSpec{{[]string{"scale"}, fractionFlag}}
 )
 
-// agentCall sends a device command to the daemon. Common flags: -d/--device, -p/--platform.
-// platformFlag is -p, lowercased (as tb test takes it); a value that names no platform is an
-// error, not a filter that matches nothing (`tb release -p IOS` released nothing and exited
-// 0, issue #184).
 func platformFlag(a *args) (string, error) {
 	p := strings.ToLower(a.str("platform"))
 	switch device.Platform(p) {
@@ -355,16 +340,14 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
 	a, err := parseArgs(argv, specs...)
 	if err == nil {
-		// A positional argument is the device for tb close (`tb close all`), as for tb open,
-		// and refused by the commands that take none, never ignored (issue #249).
 		switch cmd {
 		case "close":
 			err = a.devicePos()
-		case "shot": // one path, at most
+		case "shot":
 			if len(a.pos) > 1 {
 				err = fmt.Errorf("unexpected argument %q: tb shot takes one path", a.pos[1])
 			}
-		case "open", "locate": // read below
+		case "open", "locate":
 		default:
 			err = a.noPos()
 		}
@@ -485,8 +468,6 @@ func cmdDo(argv []string) int {
 	return callDaemon("do", req)
 }
 
-// toCommandList turns `tb do` arguments into one YAML command list. Each argument is a
-// command (`tapOn: Login`, `back`) or already a list.
 func toCommandList(parts []string) string {
 	var b strings.Builder
 	for _, p := range parts {
@@ -558,11 +539,6 @@ func cmdSave(argv []string) int {
 	return callDaemon("save", req)
 }
 
-// stopSignals end a command that drives devices from this process (tb test, tb hierarchy):
-// it closes them first. A web device's Chrome runs in a process group of its own, so the
-// terminal's signals reach only tb, which must close it (issue #124). A signal tb was started
-// with ignored is left out, so it stays ignored (signal.Notify would un-ignore it): under
-// `nohup tb test ... &` a logout's SIGHUP does not cancel the run.
 func stopSignals() []os.Signal {
 	var sigs []os.Signal
 	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP} {
@@ -573,10 +549,9 @@ func stopSignals() []os.Signal {
 	return sigs
 }
 
-// stopContext is cancelled by stopSignals.
 func stopContext() (context.Context, context.CancelFunc) {
 	sigs := stopSignals()
-	if len(sigs) == 0 { // NotifyContext with no signals would take every signal
+	if len(sigs) == 0 {
 		return context.WithCancel(context.Background())
 	}
 	return signal.NotifyContext(context.Background(), sigs...)
@@ -586,14 +561,12 @@ func cmdHierarchy(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag})
 	if err == nil {
-		err = a.noPos() // `tb hierarchy emulator-5554` names no device: -d does (issue #249)
+		err = a.noPos()
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	// A web device's Chrome runs in a process group of its own: tb closes it on a signal
-	// (issue #124).
 	ctx, cancel := stopContext()
 	defer cancel()
 	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
@@ -625,8 +598,6 @@ func cmdDaemon(argv []string) int {
 	if len(argv) > 0 {
 		switch argv[0] {
 		case "stop":
-			// It returns once the daemon has closed its sessions' devices and freed them, not
-			// as soon as it answers (issue #124).
 			resp, err := daemon.StopDaemon()
 			if errors.Is(err, daemon.ErrNotRunning) {
 				fmt.Println("tb daemon is not running")
@@ -652,7 +623,6 @@ func cmdDaemon(argv []string) int {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	srv := daemon.NewServer(30 * time.Minute)
 	session.New().Register(srv)
-	// SIGINT and SIGTERM stop it the orderly way, closing the sessions' devices (issue #58).
 	defer srv.StopOnSignals(os.Interrupt, syscall.SIGTERM)()
 	if err := srv.Serve(); err != nil {
 		log.Println(err)

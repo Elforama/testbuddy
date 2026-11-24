@@ -4,54 +4,39 @@ import TBTouchGuard
 import XCTest
 @testable import TBAgentCore
 
-/// The probe's decision at touch-down (TBTouchGuard.h), with the frame the agent packed for it.
 final class TouchGuardTests: XCTestCase {
     private func frame(_ r: CGRect) -> TBFrame {
         TBFrame(x: r.origin.x, y: r.origin.y, w: r.size.width, h: r.size.height)
     }
 
-    /// Issue #103: "Shift" moves the target down 600 ms after its tap. The agent read the target at
-    /// rest, then sent the touch as the move began: at touch-down its live frame had gone 2.94 pt
-    /// down, the point still on it. The touch reached the app, SwiftUI's button (laid out where
-    /// the move ends) did not take it, and the tap reported success. (The frames are from that
-    /// touch on a simulator.) A target that moved between the read and the touch is moving: the
-    /// touch must be withheld, so the host finds the target again once it is still.
     func testATargetThatMovedSinceTheReadIsWithheld() {
         let read = CGRect(x: 20, y: 470, width: 72.333333333333329, height: 34.333333333333314)
         let live = CGRect(x: 20, y: 472.93870544433594, width: 72.333333333333329, height: 34.333333333333314)
         XCTAssertTrue(tbWithholdTouch(frame(live), 56, 487, TouchGuard.pack(read)))
     }
 
-    /// The same target, still: the touch goes through.
     func testAStillTargetIsTouched() {
         let read = CGRect(x: 20, y: 470, width: 72.333333333333329, height: 34.333333333333314)
         XCTAssertFalse(tbWithholdTouch(frame(read), 56, 487, TouchGuard.pack(read)))
     }
 
-    /// A button pulsing around its middle (scaled 1.0 to 1.15, forever) changes size but not
-    /// place: it stays tappable, as before.
     func testAPulsingTargetIsTouched() {
         let read = CGRect(x: 20, y: 200, width: 60, height: 40)
         let live = read.insetBy(dx: -4.5, dy: -3)
         XCTAssertFalse(tbWithholdTouch(frame(live), 50, 220, TouchGuard.pack(read)))
     }
 
-    /// Without a frame from the agent (a retry that lets a target that never stops moving be
-    /// tapped), only the point is checked, as before.
     func testWithoutAFrameOnlyThePointCounts() {
         let live = CGRect(x: 20, y: 472.94, width: 72.33, height: 34.33)
         XCTAssertFalse(tbWithholdTouch(frame(live), 56, 487, 0))
         XCTAssertTrue(tbWithholdTouch(frame(live), 56, 600, 0))
     }
 
-    /// A touch off the target is withheld, armed or not.
     func testATouchOffTheTargetIsWithheld() {
         let read = CGRect(x: 20, y: 686, width: 72.33, height: 34.33)
         XCTAssertTrue(tbWithholdTouch(frame(read), 56, 487, TouchGuard.pack(read)))
     }
 
-    /// Why a touch is withheld: the target moved since the agent read it (issue #103), or the
-    /// point is off it. The host taps again after the first only in its CI mode, so it is told.
     func testWhyATouchIsWithheld() {
         let read = CGRect(x: 20, y: 470, width: 72.333333333333329, height: 34.333333333333314)
         let moved = CGRect(x: 20, y: 472.93870544433594, width: 72.333333333333329, height: 34.333333333333314)
@@ -62,8 +47,6 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(tbWithholdReason(frame(away), 56, 487, 0), TBWithheldOffTarget)
     }
 
-    /// The probe's rejection says which: the agent reads "moved" or off the target from it, and
-    /// nothing from another touch's.
     func testARejectionSaysWhetherTheTargetMoved() {
         let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
         XCTAssertEqual(TouchGuard.rejection(tbRejection(token, true), token: token), .moved)
@@ -74,7 +57,6 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(token & TBRejectedMoved, 0)
     }
 
-    /// The agent's packing (Swift) and the probe's (C) agree, to a quarter point.
     func testPackingRoundTrips() {
         for r in [CGRect(x: 20, y: 470, width: 72.333, height: 34.333), CGRect(x: -12.5, y: -3, width: 402, height: 874),
                   CGRect(x: 0, y: 0, width: 1366, height: 1024)] {
@@ -92,12 +74,6 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(TouchGuard.pack(CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10)), 0)
     }
 
-    /// Issue #131: in CI, a tap on a SwiftUI dialog button went down on the button (its press
-    /// showed: "the screen changed"), but the touch never ended normally: it was cancelled (the
-    /// system ended it when its virtual digitizer went away, about 150 ms later), so the button
-    /// did not act. The probe's receipt still said the touch was taken on the target, and the tap
-    /// counted as done. A touch that ended cancelled reached no handler as a tap: its receipt
-    /// must say so, and must not say it was taken.
     func testACancelledTouchIsNotReportedAsTaken() {
         let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
         let receipt = tbTouchReceipt(token, true, true)
@@ -105,17 +81,13 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(receipt & TBReceiptTargeted, 0)
     }
 
-    /// A touch that ended normally is taken, as before, on the target or not.
     func testATouchThatEndedIsTaken() {
         let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, true, false), token: token), .ended(targeted: true))
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, false, false), token: token), .ended(targeted: false))
-        // Another touch's receipt says nothing about this one.
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token + 1, true, true), token: token), TouchGuard.Receipt.none)
     }
 
-    /// Issue #134: the tap's `touch` field says how the probe saw the touch end, for the host's
-    /// trace: lifted (on the target or not), cancelled, or no receipt in time.
     func testTheTouchFieldSaysHowTheTouchEnded() {
         let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, true, false), token: token).word, "ended")
@@ -124,8 +96,6 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token + 1, true, false), token: token).word, "none")
     }
 
-    /// Issue #131: a nonce never sets the receipt's flag bits, whatever its counter, so a flag
-    /// is never read as part of a nonce, nor a nonce as a flag.
     func testANonceLeavesTheReceiptFlagsFree() {
         XCTAssertEqual(TouchGuard.targetedFlag, TBReceiptTargeted)
         XCTAssertEqual(TouchGuard.cancelledFlag, TBReceiptCancelled)
@@ -139,10 +109,6 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(TouchGuard.nonce(counter: UInt32.max, idHash: 0) & (TBReceiptTargeted | TBReceiptCancelled), 0)
     }
 
-    /// Issue #149: a guarded tap says whether the UI made a solid change after the host's read
-    /// (a layout shift its frames may not show yet). A ticker's restless changes are no such
-    /// change: on a still screen with a ticker the answer stays no, so the host does not look
-    /// again (and cannot fail the step) after a tap that moved its own button.
     func testSolidChangeSinceTheHostsRead() {
         var mark = TouchGuard.SolidMark()
         XCTAssertFalse(mark.changed(since: 0), "no change at all")
@@ -152,45 +118,35 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertFalse(mark.changed(since: 1), "only a ticker's changes after the read")
         XCTAssertFalse(mark.changed(since: 3), "nothing after the read")
         XCTAssertTrue(mark.changed(since: 0), "a solid change after the read")
-        mark.note(seq: 4, restless: false) // the shift's state change, just before the touch
+        mark.note(seq: 4, restless: false)
         XCTAssertTrue(mark.changed(since: 3))
         mark.note(seq: 5, restless: true)
         XCTAssertTrue(mark.changed(since: 3), "a later ticker change keeps the solid one")
         XCTAssertFalse(mark.changed(since: 4))
     }
 
-    // Issue #324: a watched touch, on a button the host found by its text. RNTester's
-    // "Threshold: OFF" (a React Native Button) at [16,733][155,771] on a 402x874 screen: the
-    // touch goes to its label, inside the button's own view, whose frame is the button's.
     private let screenW = 402.0, screenH = 874.0
     private let button = TBFrame(x: 16, y: 733, w: 139, h: 38)
 
-    /// The button's own view (fractional, as UIKit lays it out) is the target.
     func testTheButtonsOwnViewIsTheTarget() {
         XCTAssertTrue(tbViewIsTarget(TBFrame(x: 16.33, y: 732.67, w: 138.67, h: 38.33), button, screenW, screenH))
     }
 
-    /// Its label, inside it, is not: the probe walks up to the button from it.
     func testALabelInsideIsNotItself() {
         XCTAssertFalse(tbViewIsTarget(TBFrame(x: 30, y: 742, w: 110, h: 20), button, screenW, screenH))
     }
 
-    /// A veil hidden from accessibility over the screen is not the button, nor is its spinner,
-    /// even where the spinner lies inside a button in the middle of the screen.
     func testAVeilAndItsSpinnerAreNotTheTarget() {
         XCTAssertFalse(tbViewIsTarget(TBFrame(x: 0, y: 0, w: screenW, h: screenH), button, screenW, screenH))
         let middle = TBFrame(x: 51, y: 412, w: 300, h: 50)
         XCTAssertFalse(tbViewIsTarget(TBFrame(x: 182.5, y: 418.5, w: 37, h: 37), middle, screenW, screenH))
     }
 
-    /// A target as big as half the screen tells nothing: a veil that size would match it.
     func testABigTargetTellsNothing() {
         let big = TBFrame(x: 0, y: 0, w: screenW, h: screenH * 0.6)
         XCTAssertFalse(tbViewIsTarget(big, big, screenW, screenH))
     }
 
-    // The walk up from the touch's hit-test view (issue #324, review): only the button itself, an
-    // accessibility element with its bounds, reached by views inside it and none concealed.
     private func view(_ f: TBFrame, element: Bool = false, concealed: Bool = false) -> TBChainView {
         TBChainView(frame: f, element: element, concealed: concealed)
     }
@@ -200,46 +156,36 @@ final class TouchGuardTests: XCTestCase {
     private var screen: TBFrame { TBFrame(x: 0, y: 0, w: screenW, h: screenH) }
     private let row = TBFrame(x: 0, y: 700, w: 402, h: 100)
 
-    /// The button itself (a UIButton, React Native's Pressable view): reached.
     func testTheButtonItselfIsReached() {
         XCTAssertTrue(reached([view(button, element: true), view(row), view(screen)]))
     }
 
-    /// Its label, inside it (an element of its own or not): reached, through the button.
     func testALabelInsideTheButtonIsReached() {
         let label = TBFrame(x: 30, y: 742, w: 110, h: 20)
         XCTAssertTrue(reached([view(label, element: true), view(button, element: true), view(row)]))
         XCTAssertTrue(reached([view(label), view(button, element: true), view(row)]))
     }
 
-    /// A veil hidden from accessibility inside a container the button's size (a cell's content
-    /// view, a React Native wrapper as big as its Pressable), the button a sibling of the veil:
-    /// the container has the button's bounds but is no element. Not reached.
     func testAVeilInsideAContainerTheButtonsSizeIsNotReached() {
         XCTAssertFalse(reached([view(button, concealed: true), view(button), view(row), view(screen)]))
         XCTAssertFalse(reached([view(button), view(button), view(row), view(screen)]),
                        "a veil that is only no element, not marked hidden")
     }
 
-    /// An overlay the button's size over it, a sibling: up from it is its superview, bigger.
     func testASiblingOverlayTheButtonsSizeIsNotReached() {
         XCTAssertFalse(reached([view(button, concealed: true), view(row), view(screen)]))
         XCTAssertFalse(reached([view(button), view(row), view(screen)]))
     }
 
-    /// A concealed view on the way up (a container that hides its elements) says no, even under
-    /// the button's element.
     func testAConcealedViewOnTheWayIsNotReached() {
         let label = TBFrame(x: 30, y: 742, w: 110, h: 20)
         XCTAssertFalse(reached([view(label, concealed: true), view(button, element: true)]))
     }
 
-    /// A SwiftUI or Flutter button: the touch goes to a hosting view, no element on the way.
     func testAHostingViewIsNotReached() {
         XCTAssertFalse(reached([view(screen), view(screen)]))
     }
 
-    /// The agent arms a watched touch with the probe's marker, and the host's bounds as its frame.
     func testAWatchedTouchIsArmedWithTheProbesMarker() {
         XCTAssertEqual(TouchGuard.watchedTouch, TBWatchedTouch)
         XCTAssertEqual(TouchGuard.watchFrame([16, 733, 155, 771]), CGRect(x: 16, y: 733, width: 139, height: 38))

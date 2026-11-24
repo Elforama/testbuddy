@@ -8,7 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// body is the listing without its header line.
 func body(l *Listing) string {
 	_, rest, _ := strings.Cut(l.Text(), "\n")
 	return rest
@@ -21,8 +20,6 @@ func checkBody(t *testing.T, l *Listing, want string) {
 	}
 }
 
-// A profile row (avatar, name over email, edit button) above a row of two buttons:
-// rows and the column inside a row get header lines, wrappers holding one thing do not.
 func TestOutlineRowsAndColumns(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.LinearLayout", rect(0, 200, 1080, 600)),
@@ -30,7 +27,7 @@ func TestOutlineRowsAndColumns(t *testing.T) {
 		nd(2, "android.widget.LinearLayout", rect(0, 300, 1080, 420)),
 		nd(3, "android.widget.ImageView", rect(40, 300, 160, 420), desc("Avatar")),
 		nd(3, "android.widget.LinearLayout", rect(180, 300, 800, 420)),
-		nd(4, "android.widget.FrameLayout", rect(180, 300, 800, 350)), // wrapper: collapsed
+		nd(4, "android.widget.FrameLayout", rect(180, 300, 800, 350)),
 		nd(5, "android.widget.TextView", rect(180, 300, 800, 350), text("Jane Doe")),
 		nd(4, "android.widget.TextView", rect(180, 360, 800, 410), text("jane@example.com")),
 		nd(3, "android.widget.Button", rect(840, 320, 1040, 400), text("Edit"), click),
@@ -51,8 +48,6 @@ row:
 `)
 }
 
-// A scrolling list of tappable cards: the list is marked scrollable and each card's texts
-// sit under the card.
 func TestOutlineScrollListOfCards(t *testing.T) {
 	s := android(
 		nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 200, 1080, 2200), scrollable),
@@ -69,8 +64,6 @@ func TestOutlineScrollListOfCards(t *testing.T) {
 `)
 }
 
-// Texts inside a button that are not part of its label are indented under it, laid out
-// as they sit.
 func TestOutlineInsideButton(t *testing.T) {
 	s := android(
 		nd(1, "android.view.ViewGroup", rect(0, 200, 1080, 400), desc("Wi-Fi"), click),
@@ -84,8 +77,6 @@ func TestOutlineInsideButton(t *testing.T) {
 `)
 }
 
-// Siblings laid out flat in one container (a ConstraintLayout, a React Native view) are
-// split into rows by position; equal rows make a grid.
 func TestOutlineRowsByPosition(t *testing.T) {
 	s := android(
 		nd(1, "androidx.constraintlayout.widget.ConstraintLayout", rect(0, 0, 1080, 2400)),
@@ -119,8 +110,6 @@ row:
 `)
 }
 
-// On iOS a container with an identifier is listed itself, with its contents under it;
-// items that cover each other (a button over a row) do not make a row.
 func TestOutlineCarouselIDAndOverlap(t *testing.T) {
 	s := ios(
 		nd(2, "ScrollView", rect(0, 100, 390, 300), id("featured")),
@@ -143,7 +132,6 @@ func TestOutlineCarouselIDAndOverlap(t *testing.T) {
 `)
 }
 
-// A plain vertical screen stays a flat list: no header lines at all.
 func TestOutlinePlainStackIsFlat(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.ScrollView", rect(0, 0, 1080, 2400)),
@@ -159,8 +147,6 @@ func TestOutlinePlainStackIsFlat(t *testing.T) {
 `)
 }
 
-// An icon button laid over the end of a field (show password) is listed after the field,
-// not beside it in a row.
 func TestOutlineIconInsideField(t *testing.T) {
 	s := ios(
 		nd(2, "Other", rect(0, 260, 390, 400)),
@@ -174,8 +160,6 @@ func TestOutlineIconInsideField(t *testing.T) {
 `)
 }
 
-// iOS and web report elements outside the visible area: a scroll area counts them by side,
-// once each (not the text inside an off-screen card again).
 func TestOutlineMoreFromOffscreenElements(t *testing.T) {
 	s := ios(
 		nd(2, "ScrollView", rect(0, 100, 390, 844), scrollable),
@@ -197,7 +181,6 @@ func TestOutlineMoreFromOffscreenElements(t *testing.T) {
 	}
 }
 
-// Off-screen elements outside any scroll area (a long web page) are one line at the end.
 func TestOutlineMoreOnPage(t *testing.T) {
 	s := web(
 		nd(1, "h1", rect(100, 50, 600, 100), text("Docs")),
@@ -209,8 +192,6 @@ func TestOutlineMoreOnPage(t *testing.T) {
 `)
 }
 
-// Android sends no off-screen nodes: a list's size and its items' rows give the count, and
-// "can scroll further" alone gives "more" without one.
 func TestOutlineMoreAndroidList(t *testing.T) {
 	list := nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 200, 1080, 2200), scrollable)
 	list.Coll = &ui.Coll{Rows: 50, Cols: 1}
@@ -236,8 +217,6 @@ func TestOutlineMoreAndroidList(t *testing.T) {
 `)
 }
 
-// Elements that were not on the screen shown before get a "*"; a first look, another app
-// or an all-new screen marks nothing.
 func TestMarkNew(t *testing.T) {
 	refs := NewRefs()
 	first := Build(android(
@@ -268,8 +247,6 @@ func TestMarkNew(t *testing.T) {
 	}
 }
 
-// A list that reports its size (here on a child of the scroll view, as Android Settings
-// does) but not its items' places: at the top of the list, the rows on screen give the count.
 func TestOutlineMoreAndroidListAtTop(t *testing.T) {
 	sv := nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 200, 1080, 2200), scrollable)
 	sv.MoreAfter = true
@@ -286,7 +263,6 @@ func TestOutlineMoreAndroidListAtTop(t *testing.T) {
 `)
 }
 
-// When only some rows report their place, the rows on screen still count as shown.
 func TestOutlineMoreAndroidSparsePlaces(t *testing.T) {
 	sv := nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 200, 1080, 2200), scrollable)
 	sv.Coll = &ui.Coll{Rows: 19, Cols: 1}
@@ -305,8 +281,6 @@ func TestOutlineMoreAndroidSparsePlaces(t *testing.T) {
 `)
 }
 
-// A row scrolled out of its list but still inside the screen (behind a header) is out of
-// view: counted, not listed, the same as the matcher sees it.
 func TestOutlineRowScrolledOutOfListInsideScreen(t *testing.T) {
 	s := ios(
 		nd(2, "StaticText", rect(0, 50, 390, 100), text("Header")),
@@ -323,8 +297,6 @@ column scrollable (1 more above, 1 more below):
 `)
 }
 
-// A container's id is shown when it is unique on screen and names something (not an Android
-// layout id), and never on the web, where ids are everywhere.
 func TestGroupID(t *testing.T) {
 	o := &outliner{l: &Listing{Platform: "android"}, idCount: map[string]int{"cart": 1, "row": 2, "com.app:id/frame": 1, "com.app:id/x": 1}}
 	for id, want := range map[string]string{"cart": "cart", "row": "", "com.app:id/frame": "", "": ""} {

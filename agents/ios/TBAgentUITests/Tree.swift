@@ -1,32 +1,14 @@
-// The screen as docs/protocol.md's windows and nodes.
-//
-// Windows, top-most first: a SpringBoard alert over the app (type 3), the keyboard (type 2,
-// split out of the app's tree), the foreground app (type 1). Attribute mapping:
-//   t = title, else value; cd = label; id = identifier; h = placeholderValue; v = value;
-//   c = element type name. Flags per docs/protocol.md; iOS has no "visible to user" attribute,
-//   so a node is visible unless its frame lies outside the app's frame or is empty.
-//
-// Two ways to read: "fast" asks testmanagerd for a snapshot with only the attributes used here
-// (XCAXClient_iOS requestSnapshotForElement:attributes:parameters:error:); "public" is
-// XCUIApplication.snapshot() (every attribute). Public is the default (`mode`, below, which
-// says why); the treeMode op switches to fast.
 import XCTest
 
 final class Tree {
-    /// How long one snapshot may wait for the app before failing (and being tried again).
     static let axTimeoutSeconds = 3.0
-    /// The key paths a node needs (fast snapshots ask for exactly these).
     static let keyPaths = ["elementType", "frame", "label", "title", "value", "identifier", "placeholderValue",
                            "enabled", "selected", "hasKeyboardFocus", "hasFocus"]
 
-    /// "public" measured faster than "fast" on Xcode 27.2 (Settings, 167 nodes: 35 ms vs
-    /// 58 ms): XCUIApplication.snapshot() is answered in the app over the automation session,
-    /// the trimmed request goes through testmanagerd. See docs/research/ios-events.md.
     var mode = "public"
     private lazy var fastAttributes: [AnyObject]? = Private.axAttributes(forKeyPaths: Tree.keyPaths)
     private lazy var fastParameters: [String: Any] = Private.defaultSnapshotParameters()
 
-    /// What one read saw, gathered in the read and published when it ends.
     private struct Seen {
         var appFrame = CGRect.zero
         var landscape: Bool?
@@ -34,25 +16,16 @@ final class Tree {
         var ms: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
     }
 
-    /// What the last read saw. A read runs on the main thread, and one given up on by its op
-    /// (issue #130) may still end there while the ops queue reads these: they are published
-    /// under a lock, all at once.
     private let lock = NSLock()
     private var _lastSignature: (seq: Int64, hash: Int)?
     private var _landscape = false
     private var _lastAppFrame = CGRect.zero
     private var _lastKeyboard = false
     private var _lastMs: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
-    /// The last-app fallback (issue #142) was logged; cleared once the foreground is known.
-    /// Main thread.
     private var loggedFallback = false
-    /// The host's CI mode, as the last screen read that said ("ci" on the tree request): the
-    /// last-app fallback (Front.read) is CI mode's. Main thread.
     private var hostCI = false
 
-    /// Hash of the windows of the last read, and the change counter when it was taken.
     var lastSignature: (seq: Int64, hash: Int)? { lock.lock(); defer { lock.unlock() }; return _lastSignature }
-    /// Whether the app's frame was wider than tall at the last read (touch coordinates turn).
     var landscape: Bool { lock.lock(); defer { lock.unlock() }; return _landscape }
     var lastAppFrame: CGRect { lock.lock(); defer { lock.unlock() }; return _lastAppFrame }
     var lastKeyboard: Bool { lock.lock(); defer { lock.unlock() }; return _lastKeyboard }
@@ -67,9 +40,6 @@ final class Tree {
         if let signature { _lastSignature = signature }
     }
 
-    /// Writes "keyboard" and "windows" for the current screen into w. Main thread. wanted: false
-    /// once the op gave the read up: what it saw is not published (issue #130).
-    /// ci: the host's CI mode, when the request says (nil: as the last read that did).
     func write(_ w: JW, mode requested: String? = nil, seq: Int64, launchBundle: String? = nil, launchPID: Int32 = 0,
                ci: Bool? = nil, wanted: () -> Bool = { true }) throws {
         if let ci { hostCI = ci }
@@ -81,7 +51,6 @@ final class Tree {
         w.key("timing").obj().put("snapMs", seen.ms.snap).put("walkMs", seen.ms.walk).put("nodes", seen.ms.nodes).put("mode", requested ?? mode).end()
     }
 
-    /// A hash of everything a read shows: equal hashes, same screen. One snapshot. Main thread.
     func signature() throws -> Int {
         var seen = Seen(appFrame: lastAppFrame)
         let h = Tree.hash(try windows(mode: mode, seen: &seen).bytes)
@@ -95,7 +64,6 @@ final class Tree {
         return h.finalize()
     }
 
-    /// The windows array (JSON) and whether a keyboard shows.
     private func windows(mode: String, launchBundle: String? = nil, launchPID: Int32 = 0, seen: inout Seen) throws -> (bytes: [UInt8], keyboard: Bool) {
         func snapshot(bundle: String, pid: Int32, mode: String) throws -> XCUIElementSnapshot {
             let t = DispatchTime.now().uptimeNanoseconds
@@ -104,11 +72,6 @@ final class Tree {
         }
         var fg = Apps.shared.foreground()
         if fg.bundle.isEmpty {
-            // Issue #142: which app is in front could not be asked (an accessibility timeout on
-            // a starved simulator). Front.read: the last app seen in front if XCTest still has
-            // it in the foreground, not SpringBoard (whose tree shows that app as a card in its
-            // switcher); with none, ask again, then SpringBoard as before. In CI mode only
-            // (hostCI): elsewhere SpringBoard at once, as before the fix. Main thread.
             var last: Front.App?
             if hostCI, let l = Apps.shared.lastApp(), Apps.shared.app(l.bundle).state == .runningForeground {
                 last = Front.App(l.pid, l.bundle)
@@ -125,12 +88,12 @@ final class Tree {
                 fg = Apps.Foreground(pid: pid != 0 ? pid : Apps.shared.springboardPidIfKnown, bundle: Apps.springboard, all: fg.all)
             case .lastApp(let app):
                 if !loggedFallback {
-                    loggedFallback = true // once until the foreground is known again
+                    loggedFallback = true
                     NSLog("tb: foreground not known (no active application listed): reading \(app.bundle), the last app in front")
                 }
                 fg = Apps.Foreground(pid: app.pid, bundle: app.bundle, all: fg.all)
             case .unknown:
-                throw LaunchWindowChanged() // a launch's first-tree wait asks again
+                throw LaunchWindowChanged()
             }
         } else {
             loggedFallback = false
@@ -141,7 +104,6 @@ final class Tree {
         var appBundle = fg.bundle, appPid = fg.pid
 
         if fg.bundle == Apps.springboard {
-            // SpringBoard alone: its home screen, or one of its alerts over an app.
             let sb = try snapshot(bundle: Apps.springboard, pid: fg.pid, mode: mode)
             let alerts = Tree.find(sb, .alert)
             var behind = Apps.shared.lastApp()
@@ -171,8 +133,6 @@ final class Tree {
         if !appBundle.isEmpty {
             let snap = try snapshot(bundle: appBundle, pid: appPid, mode: mode)
             windows += appWindow(snap, bundle: appBundle, pid: appPid, keyboard: &keyboard, active: springboardAlert == nil, seen: &seen)
-            // A full-screen system browser can leave the host's snapshot empty on iOS 26.
-            // Keep the host as the foreground app and read the visible page from its service.
             if springboardAlert == nil, let browser = browserWindow(over: appBundle, host: snap, appFrame: seen.appFrame) {
                 windows.insert(browser, at: 0)
             }
@@ -206,7 +166,6 @@ final class Tree {
                       frame: lastAppFrame, nodes: nodes.end().bytes, active: true)
     }
 
-    /// The app's window, preceded by the keyboard's when the app shows one.
     private func appWindow(_ snap: XCUIElementSnapshot, bundle: String, pid: Int32, keyboard: inout Bool, active: Bool,
                            seen: inout Seen) -> [[UInt8]] {
         let t = DispatchTime.now().uptimeNanoseconds
@@ -238,9 +197,6 @@ final class Tree {
         return w.end().bytes
     }
 
-    // MARK: snapshots
-
-    /// A snapshot of an app. Main thread. retry: the public path asks once more after a failure.
     func snapshot(bundle: String, pid: Int32, mode: String, retry: Bool = true) throws -> XCUIElementSnapshot {
         let app = Apps.shared.app(bundle)
         if mode == "fast", let attrs = fastAttributes {
@@ -255,16 +211,12 @@ final class Tree {
                 }
             }
         }
-        // Public path; one retry, as a read in a transition can time out.
         do { return try app.snapshot() } catch {
             guard retry else { throw error }
             return try app.snapshot()
         }
     }
 
-    /// Before injecting a selector tap, resolve its live button in the same process.
-    /// Never select another matching row or tap a point outside the button.
-    /// Its frame as read now, or why the tap must not go (Preflight.check).
     func containsTap(id: String, pid: Int32, point: CGPoint) throws -> Preflight {
         let fg = Apps.shared.foreground()
         guard fg.pid == pid, !fg.bundle.isEmpty else { return .withheld(reason: Preflight.otherProcess, frame: nil) }
@@ -272,7 +224,6 @@ final class Tree {
         return Preflight.check(PreflightSnap(s: snapshot), id: id, point: point, frontPid: fg.pid, pid: pid)
     }
 
-    /// XCTest's snapshot as the tap's preflight reads it.
     private struct PreflightSnap: PreflightNode {
         let s: XCUIElementSnapshot
         var isButton: Bool { s.elementType == .button }
@@ -282,8 +233,6 @@ final class Tree {
         var children: [PreflightSnap] { s.children.map { PreflightSnap(s: $0) } }
     }
 
-    /// The editable field with this identifier in pid's app (the only one), with the app's
-    /// frame and the keyboard's, from one snapshot: where typing touches to focus it. Main thread.
     func field(id: String, pid: Int32) throws -> FieldGeometry {
         let fg = Apps.shared.foreground()
         guard fg.pid == pid, !fg.bundle.isEmpty else { throw AgentError("process changed while refocusing \(id)") }
@@ -303,15 +252,9 @@ final class Tree {
         return FieldGeometry(frame: matches[0].frame, screen: frame(of: snap), keyboard: keyboard)
     }
 
-    /// The field with keyboard focus (the first in the tree, as a query's firstMatch; its value
-    /// "" when it shows only its placeholder) and whether a keyboard shows, from one snapshot of
-    /// the foreground app: what typing looks at (issue #51; a query for each took two snapshots
-    /// for the field, .exists then .snapshot(), and one for the keyboard). Main thread.
     func focus() throws -> FocusState {
         let fg = Apps.shared.foreground()
         guard !fg.bundle.isEmpty else { return FocusState(field: nil, keyboard: false) }
-        // No retry: on an app that does not answer, a look must not hold the main thread for two
-        // AX timeouts; typing looks again on the next change.
         lastFocused = nil
         let snap = try snapshot(bundle: fg.bundle, pid: fg.pid, mode: mode, retry: false)
         let (state, node) = FocusState.lookNode(SnapNode(s: snap))
@@ -319,12 +262,8 @@ final class Tree {
         return state
     }
 
-    /// The field the last focus look found (main thread only).
     private var lastFocused: XCUIElementSnapshot?
 
-    /// The selection of the field the last focus look found, with its value, both read in one
-    /// request to the app (issue #340: XCTest's selected text range, in UTF-16 units). nil when
-    /// that look found none, or the field reports no selection. Main thread.
     func selection() -> TextSelection? {
         guard let s = lastFocused, let element = RT.get(s as AnyObject, "accessibilityElement") as? NSObject,
               let attrs = try? Private.attributes(of: element, [Tree.selectedTextRange, Tree.valueAttribute]),
@@ -334,7 +273,6 @@ final class Tree {
     private static let selectedTextRange = "XC_kAXXCAttributeSelectedTextRange"
     private static let valueAttribute = "XC_kAXXCAttributeValue"
 
-    /// XCTest's snapshot as the focus look reads it (FocusState.look).
     private struct SnapNode: FocusNode {
         let s: XCUIElementSnapshot
         var isKeyboard: Bool { s.elementType == .keyboard }
@@ -363,8 +301,6 @@ final class Tree {
         return out
     }
 
-    // MARK: nodes
-
     private static let keyboardFocusSel = NSSelectorFromString("hasKeyboardFocus")
 
     private static func keyboardFocus(_ s: XCUIElementSnapshot) -> Bool {
@@ -373,8 +309,6 @@ final class Tree {
         return unsafeBitCast(o.method(for: keyboardFocusSel), to: Get.self)(o, keyboardFocusSel)
     }
 
-    /// Pre-order walk writing nodes; a Keyboard element's subtree goes to the keyboard list
-    /// (depth from 0) when one is given. Returns the number of nodes written.
     @discardableResult
     private func walk(_ s: XCUIElementSnapshot, depth: Int, into w: JW, bounds: CGRect,
                       keyboard: (JW, (CGRect) -> Void)?, flutterPID: Int32? = nil) -> Int {
@@ -444,7 +378,6 @@ final class Tree {
         w.end()
     }
 
-    /// React Native spells a checkbox's state into its value ("checkbox, checked").
     private static func spelledChecked(_ value: String) -> Bool {
         guard value.contains(", ") else { return false }
         let words = value.components(separatedBy: ", ")
@@ -541,5 +474,4 @@ final class Tree {
     }
 }
 
-/// A foreground switch during launch acquisition. Wait for the next app event.
 struct LaunchWindowChanged: Error {}

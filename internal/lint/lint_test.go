@@ -11,7 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/match"
 )
 
-// parse writes the flow (and any other files) to a temp folder and parses it.
 func parse(t *testing.T, src string, files ...string) *flow.Flow {
 	t.Helper()
 	dir := t.TempDir()
@@ -28,7 +27,6 @@ func parse(t *testing.T, src string, files ...string) *flow.Flow {
 	return f
 }
 
-// codes renders warnings as "code@line" ("code" alone for flow-wide ones).
 func codes(ws []Warning) string {
 	var out []string
 	for _, w := range ws {
@@ -97,8 +95,6 @@ func TestRules(t *testing.T) {
 - tapOn: Go`, "missing_assertion"},
 		{"extendedWaitUntil counts as an assertion", `- extendedWaitUntil: {visible: Done, timeout: 1000}`, ""},
 		{"assertTrue counts as an assertion", `- assertTrue: "${1 == 1}"`, ""},
-		// Issue #278: a tap's timeout (tb extension) is a lookup budget, not an assertion or a
-		// fragile step: nothing to warn about.
 		{"tap timeout", `- tapOn: {text: "Not now", optional: true, timeout: 500}
 - tapOn: {id: skip, optional: true, timeout: 0}
 - assertVisible: Home`, ""},
@@ -113,8 +109,6 @@ func TestRules(t *testing.T) {
 	}
 }
 
-// Inline nested commands are linted, and their assertions count; a runFlow file is linted
-// on its own, not through the flows that run it.
 func TestNested(t *testing.T) {
 	f := parse(t, header+`- repeat:
     times: 2
@@ -135,7 +129,6 @@ func TestNested(t *testing.T) {
 	if got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
-	// Commands inside a block have no step; the runFlow's own condition is step 3's.
 	steps := []int{}
 	for _, w := range Flow(f) {
 		steps = append(steps, w.Step)
@@ -145,7 +138,6 @@ func TestNested(t *testing.T) {
 	}
 }
 
-// Multi-device role blocks and parallel blocks are walked.
 func TestMultiDevice(t *testing.T) {
 	f := parse(t, `devices:
   alice: {platform: ios, appId: com.chat}
@@ -163,7 +155,6 @@ func TestMultiDevice(t *testing.T) {
 	}
 }
 
-// Top-level warnings carry their 1-based step; onFlowStart commands are linted too.
 func TestStepsAndHooks(t *testing.T) {
 	f := parse(t, `appId: com.app
 onFlowStart:
@@ -185,8 +176,6 @@ onFlowStart:
 	}
 }
 
-// Messages say what is wrong and how to fix it; pixel taps say they break across screens,
-// and a regex_text warning shows the escaped text.
 func TestMessages(t *testing.T) {
 	ws := Flow(parse(t, header+`- tapOn: {point: "50%,50%"}
 - tapOn: {point: "100,200"}
@@ -196,8 +185,6 @@ func TestMessages(t *testing.T) {
 	if len(ws) != 4 {
 		t.Fatalf("got %+v", ws)
 	}
-	// A text still finds itself as written (texts also match literally), but matches more;
-	// an id does not find itself at all.
 	if !strings.Contains(ws[2].Message, "also") {
 		t.Errorf("regex text: %q", ws[2].Message)
 	}
@@ -215,8 +202,6 @@ func TestMessages(t *testing.T) {
 	}
 }
 
-// The escaped form a regex_text warning suggests matches the value as a regex alone, so it
-// works for ids too.
 func TestSuggestedEscapeMatches(t *testing.T) {
 	for _, v := range []string{"Price ($)", "Sign in?", "(Optional)", "save.btn?", "c++", "a{b}"} {
 		if esc := regexp.QuoteMeta(v); !match.RegexMatches(esc, v) {
@@ -225,8 +210,6 @@ func TestSuggestedEscapeMatches(t *testing.T) {
 	}
 }
 
-// Issue #64: an unknown header key (a mistyped tags:) is kept and the flow still parses and
-// runs, but --lint warns about it, naming the known key it is closest to.
 func TestUnknownHeaderKey(t *testing.T) {
 	f := parse(t, `appId: com.app
 name: Login
@@ -257,7 +240,6 @@ myToolSetting: 1
 	}
 }
 
-// Every header key tb or Maestro reads gets no warning: a valid flow's header stays quiet.
 func TestKnownHeaderKeys(t *testing.T) {
 	f := parse(t, `appId: com.app
 url: https://example.com
@@ -285,8 +267,6 @@ onFlowComplete: [back]
 	}
 }
 
-// Issue #64: a key written twice in a map is accepted (the last one wins), in a command or
-// in the header, so --lint warns at the second one.
 func TestDuplicateKey(t *testing.T) {
 	f := parse(t, `appId: com.app
 tags: [a]

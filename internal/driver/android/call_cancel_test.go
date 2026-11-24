@@ -1,8 +1,5 @@
 package android
 
-// A cancelled run sends no more agent requests and stops waiting for the one in flight
-// (issue #202).
-
 import (
 	"context"
 	"errors"
@@ -16,9 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// issue #202: a call on an already cancelled context sends nothing. callOn used to bound the
-// reply wait by ctx's deadline only, so a cancelled run (Ctrl-C, a failed role, an MCP cancel)
-// still tapped.
 func TestCallCancelledSendsNothing(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tap", func(map[string]any) map[string]any { return nil })
@@ -34,10 +28,6 @@ func TestCallCancelledSendsNothing(t *testing.T) {
 	}
 }
 
-// slowOp makes the fake agent hold its answer to the first op request until release is
-// closed; started is closed once that request has arrived. The agent serves a connection's
-// requests in order, as the real one does for a long `sh`, so nothing else is answered
-// meanwhile.
 func slowOp(t *testing.T, a *fakeAgent, op string, reply map[string]any) (started, release chan struct{}) {
 	started, release = make(chan struct{}), make(chan struct{})
 	first := true
@@ -64,9 +54,6 @@ type callRes struct {
 	err error
 }
 
-// cancelInFlight sends a slow sh, cancels its context once the agent has it, and returns how
-// the call ended and how long after the cancel. It gives up after 3 s and lets the agent
-// answer, so a call that ignores the cancel fails the test instead of hanging it.
 func cancelInFlight(t *testing.T, d *Driver, started, release chan struct{}) (callRes, time.Duration) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,7 +81,6 @@ func cancelInFlight(t *testing.T, d *Driver, started, release chan struct{}) (ca
 	}
 }
 
-// recvRes receives a call's result, failing the test if it does not come within 10 s.
 func recvRes(t *testing.T, ch <-chan callRes) callRes {
 	t.Helper()
 	select {
@@ -117,8 +103,6 @@ func outOf(m *wire.Msg) string {
 	return r.Out
 }
 
-// issue #202: a call waiting on a slow agent returns promptly when its context is cancelled,
-// with the cancellation. It used to wait out the reply timeout (65 s for sh).
 func TestCallCancelledWhileWaiting(t *testing.T) {
 	a := newFakeAgent(t)
 	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": "late"})
@@ -132,8 +116,6 @@ func TestCallCancelledWhileWaiting(t *testing.T) {
 	}
 }
 
-// issue #202: after a call is cancelled, the late reply to it is dropped and the next call on
-// the same connection gets its own reply, not that one. The connection is kept.
 func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {
 	a := newFakeAgent(t)
 	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": "late"})
@@ -145,8 +127,6 @@ func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {
 	if r, _ := cancelInFlight(t, d, started, release); !errors.Is(r.err, context.Canceled) {
 		t.Fatalf("issue #202: cancelled call = %+v, want context.Canceled", r)
 	}
-	// The next call goes out while the agent still owes the cancelled one its answer: the
-	// agent answers the sh first, then this.
 	next := make(chan callRes, 1)
 	go func() {
 		m, err := d.call(ctxT(t), "info", nil, 5*time.Second)
@@ -163,9 +143,6 @@ func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {
 	}
 }
 
-// issue #202: StopRecording on a cancelled run still stops screenrecord and removes its files
-// on the device: a call on a cancelled context sends nothing now, so the cleanup runs on a
-// context of its own. The video is not kept (the run was cancelled).
 func TestStopRecordingCancelledStillStops(t *testing.T) {
 	a := recordingAgent(t, true, "/sdcard/tb-recording-1.mp4\n")
 	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Content area is 1080x2400 at offset x=0 y=0"}})
@@ -189,8 +166,6 @@ func TestStopRecordingCancelledStillStops(t *testing.T) {
 	}
 }
 
-// issue #202 (review): a cancelled run's ask whether screenrecord can record without its cap
-// gets no answer, and is not remembered as "no": the next run asks again.
 func TestUnlimitedRecordingNotCachedOnCancel(t *testing.T) {
 	a := recordingAgent(t, true, "")
 	d := newDriver(t, a)
@@ -204,8 +179,6 @@ func TestUnlimitedRecordingNotCachedOnCancel(t *testing.T) {
 	}
 }
 
-// issue #202 (second review): the same when the run is cancelled while the agent answers the
-// ask: the answer is given up on, the ask says no, and the next one asks again.
 func TestUnlimitedRecordingNotCachedOnCancelMidCall(t *testing.T) {
 	a := recordingAgent(t, true, "")
 	answer := a.handlers["sh"]
@@ -245,17 +218,13 @@ func TestUnlimitedRecordingNotCachedOnCancelMidCall(t *testing.T) {
 	}
 }
 
-// issue #202 (second review): Release after a run was cancelled during a long agent request
-// ends within releaseWait. Its location-off and exit requests waited behind the request the
-// run gave up on (the agent runs one at a time): a cancelled 30 s sh made Release take 32 s.
-// The agent is still stopped (with adb).
 func TestReleaseAfterAbandonedRequest(t *testing.T) {
 	a := newFakeAgent(t)
 	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
 	a.on("location", func(map[string]any) map[string]any { return nil })
 	s := stubADB(t, nil)
 	d := stubbedDriver(t, s, a)
-	d.locAt.Store(&locPoint{1, 2}) // a location is on: Release turns it off
+	d.locAt.Store(&locPoint{1, 2})
 	cancelInFlight(t, d, started, release)
 	start := time.Now()
 	d.Release(ctxT(t))
@@ -273,8 +242,6 @@ func TestReleaseAfterAbandonedRequest(t *testing.T) {
 	}
 }
 
-// issue #202 (second review): Keep after a cancelled request asks the agent to stay without
-// waiting for the request's bound: it times out on its own 2 s.
 func TestKeepAfterAbandonedRequest(t *testing.T) {
 	a := newFakeAgent(t)
 	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
@@ -289,8 +256,6 @@ func TestKeepAfterAbandonedRequest(t *testing.T) {
 	eventually(t, "keep to reach the agent", func() bool { return a.arrived("keep") == 1 })
 }
 
-// issue #202: Release on a cancelled context still asks the agent to exit and stops it with
-// adb: a run stopped with Ctrl-C frees its devices.
 func TestReleaseCancelledStillStops(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)

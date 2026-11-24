@@ -4,7 +4,6 @@ import (
 	"testing"
 )
 
-// Describe renders a selector for error messages, fields in a fixed order.
 func TestDescribe(t *testing.T) {
 	cases := []struct {
 		name string
@@ -52,8 +51,6 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
-// Walk visits the selector and every nested one: itself, the relative and tree relations,
-// then the descendants, each depth-first; a nil selector visits nothing.
 func TestSelectorWalk(t *testing.T) {
 	sel := &Selector{
 		Text:  "root",
@@ -79,7 +76,6 @@ func TestSelectorWalk(t *testing.T) {
 	}
 }
 
-// Walk lets the engine fill CSS results into every nested selector before matching.
 func TestSelectorWalkCanMutate(t *testing.T) {
 	sel := &Selector{CSS: "a", Below: &Selector{CSS: "b"}, ContainsDescendants: []*Selector{{CSS: "c"}}}
 	sel.Walk(func(s *Selector) {

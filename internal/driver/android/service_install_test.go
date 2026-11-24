@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// AND-005 deployment: silently retaining a differently signed helper leaves
-// the old no-op service active while the shell runs new code. Exercise the
-// actual install shell with a fake package manager, rather than matching text.
 func TestServiceInstallRecoversOnlyOwnHelperSigningMismatch(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("executes the Android POSIX setup shell locally")

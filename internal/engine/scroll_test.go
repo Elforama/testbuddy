@@ -16,7 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// scroll is a swipe up from the middle: 400 ms on Android, 333 ms on iOS.
 func TestScroll(t *testing.T) {
 	for plat, d := range map[string]time.Duration{"android": 400 * time.Millisecond, "ios": 333 * time.Millisecond} {
 		f := &fakeDriver{screen: static(), plat: plat, onSwipe: func(x1, y1, x2, y2 int) {}}
@@ -27,9 +26,6 @@ func TestScroll(t *testing.T) {
 	}
 }
 
-// scroller makes the screen a list of n rows (50 px tall, or 100 px wide columns at y 300 when
-// sideways), scrolled by drags between 0 and its end, starting at offset start. It returns the
-// offset and the row count (which the test may grow).
 func (f *fakeDriver) scroller(n int, sideways bool, start int64) (off, rows *atomic.Int64) {
 	off, rows = &atomic.Int64{}, &atomic.Int64{}
 	off.Store(start)
@@ -81,7 +77,6 @@ func (f *fakeDriver) scroller(n int, sideways bool, start int64) (off, rows *ato
 	return off, rows
 }
 
-// An element already on screen needs no scrolling.
 func TestScrollUntilVisibleAlreadyThere(t *testing.T) {
 	f := &fakeDriver{}
 	f.scroller(30, false, 0)
@@ -91,7 +86,6 @@ func TestScrollUntilVisibleAlreadyThere(t *testing.T) {
 	}
 }
 
-// scrollUntilVisible goes in every direction, dragging opposite to the content's travel.
 func TestScrollUntilVisibleDirections(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -100,7 +94,6 @@ func TestScrollUntilVisibleDirections(t *testing.T) {
 		start       int64
 		drag        [4]int
 	}{
-		// Up and down across most of the list (issue #372), sideways as before.
 		{"DOWN", "Item 30", false, 0, [4]int{200, 720, 200, 80}},
 		{"UP", "Item 2", false, 2300, [4]int{200, 80, 200, 720}},
 		{"RIGHT", "Col 20", true, 0, [4]int{340, 400, 60, 400}},
@@ -126,8 +119,6 @@ func TestScrollUntilVisibleDirections(t *testing.T) {
 	}
 }
 
-// visibilityPercentage below 100 takes any part showing (the format divides it by 100 as an
-// integer); 100, the default, waits for the whole element.
 func TestScrollUntilVisiblePercentage(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -135,7 +126,7 @@ func TestScrollUntilVisiblePercentage(t *testing.T) {
 		swipes bool
 	}{{"", true}, {", visibilityPercentage: 100", true}, {", visibilityPercentage: 50", false}, {", visibilityPercentage: 0", false}} {
 		f := &fakeDriver{}
-		f.scroller(30, false, 30) // Item 14 at 770-820: 60% shows
+		f.scroller(30, false, 30)
 		mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 14"+tc.opt+"}"))
 		if got := len(f.swipeAt) > 0; got != tc.swipes {
 			t.Errorf("%q: swiped %v, want %v", tc.opt, got, tc.swipes)
@@ -143,7 +134,6 @@ func TestScrollUntilVisiblePercentage(t *testing.T) {
 	}
 }
 
-// centerElement drags just far enough to bring the element near the middle.
 func TestScrollUntilVisibleCenter(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -153,12 +143,9 @@ func TestScrollUntilVisibleCenter(t *testing.T) {
 	if cy < 400-160 || cy > 400+160 {
 		t.Errorf("Item 16's center at %d, want near 400", cy)
 	}
-	// One drag across the list (issue #372: from 90% of it to 10%) brings it to 260-310,
-	// near enough the middle.
 	if want := [][4]int{{200, 720, 200, 80}}; !reflect.DeepEqual(f.swipeAt, want) {
 		t.Errorf("drags %v, want %v", f.swipeAt, want)
 	}
-	// Sideways too.
 	f2 := &fakeDriver{}
 	off2, _ := f2.scroller(30, true, 0)
 	mustPass(t, runWith(t, f2, quick, "- scrollUntilVisible: {element: Col 5, direction: RIGHT, centerElement: true}"))
@@ -183,10 +170,6 @@ func TestScrollCenterStopsAtKnownAndroidEnd(t *testing.T) {
 	}
 }
 
-// Issue #368: a fully visible element near the end of its list cannot be centered. On iOS and
-// web (no MoreBefore/MoreAfter flags), and on Android without them, one centering drag that
-// leaves it where it was ends the centering, rather than up to five, each with a 500 ms wait.
-// An autoplaying carousel in the list changes how it looks, not where the element is.
 func TestScrollCenterStopsWhenDragLeavesElement(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -195,7 +178,7 @@ func TestScrollCenterStopsWhenDragLeavesElement(t *testing.T) {
 	}{{"ios", false}, {"web", false}, {"android", false}, {"ios", true}} {
 		t.Run(fmt.Sprintf("%s carousel=%v", tc.plat, tc.carousel), func(t *testing.T) {
 			f := &fakeDriver{plat: tc.plat}
-			off, _ := f.scroller(30, false, 800) // at its end: Item 27 at 650-700, whole, off-center
+			off, _ := f.scroller(30, false, 800)
 			if tc.carousel {
 				original := f.screen
 				var slide atomic.Int64
@@ -219,11 +202,6 @@ func TestScrollCenterStopsWhenDragLeavesElement(t *testing.T) {
 	}
 }
 
-// Issue #368: a centering drag the app shows late is not taken for one that cannot move the
-// list: the element ends up centered, in one drag. "async": the drag returns at once and the
-// list moves 300 ms later. "blocking": the drag takes 600 ms to send, about a default drag's
-// length, and the list moves 100 ms after it returns (timed from the drag's start, the 500 ms
-// wait would be over before the first read).
 func TestScrollCenterWaitsForLateDrag(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -233,7 +211,7 @@ func TestScrollCenterWaitsForLateDrag(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeDriver{plat: "ios"}
-			off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
+			off, _ := f.scroller(60, false, 300)
 			apply := f.onSwipe
 			f.onSwipe = func(x1, y1, x2, y2 int) {
 				time.Sleep(tc.block)
@@ -243,7 +221,6 @@ func TestScrollCenterWaitsForLateDrag(t *testing.T) {
 				}()
 			}
 			mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 16, centerElement: true, timeout: 10000}"))
-			// Right after the step: where it ended up when the step said it was done.
 			cy := 100 + 16*50 - int(off.Load()) + 25
 			f.mu.Lock()
 			drags := append([][4]int(nil), f.swipeAt...)
@@ -258,7 +235,6 @@ func TestScrollCenterWaitsForLateDrag(t *testing.T) {
 	}
 }
 
-// An element that never shows fails when the timeout runs out.
 func TestScrollUntilVisibleTimeout(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 0)), onSwipe: func(x1, y1, x2, y2 int) {}}
@@ -274,7 +250,6 @@ func TestScrollUntilVisibleTimeout(t *testing.T) {
 	}
 }
 
-// Bad timeout, speed or selector values fail scrollUntilVisible.
 func TestScrollUntilVisibleBadValues(t *testing.T) {
 	for _, tc := range []struct{ opts, want string }{
 		{"timeout: soon", `invalid timeout "soon"`},
@@ -289,7 +264,6 @@ func TestScrollUntilVisibleBadValues(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- scrollUntilVisible: {element: '${(}'}"), "JavaScript error")
 }
 
-// speed sets each drag's duration: 0 is slowest (1 s), 100 fastest.
 func TestScrollUntilVisibleSpeed(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -305,8 +279,6 @@ func TestScrollUntilVisibleSpeed(t *testing.T) {
 	}
 }
 
-// On iOS up and down drags start 70% into the list, from the side the content heads to (a
-// list too short for a long drag, issue #372); across most of a list that is not.
 func TestScrollUntilVisibleIOSDragStart(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -326,7 +298,6 @@ func TestScrollUntilVisibleIOSDragStart(t *testing.T) {
 	}
 }
 
-// dragStart: Android drags start where asked; iOS moves into the list, or reports no list.
 func TestDragStart(t *testing.T) {
 	box := at("list", 0, 0, 100, 400, 700)
 	box.Scrollable = true
@@ -347,7 +318,6 @@ func TestDragStart(t *testing.T) {
 			t.Errorf("%s %s: start %d placed %v, want %d %v", tc.plat, tc.dir, got, placed, tc.want, tc.placed)
 		}
 	}
-	// A short list: the start is never above the screen's middle for DOWN, below it for UP.
 	small := at("list", 0, 0, 0, 400, 300)
 	small.Scrollable = true
 	if got, _ := dragStart(linked("ios", small), "ios", 200, 150, "DOWN"); got != 210 {
@@ -355,8 +325,6 @@ func TestDragStart(t *testing.T) {
 	}
 }
 
-// A list that loads more rows after a drag hit its end: the next drag waits for the change
-// (a loading footer going away) rather than dragging over and over.
 func TestScrollUntilVisibleListLoadsMore(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -371,7 +339,7 @@ func TestScrollUntilVisibleListLoadsMore(t *testing.T) {
 		return nodes
 	}
 	go func() {
-		time.Sleep(800 * time.Millisecond) // past the 500 ms a drag gets to show
+		time.Sleep(800 * time.Millisecond)
 		rows.Store(30)
 		f.change(true)
 	}()
@@ -385,10 +353,6 @@ func TestScrollUntilVisibleListLoadsMore(t *testing.T) {
 	}
 }
 
-// A drag that carries the list the last few pixels to its end brings nothing new, and the next
-// one moves nothing while the list loads more there (the bench's slow list: rows that load
-// 2.5 s after it reaches its end). The drag that moved nothing still gets the wait for a change:
-// the list is loading, not stuck, and flinging it is not called for.
 func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -396,11 +360,11 @@ func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
 	var loading atomic.Bool
 	rows.Store(20)
 	loading.Store(true)
-	off.Store(330) // the list's end is at 350 while it shows its footer
+	off.Store(330)
 	end := func() int64 {
 		n := rows.Load()
 		if loading.Load() {
-			n++ // the footer's row
+			n++
 		}
 		return max(0, 100+n*50-800)
 	}
@@ -428,8 +392,6 @@ func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
 	var swipes atomic.Int64
 	f.onSwipe = func(x1, y1, x2, y2 int) {
 		if swipes.Add(1) > 20 {
-			// Far past the drags this needs (the fake's flings come back at once): load now,
-			// so a failing run ends quickly.
 			rows.Store(40)
 			loading.Store(false)
 		}
@@ -458,7 +420,6 @@ func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
 	}
 }
 
-// helpers: centered, clamp, abs, scrollContainer, newTexts, listSignature.
 func TestScrollHelpers(t *testing.T) {
 	screen := ui.Rect{R: 400, B: 800}
 	if !centered(ui.Rect{T: 300, R: 400, B: 400}, screen, "DOWN") || centered(ui.Rect{T: 700, R: 400, B: 800}, screen, "UP") {
@@ -499,7 +460,6 @@ func TestScrollHelpers(t *testing.T) {
 	if n := newTexts(plain, 1, 1, seen); n != 2 {
 		t.Errorf("no list: %d new, want the whole screen's 2", n)
 	}
-	// The signature changes when the list's rows move along the drag's axis, not across it.
 	sig := listSignature(s, 200, 350, true)
 	row.Bounds.L += 10
 	if listSignature(s, 200, 350, true) != sig {
@@ -514,14 +474,12 @@ func TestScrollHelpers(t *testing.T) {
 	}
 }
 
-// A negative timeout means the default.
 func TestScrollUntilVisibleNegativeTimeout(t *testing.T) {
 	f := &fakeDriver{}
 	f.scroller(30, false, 0)
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 20, timeout: -1}"))
 }
 
-// waitAny returns on any newer change, the deadline, the context, or a lost connection.
 func TestWaitAny(t *testing.T) {
 	f := &fakeDriver{}
 	r := New(f, quick)
@@ -550,7 +508,7 @@ func TestWaitAny(t *testing.T) {
 		{"closed", func(ch chan driver.Event) { close(ch) }},
 	} {
 		ch := make(chan driver.Event, 2)
-		ch <- driver.Event{Kind: "changed", Seq: 1} // older: ignored
+		ch <- driver.Event{Kind: "changed", Seq: 1}
 		tc.send(ch)
 		if d := took(func() { r.waitAny(ctx, ch, f.Seq(), soon()) }); d > 100*time.Millisecond {
 			t.Errorf("%s: %s", tc.name, d)
@@ -558,7 +516,6 @@ func TestWaitAny(t *testing.T) {
 	}
 }
 
-// After two drags that bring nothing new, a fling the device fails fails the command.
 func TestScrollUntilVisibleFlingError(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Page", "", 300))}
@@ -573,10 +530,6 @@ func TestScrollUntilVisibleFlingError(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Next, timeout: 10000}"), "fling failed")
 }
 
-// When scrollUntilVisible gives up, its failure says how many swipes it sent and how many of
-// them moved the screen: "No visible element found" alone does not tell a list scrolled to its
-// end from swipes whose touches never reached the app (issue #109: a simulator still starting
-// up dropped the first drags, and the warm-up's failure did not show it).
 func TestScrollUntilVisibleFailureCountsSwipes(t *testing.T) {
 	t.Parallel()
 	counts := regexp.MustCompile(`after (\d+) swipes?, (none|\d+) of which moved the screen`)
@@ -603,7 +556,6 @@ func TestScrollUntilVisibleFailureCountsSwipes(t *testing.T) {
 	})
 	t.Run("first drags dropped", func(t *testing.T) {
 		t.Parallel()
-		// A long list the first two drags do not move (their touches dropped), then every one does.
 		f := &fakeDriver{plat: "ios"}
 		f.scroller(200, false, 0)
 		move := f.onSwipe
@@ -613,7 +565,6 @@ func TestScrollUntilVisibleFailureCountsSwipes(t *testing.T) {
 				move(x1, y1, x2, y2)
 			}
 		}
-		// Long enough for the 2 s that a drag that moved nothing is given to show a change.
 		sent, moved := parse(t, runWith(t, f, quick, "- scrollUntilVisible: {element: {id: nope}, timeout: 5000}"))
 		if sent != len(f.swipeAt) || moved == 0 || moved > sent-2 {
 			t.Errorf("reported %d swipes, %d moved; sent %d, the first 2 dropped", sent, moved, len(f.swipeAt))

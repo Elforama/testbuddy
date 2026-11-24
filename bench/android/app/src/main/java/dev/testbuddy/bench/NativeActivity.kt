@@ -3,7 +3,6 @@ package dev.testbuddy.bench
 import android.content.Intent
 import android.os.Bundle
 
-/** Scenario 11, "Native toolkits": the same mini screen in Views, Compose and a WebView. */
 class NativeActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

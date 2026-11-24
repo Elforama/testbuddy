@@ -28,6 +28,6 @@ and passes with it.
      (`bench/flows/scenarios`, with the screen it needs in the bench apps and
      `bench/SCENARIOS.md`), or a script in `bench/checks` for what a flow cannot see
      (`tb look`'s listing, for one);
-   - name the issue in the test's comment ("issue #12").
+   - name the issue in the test's name (`TestIssue12...`) or, where a name cannot carry it, in the commit message: code files carry no comments.
 4. **Show both runs** in the commit message or the pull request, and in the issue when you
    close it: the failing run on the code without the fix, the passing run with it.

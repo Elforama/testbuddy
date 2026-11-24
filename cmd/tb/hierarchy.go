@@ -6,8 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// hnode is the full hierarchy as JSON (tb hierarchy, debug output), in the usual attribute
-// vocabulary.
 type hnode struct {
 	Attributes map[string]string `json:"attributes"`
 	Children   []*hnode          `json:"children,omitempty"`

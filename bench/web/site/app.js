@@ -1,19 +1,6 @@
-// Buddy Bench (web): the router, the scenario list and scenario 1, "Journey".
-// Spec: bench/SPEC.md and bench/SCENARIOS.md. Plain JS, no libraries, no network.
-//
-// Every screen is a <section class="screen"> that stays in the DOM; one is shown at a time.
-// Ids repeat across screens (every scenario has a `back`, a `page`, ...), so code always looks
-// ids up inside its own screen (Bench.q(root, id)), never with document.getElementById.
-//
-// Routing: hash routes (#/controls, #/navigation/level/3, ...). Every in-app entry is a real
-// browser history entry carrying its depth, so the in-app Back buttons and the browser's back
-// button do the same thing. Opening the page on a deep route builds the stack below it
-// (#/navigation/level/3 → list, Navigation, Level 1, Level 2, Level 3).
 (() => {
   const B = (window.Bench = {});
 
-  // ---- DOM helpers ----
-  // h('button', {id: 'x', onclick: f, hidden: true}, 'Text', child, ...)
   const h = (B.h = (tag, props, ...kids) => {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(props || {})) {
@@ -30,11 +17,9 @@
   const q = (B.q = (root, id) => root.querySelector('#' + id));
   B.spinner = (id) => h('div', { id, class: 'spinner', role: 'progressbar', 'aria-busy': 'true' });
 
-  // ---- screens and routes ----
   const screens = {};
   const routes = [];
   const parentRules = [];
-  // B.screen(name, sectionElement, {enter(params, info), leave(next), guard(), pushed, slide})
   B.screen = (name, el, opts = {}) => {
     el.classList.add('screen');
     if (opts.pushed) el.classList.add('pushed');
@@ -44,13 +29,11 @@
     screens[name] = Object.assign({ name, el }, opts);
     return el;
   };
-  // B.route('/journey/detail/:n', 'detail')
   B.route = (pattern, name) => {
     const keys = [];
     const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '$');
     routes.push({ re, keys, name });
   };
-  // A rule for the screen below a route, where it isn't simply the route minus its last part.
   B.parentRule = (f) => parentRules.push(f);
   const parentOf = (path) => {
     if (path === '/') return null;
@@ -70,29 +53,24 @@
     return null;
   };
 
-  // A scenario screen: a bar (Back + title) over a page that scrolls (id `page`).
   const bar = (title, titleId) =>
     h('header', { class: 'bar' }, h('button', { id: 'back', class: 'back' }, 'Back'), h('h1', { id: titleId }, title));
   B.bar = bar;
-  // B.scenario(key, name, build): build(page, section) returns the screen's hooks.
   B.scenario = (key, name, build, opts = {}) => B.sub(key, '/' + key, name, 'scenario_title', build, opts);
-  // B.sub(screenName, routePattern, title, titleId, build, opts): a pushed screen under a scenario.
-  // opts.top: elements fixed between the bar and the page (a `picked` line, ...).
   B.sub = (name, pattern, title, titleId, build, opts = {}) => {
     const page = h('div', { id: 'page', class: 'page' });
     const sec = h('section', { id: 'screen-' + name, class: 'scn' }, bar(title, titleId), opts.top || null, page);
     document.body.append(sec);
     const hooks = (build && build(page, sec)) || {};
-    if (hooks.top) sec.insertBefore(hooks.top, page); // a line fixed above the page, made by build
+    if (hooks.top) sec.insertBefore(hooks.top, page);
     B.screen(name, sec, Object.assign({ pushed: true }, opts, hooks));
     B.route(pattern, name);
     return sec;
   };
 
-  // ---- navigation ----
-  let cur = null; // {path, name, params}
-  let depth = 0; // this entry's index in the in-app history
-  const stack = []; // the path at each depth
+  let cur = null;
+  let depth = 0;
+  const stack = [];
   B.current = () => (cur ? cur.path : '/');
   const urlOf = (path) => (path === '/' ? location.pathname + location.search : '#' + path);
   const pathNow = () => decodeURIComponent(location.hash.replace(/^#/, '')) || '/';
@@ -112,7 +90,6 @@
     ns.el.hidden = false;
     ns.el.classList.remove('enter', 'leaving');
     if (how === 'push' && ns.pushed) { void ns.el.offsetWidth; ns.el.classList.add('enter'); }
-    // A screen with its own (slow) transition also slides out when popped.
     if (how === 'pop' && ps && ps !== ns && ps.slide) {
       ps.el.hidden = false;
       ps.el.classList.add('leaving');
@@ -127,7 +104,6 @@
     if (ns.enter) ns.enter(r.params, { how, from: prev ? prev.path : null });
   };
 
-  // Open a route: a new history entry (or, with replace, in place of this one).
   B.go = (path, o = {}) => {
     if (o.replace) {
       history.replaceState({ depth }, '', urlOf(path));
@@ -138,8 +114,6 @@
       show(path, 'push');
     }
   };
-  // Back, as the in-app Back buttons do it: the browser's back when there is an in-app entry
-  // below, else replace this screen with its parent.
   let bypass = false;
   const guarded = () => cur && screens[cur.name].guard && screens[cur.name].guard();
   B.back = (o = {}) => {
@@ -148,7 +122,6 @@
     const p = parentOf(cur.path);
     if (p) B.go(p, { replace: true, how: 'pop' });
   };
-  // Pop back to a screen lower in the stack (or replace this one with it).
   B.popTo = (path) => {
     for (let i = depth - 1; i >= 0; i--) {
       if (stack[i] === path) { bypass = true; history.go(i - depth); return; }
@@ -158,14 +131,11 @@
   window.addEventListener('popstate', (e) => {
     const st = e.state;
     if (!st || typeof st.depth !== 'number') {
-      // A new hash typed or linked (or a launch of a deep link on the open page, which does
-      // not reload it): open it as a deep link, with its stack below it.
       startAt(pathNow());
       return;
     }
     const goingBack = st.depth < depth;
     if (goingBack && !bypass && guarded()) {
-      // The screen refused to leave (it asks first): put it back on top.
       depth = st.depth + 1;
       history.pushState({ depth }, '', '#' + cur.path);
       stack[depth] = cur.path;
@@ -175,14 +145,11 @@
     depth = st.depth;
     show(pathNow(), goingBack ? 'pop' : 'push');
   });
-  // Every `.back` button in the main document is the in-app Back.
   document.addEventListener('click', (e) => {
     const b = e.target.closest && e.target.closest('.back');
     if (b && !b.disabled) B.back();
   });
 
-  // Open a route as a deep link: this history entry becomes the list, with the route's stack
-  // pushed above it (#/navigation/level/3: list, Navigation, Level 1, Level 2, Level 3).
   const startAt = (path) => {
     const target = resolve(path) ? path : '/';
     const chain = [];
@@ -199,7 +166,6 @@
   };
   B.start = () => startAt(pathNow());
 
-  // ---- the scenario list ----
   const SCENARIOS = [
     ['journey', 'Journey'], ['slow', 'Slow and janky'], ['permissions', 'Permissions'],
     ['overlays', 'Overlays'], ['controls', 'Controls'], ['navigation', 'Navigation and back stack'],
@@ -217,13 +183,11 @@
   B.screen('list', listSec);
   B.route('/', 'list');
 
-  // ---- 1. Journey (SPEC.md screens 1-4) ----
-  const $ = (id) => document.getElementById(id); // the journey's ids are unique in the document
+  const $ = (id) => document.getElementById(id);
   const login = $('screen-login'), home = $('screen-home'), detail = $('screen-detail'), live = $('screen-live');
   const state = { user: '', cart: 0, items: 40, item: 0, taps: 0 };
   const inJourney = (p) => p === '/journey' || p.startsWith('/journey/');
 
-  // Login
   $('login').addEventListener('click', () => {
     const u = $('username').value, p = $('password').value;
     if (!u || !p) { $('error').hidden = false; return; }
@@ -231,7 +195,7 @@
     $('loading').hidden = false;
     setTimeout(() => {
       $('loading').hidden = true;
-      if (B.current() !== '/journey') return; // left during sign-in
+      if (B.current() !== '/journey') return;
       state.user = u;
       $('welcome').textContent = 'Welcome, ' + u;
       B.go('/journey/home', { replace: true });
@@ -241,12 +205,10 @@
     enter() { if (state.user) B.go('/journey/home', { replace: true }); },
   });
   B.route('/journey', 'login');
-  B.parentRule((p) => (p === '/journey/home' ? '/' : null)); // Login was replaced by Home
+  B.parentRule((p) => (p === '/journey/home' ? '/' : null));
   B.parentRule((p) => (/^\/journey\/(detail\/\d+|live)$/.test(p) ? '/journey/home' : null));
 
-  // Home
   let tick = 0;
-  // It keeps counting behind other screens, but only redraws while Home shows (as on iOS).
   setInterval(() => { tick++; if (cur && cur.name === 'home') $('ticker').textContent = 'Live: ' + tick; }, 100);
   const list = $('items');
   const renderCart = () => {
@@ -301,7 +263,6 @@
   });
   B.route('/journey/home', 'home');
 
-  // Detail
   let reviewsTimer;
   B.screen('detail', detail, {
     pushed: true,
@@ -319,7 +280,6 @@
   B.route('/journey/detail/:n', 'detail');
   $('add_to_cart').addEventListener('click', () => { state.cart++; renderCart(); });
 
-  // Live
   let raf = 0, started = 0;
   B.screen('live', live, {
     pushed: true,

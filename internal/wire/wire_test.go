@@ -15,9 +15,8 @@ import (
 	"time"
 )
 
-const wait = 5 * time.Second // upper bound for anything that should happen promptly
+const wait = 5 * time.Second
 
-// peer is the fake agent at the other end of a net.Pipe.
 type peer struct {
 	t *testing.T
 	c net.Conn
@@ -34,7 +33,6 @@ func pair(t *testing.T) (*Conn, *peer) {
 	return conn, p
 }
 
-// read decodes the next request line the host sent.
 func (p *peer) read() map[string]any {
 	p.t.Helper()
 	p.c.SetReadDeadline(time.Now().Add(wait))
@@ -49,7 +47,6 @@ func (p *peer) read() map[string]any {
 	return m
 }
 
-// send writes raw bytes to the host.
 func (p *peer) send(s string) {
 	p.w.Lock()
 	defer p.w.Unlock()
@@ -111,7 +108,6 @@ func waitDone(t *testing.T, c *Conn) {
 	}
 }
 
-// A request is one JSON line: the params plus a fresh id and the op, which params cannot override.
 func TestCallRequestShape(t *testing.T) {
 	c, p := pair(t)
 	res := goCall(c, "tap", map[string]any{"x": 100, "y": 200.5, "settle": false, "id": 99, "op": "hijack"}, 0)
@@ -142,7 +138,6 @@ func TestCallRequestShape(t *testing.T) {
 	}
 }
 
-// A request with no params still carries id and op only.
 func TestCallNilParams(t *testing.T) {
 	c, p := pair(t)
 	res := goCall(c, "ping", nil, 0)
@@ -156,7 +151,6 @@ func TestCallNilParams(t *testing.T) {
 	}
 }
 
-// Request ids increase by one per call on a connection.
 func TestCallIDsIncrease(t *testing.T) {
 	c, p := pair(t)
 	for want := 1; want <= 4; want++ {
@@ -172,8 +166,6 @@ func TestCallIDsIncrease(t *testing.T) {
 	}
 }
 
-// ok:false answers are *AgentError with the op and the agent's reason, and whether the agent
-// said it was transient (issue #126); the message comes back too.
 func TestCallAgentError(t *testing.T) {
 	cases := []struct {
 		name, fields, wantMsg string
@@ -207,8 +199,6 @@ func TestCallAgentError(t *testing.T) {
 	}
 }
 
-// A call that gets no answer in time fails with a timeout; a late answer is dropped and the
-// connection keeps working.
 func TestCallTimeout(t *testing.T) {
 	c, p := pair(t)
 	res := goCall(c, "slow", nil, 30*time.Millisecond)
@@ -223,7 +213,7 @@ func TestCallTimeout(t *testing.T) {
 	if left != 0 {
 		t.Errorf("%d pending entries left after a timeout", left)
 	}
-	p.reply(req["id"], `"ok":true`) // late
+	p.reply(req["id"], `"ok":true`)
 	res = goCall(c, "fast", nil, time.Second)
 	req2 := p.read()
 	if req2["id"] != float64(2) {
@@ -236,9 +226,6 @@ func TestCallTimeout(t *testing.T) {
 	}
 }
 
-// issue #202: CallContext on a context already done sends nothing; a wait for the answer ends
-// when the context does, with its error. The agent's late answer to that call is dropped, and
-// the next call, sent before that late answer arrives, still gets its own.
 func TestCallContextCancel(t *testing.T) {
 	c, p := pair(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +241,7 @@ func TestCallContextCancel(t *testing.T) {
 		res <- callResult{m, err}
 	}()
 	req := p.read()
-	if req["op"] != "sh" { // the cancelled tap never went out
+	if req["op"] != "sh" {
 		t.Fatalf("issue #202: first request the agent got = %v, want the sh", req)
 	}
 	cancel()
@@ -269,7 +256,7 @@ func TestCallContextCancel(t *testing.T) {
 	}
 	next := goCall(c, "info", nil, time.Second)
 	req2 := p.read()
-	p.reply(req["id"], `"ok":true,"v":"late"`) // the cancelled call's answer comes first
+	p.reply(req["id"], `"ok":true,"v":"late"`)
 	p.reply(req2["id"], `"ok":true,"v":"fresh"`)
 	r := await(t, next)
 	if r.err != nil || !strings.Contains(string(r.m.Raw), "fresh") {
@@ -280,8 +267,6 @@ func TestCallContextCancel(t *testing.T) {
 	}
 }
 
-// issue #202: a wait that ctx's deadline ends is a reply timeout, as before CallContext (the
-// drivers shortened timeout to the time left): callers tell a late answer by its type.
 func TestCallContextDeadlineIsReplyTimeout(t *testing.T) {
 	c, p := pair(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -298,9 +283,6 @@ func TestCallContextDeadlineIsReplyTimeout(t *testing.T) {
 	}
 }
 
-// issue #202 (review): the agents run requests one at a time, so a call sent after a cancelled
-// one waits on the device until that one is done. Its reply timeout starts only once the
-// cancelled request's answer has arrived: it is not charged for that time.
 func TestCallAfterCancelNotChargedForTheCancelled(t *testing.T) {
 	c, p := pair(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -316,7 +298,7 @@ func TestCallAfterCancelNotChargedForTheCancelled(t *testing.T) {
 	}
 	next := goCall(c, "info", nil, 300*time.Millisecond)
 	req2 := p.read()
-	time.Sleep(600 * time.Millisecond) // the device still runs the cancelled sh
+	time.Sleep(600 * time.Millisecond)
 	p.reply(req["id"], `"ok":true,"v":"late"`)
 	p.reply(req2["id"], `"ok":true,"v":"fresh"`)
 	r := await(t, next)
@@ -329,7 +311,6 @@ func TestCallAfterCancelNotChargedForTheCancelled(t *testing.T) {
 	if left != 0 {
 		t.Errorf("issue #202: %d given-up requests remembered after their answers came", left)
 	}
-	// Nothing is ahead any more: a call that gets no answer times out on its own timeout.
 	start := time.Now()
 	third := goCall(c, "quiet", nil, 100*time.Millisecond)
 	p.read()
@@ -342,8 +323,6 @@ func TestCallAfterCancelNotChargedForTheCancelled(t *testing.T) {
 	}
 }
 
-// issue #202 (review): a cancelled request that never gets an answer holds the calls after it
-// only until its own bound (sent + its timeout) has passed, then is forgotten.
 func TestCallAfterCancelBoundedByTheCancelledTimeout(t *testing.T) {
 	c, p := pair(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -375,9 +354,6 @@ func TestCallAfterCancelBoundedByTheCancelledTimeout(t *testing.T) {
 	}
 }
 
-// issue #202 (second review): CallUnqueued's reply timeout starts at once, even with a
-// given-up request still ahead of it; a CallContext cut by ctx's deadline while queued behind
-// one says so. Abandoned counts the given-up requests still ahead.
 func TestCallUnqueuedAndQueuedTimeout(t *testing.T) {
 	c, p := pair(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -422,8 +398,6 @@ func TestCallUnqueuedAndQueuedTimeout(t *testing.T) {
 	}
 }
 
-// issue #202 (review): an answer taken from pending when the call gives up (it arrived as ctx
-// ended) is the call's result: what the agent did is reported done, not cancelled.
 func TestGiveUpPrefersAnArrivedAnswer(t *testing.T) {
 	c, _ := pair(t)
 	ch := make(chan *Msg, 1)
@@ -445,7 +419,6 @@ func TestGiveUpPrefersAnArrivedAnswer(t *testing.T) {
 	}
 }
 
-// A zero timeout waits as long as it takes.
 func TestCallZeroTimeoutWaits(t *testing.T) {
 	c, p := pair(t)
 	res := goCall(c, "settle", nil, 0)
@@ -462,8 +435,6 @@ func TestCallZeroTimeoutWaits(t *testing.T) {
 	}
 }
 
-// Concurrent calls are matched to their own answers by id, even when answered out of order,
-// and their request lines never interleave.
 func TestConcurrentCalls(t *testing.T) {
 	c, p := pair(t)
 	const n = 50
@@ -480,7 +451,7 @@ func TestConcurrentCalls(t *testing.T) {
 	if len(ids) != n {
 		t.Fatalf("ids not unique: %d distinct of %d", len(ids), n)
 	}
-	for i := n - 1; i >= 0; i-- { // answer in reverse order
+	for i := n - 1; i >= 0; i-- {
 		p.reply(reqs[i]["id"], fmt.Sprintf(`"ok":true,"n":%v`, reqs[i]["n"]))
 	}
 	for i := 0; i < n; i++ {
@@ -496,7 +467,6 @@ func TestConcurrentCalls(t *testing.T) {
 	}
 }
 
-// Answers with an unknown id are ignored.
 func TestUnknownIDIgnored(t *testing.T) {
 	c, p := pair(t)
 	p.reply(999, `"ok":true`)
@@ -508,7 +478,6 @@ func TestUnknownIDIgnored(t *testing.T) {
 	}
 }
 
-// A message with "ev" is an event even if it also has an id: it never answers a call.
 func TestEventNeverAnswersCall(t *testing.T) {
 	c, p := pair(t)
 	sub := c.Subscribe()
@@ -529,7 +498,6 @@ func TestEventNeverAnswersCall(t *testing.T) {
 	}
 }
 
-// Binary payloads ("bin": N) are read as N raw bytes after the line, newlines included.
 func TestBinaryAttachment(t *testing.T) {
 	c, p := pair(t)
 	sub := c.Subscribe()
@@ -553,7 +521,6 @@ func TestBinaryAttachment(t *testing.T) {
 	}
 }
 
-// Events can carry binary data too.
 func TestBinaryEvent(t *testing.T) {
 	c, p := pair(t)
 	sub := c.Subscribe()
@@ -563,7 +530,6 @@ func TestBinaryEvent(t *testing.T) {
 	}
 }
 
-// A connection that drops mid-attachment reports the short read.
 func TestTruncatedBinary(t *testing.T) {
 	c, p := pair(t)
 	go func() {
@@ -576,7 +542,6 @@ func TestTruncatedBinary(t *testing.T) {
 	}
 }
 
-// A line that is not JSON drops the connection with a "bad message" error.
 func TestBadMessage(t *testing.T) {
 	c, p := pair(t)
 	go p.send("this is not json\n")
@@ -589,7 +554,6 @@ func TestBadMessage(t *testing.T) {
 	}
 }
 
-// When the agent hangs up, pending calls fail, Done closes, and Err says the connection closed.
 func TestPeerCloseFailsPendingCalls(t *testing.T) {
 	c, p := pair(t)
 	res := goCall(c, "tree", nil, 0)
@@ -612,7 +576,6 @@ func TestPeerCloseFailsPendingCalls(t *testing.T) {
 	}
 }
 
-// Closing our side ends the read loop: Done closes and Err is set.
 func TestClose(t *testing.T) {
 	c, _ := pair(t)
 	if err := c.Close(); err != nil {
@@ -624,7 +587,6 @@ func TestClose(t *testing.T) {
 	}
 }
 
-// Err before the connection drops says it is closed (there is no other error yet).
 func TestErrWhileOpen(t *testing.T) {
 	c, _ := pair(t)
 	if err := c.Err(); err == nil || err.Error() != "agent connection closed" {
@@ -637,7 +599,6 @@ func TestErrWhileOpen(t *testing.T) {
 	}
 }
 
-// Pushed events go to every subscriber in order; Seq follows "changed", SettledSeq "settled".
 func TestEventsAndSeq(t *testing.T) {
 	c, p := pair(t)
 	if c.Seq() != 0 || c.SettledSeq() != 0 {
@@ -667,7 +628,6 @@ func TestEventsAndSeq(t *testing.T) {
 	if c.lastChanged.Load() == 0 {
 		t.Error("lastChanged not recorded")
 	}
-	// A settled event does not move Seq; a later change does.
 	p.send(`{"ev":"settled","seq":5}` + "\n")
 	p.send(`{"ev":"changed","seq":8}` + "\n")
 	recv(t, s1)
@@ -676,19 +636,17 @@ func TestEventsAndSeq(t *testing.T) {
 		t.Errorf("Seq/SettledSeq = %d/%d, want 8/5", c.Seq(), c.SettledSeq())
 	}
 	var pkg struct{ Pkg string }
-	// Raw keeps op-specific fields of events.
 	m := &Msg{Raw: json.RawMessage(`{"ev":"changed","seq":3,"pkg":"com.app"}`)}
 	if m.Decode(&pkg); pkg.Pkg != "com.app" {
 		t.Errorf("pkg = %q", pkg.Pkg)
 	}
 }
 
-// Unsubscribe stops delivery to that channel only; unknown channels are ignored.
 func TestUnsubscribe(t *testing.T) {
 	c, p := pair(t)
 	keep, drop := c.Subscribe(), c.Subscribe()
 	c.Unsubscribe(drop)
-	c.Unsubscribe(make(chan *Msg)) // not subscribed: no-op
+	c.Unsubscribe(make(chan *Msg))
 	p.send(`{"ev":"changed","seq":1}` + "\n")
 	recv(t, keep)
 	select {
@@ -696,7 +654,6 @@ func TestUnsubscribe(t *testing.T) {
 		t.Errorf("unsubscribed channel got %+v", m)
 	default:
 	}
-	// Dropping the connection closes subscribed channels but leaves the unsubscribed one alone.
 	p.c.Close()
 	waitDone(t, c)
 	if _, ok := <-keep; ok {
@@ -711,7 +668,6 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
-// A subscriber that never reads drops events once its buffer is full instead of blocking calls.
 func TestSlowSubscriberDoesNotBlock(t *testing.T) {
 	c, p := pair(t)
 	slow := c.Subscribe()
@@ -726,7 +682,6 @@ func TestSlowSubscriberDoesNotBlock(t *testing.T) {
 	if r := await(t, res); r.err != nil {
 		t.Fatal(r.err)
 	}
-	// The events are sent alongside the reply, so they may still be arriving.
 	for deadline := time.Now().Add(2 * time.Second); c.Seq() < 300 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -741,7 +696,6 @@ func TestSlowSubscriberDoesNotBlock(t *testing.T) {
 	}
 }
 
-// Params that cannot be encoded fail the call before anything is sent or left pending.
 func TestCallMarshalError(t *testing.T) {
 	c, _ := pair(t)
 	_, err := c.Call("bad", map[string]any{"ch": make(chan int)}, time.Second)
@@ -755,12 +709,10 @@ func TestCallMarshalError(t *testing.T) {
 	}
 }
 
-// failWriter is a connection whose writes fail but whose reads block like a quiet agent.
 type failWriter struct{ net.Conn }
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write refused") }
 
-// A failed write fails the call and removes its pending entry.
 func TestCallWriteError(t *testing.T) {
 	a, b := net.Pipe()
 	t.Cleanup(func() { a.Close(); b.Close() })
@@ -776,10 +728,6 @@ func TestCallWriteError(t *testing.T) {
 	}
 }
 
-// A call that fails because the connection dropped returns only once Done is closed, so the
-// driver, which checks Done to decide whether to reconnect and send the request again, sees
-// the drop (issue #66). The read loop is held, after it has woken the pending calls, until
-// the call has returned: the order is fixed, not left to the scheduler.
 func TestCallFailsAfterDone(t *testing.T) {
 	a, b := net.Pipe()
 	t.Cleanup(func() { a.Close(); b.Close() })
@@ -794,7 +742,7 @@ func TestCallFailsAfterDone(t *testing.T) {
 	go c.readLoop()
 	type result struct {
 		err  error
-		done bool // Done was closed when the call returned
+		done bool
 	}
 	res := make(chan result, 1)
 	go func() {
@@ -820,8 +768,6 @@ func TestCallFailsAfterDone(t *testing.T) {
 	waitDone(t, c)
 }
 
-// A failed write means the connection is unusable: the call returns only once Done is
-// closed, so the driver reconnects and sends the request again (issue #66).
 func TestCallWriteErrorClosesConn(t *testing.T) {
 	a, b := net.Pipe()
 	t.Cleanup(func() { a.Close(); b.Close() })
@@ -834,14 +780,12 @@ func TestCallWriteErrorClosesConn(t *testing.T) {
 	}
 }
 
-// AgentError prints as "op: message".
 func TestAgentErrorString(t *testing.T) {
 	if got := (&AgentError{Op: "tap", Msg: "boom"}).Error(); got != "tap: boom" {
 		t.Errorf("Error() = %q", got)
 	}
 }
 
-// HelloVersion reads the version out of the greeting, or "" without one.
 func TestHelloVersion(t *testing.T) {
 	c, _ := pair(t)
 	if c.Hello() != nil || c.HelloVersion() != "" {
@@ -857,7 +801,6 @@ func TestHelloVersion(t *testing.T) {
 	}
 }
 
-// fakeAgent listens on localhost TCP; each accepted connection is handed to serve in turn.
 func fakeAgent(t *testing.T, serve ...func(net.Conn)) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -878,7 +821,6 @@ func fakeAgent(t *testing.T, serve ...func(net.Conn)) string {
 	return ln.Addr().String()
 }
 
-// helloThenEcho greets and then answers every request with ok and its op.
 func helloThenEcho(version string) func(net.Conn) {
 	return func(c net.Conn) {
 		defer c.Close()
@@ -896,7 +838,6 @@ func helloThenEcho(version string) func(net.Conn) {
 	}
 }
 
-// Dial waits for the agent's hello, keeps it, and leaves no subscriber behind.
 func TestDial(t *testing.T) {
 	addr := fakeAgent(t, helloThenEcho("2.0.1"))
 	c, err := Dial(addr, 2*time.Second)
@@ -924,10 +865,9 @@ func TestDial(t *testing.T) {
 	}
 }
 
-// Dial retries when the first connection does not greet (an adb forward accepts early).
 func TestDialRetriesUntilHello(t *testing.T) {
 	notYet := func(c net.Conn) {
-		fmt.Fprint(c, `{"ev":"changed","seq":1}`+"\n") // not a hello
+		fmt.Fprint(c, `{"ev":"changed","seq":1}`+"\n")
 		time.Sleep(50 * time.Millisecond)
 		c.Close()
 	}
@@ -943,9 +883,6 @@ func TestDialRetriesUntilHello(t *testing.T) {
 	}
 }
 
-// Issue #71/#87 review: an agent can push an event before its hello on the same connection
-// (Android agents before 0.1.47 set the event sink before sending the hello). Dial skips it and
-// keeps the hello, instead of dropping a connection that is about to greet.
 func TestDialSkipsAnEventBeforeTheHello(t *testing.T) {
 	var conns atomic.Int32
 	eventFirst := func(c net.Conn) {
@@ -970,7 +907,6 @@ func TestDialSkipsAnEventBeforeTheHello(t *testing.T) {
 	}
 }
 
-// Dial gives up after the timeout when the agent never greets.
 func TestDialNoHello(t *testing.T) {
 	addr := fakeAgent(t, func(c net.Conn) { c.Close() })
 	start := time.Now()
@@ -983,7 +919,6 @@ func TestDialNoHello(t *testing.T) {
 	}
 }
 
-// Dial to a port nobody listens on fails with the dial error after the timeout.
 func TestDialNoAgent(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1004,7 +939,6 @@ func TestDialNoAgent(t *testing.T) {
 	}
 }
 
-// isClosed reports whether a channel is closed without blocking.
 func TestIsClosed(t *testing.T) {
 	ch := make(chan struct{})
 	if isClosed(ch) {
@@ -1016,8 +950,6 @@ func TestIsClosed(t *testing.T) {
 	}
 }
 
-// Subscribing after the connection dropped gives a closed channel, so the subscriber sees the
-// drop instead of waiting forever (the Android driver's pump reconnects on it).
 func TestSubscribeAfterDropIsClosed(t *testing.T) {
 	c, p := pair(t)
 	p.c.Close()

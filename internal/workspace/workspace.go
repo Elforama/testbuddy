@@ -1,6 +1,3 @@
-// Package workspace finds the flows to run from the paths given to `tb test`, following
-// Maestro's workspace rules (config.yaml flows globs, include/exclude tags,
-// executionOrder).
 package workspace
 
 import (
@@ -17,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/legacy"
 )
 
-// Config is a workspace config.yaml.
 type Config struct {
 	Flows          []string
 	IncludeTags    []string
@@ -54,7 +50,6 @@ func stringList(n *yaml.Node) []string {
 	return out
 }
 
-// LoadConfig reads a workspace config file.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -88,7 +83,6 @@ func LoadConfig(path string) (*Config, error) {
 				case "flowsOrder":
 					c.FlowsOrder = stringList(v.Content[j+1])
 				case "continueOnFailure":
-					// any YAML boolean spelling (false, False, FALSE); other values keep the default
 					var b bool
 					if err := v.Content[j+1].Decode(&b); err == nil {
 						c.ContinueOnFail = b
@@ -104,22 +98,19 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
-// Plan is what to run.
 type Plan struct {
-	Flows          []*flow.Flow // in run order: ordered flows first
-	Sequential     int          // the first Sequential flows run in order, one at a time
+	Flows          []*flow.Flow
+	Sequential     int
 	ContinueOnFail bool
 	Config         *Config
 }
 
-// Options are the CLI's selection options.
 type Options struct {
 	ConfigPath  string
 	IncludeTags []string
 	ExcludeTags []string
 }
 
-// Build turns `tb test` paths into a plan.
 func Build(paths []string, o Options) (*Plan, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("give a flow file or a folder of flows")
@@ -132,7 +123,6 @@ func Build(paths []string, o Options) (*Plan, error) {
 		}
 		cfg = c
 	}
-	// A single file runs as is: no globs, no tag filters.
 	if len(paths) == 1 {
 		if st, err := os.Stat(paths[0]); err == nil && !st.IsDir() {
 			f, err := flow.ParseFile(paths[0])
@@ -251,8 +241,6 @@ func tagsPass(tags, include, exclude []string) bool {
 	return !has(exclude)
 }
 
-// glob matches the workspace globs relative to dir ("*" does not cross folders, "**" does,
-// "!pattern" excludes).
 func glob(dir string, patterns []string, cfg *Config) ([]string, error) {
 	var inc, exc []string
 	for _, p := range patterns {
@@ -271,7 +259,6 @@ func glob(dir string, patterns []string, cfg *Config) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			// Hidden folders are skipped, but for the flows folders (.tb, and Maestro's .maestro).
 			if path != dir && strings.HasPrefix(d.Name(), ".") && d.Name() != ".tb" && d.Name() != legacy.FlowsFolder() {
 				return filepath.SkipDir
 			}
@@ -300,7 +287,6 @@ func glob(dir string, patterns []string, cfg *Config) ([]string, error) {
 	return out, err
 }
 
-// globMatch: "*" matches within one path segment, "**" across segments.
 func globMatch(pattern, path string) bool {
 	return matchSegs(strings.Split(pattern, "/"), strings.Split(path, "/"))
 }
@@ -321,7 +307,6 @@ func matchSegs(pat, segs []string) bool {
 		return false
 	}
 	if ok, _ := filepath.Match(pat[0], segs[0]); !ok {
-		// "*" alone at the last level also matches files ("subdir/*")
 		return false
 	}
 	return matchSegs(pat[1:], segs[1:])
@@ -348,7 +333,6 @@ func isFlowFile(path string, cfg *Config) bool {
 		return false
 	}
 	if !bytes.Contains(data, []byte("\n---")) && !bytes.HasPrefix(data, []byte("---")) {
-		// No command section: a workspace config or some other YAML.
 		return false
 	}
 	return true

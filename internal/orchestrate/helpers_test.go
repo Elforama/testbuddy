@@ -17,12 +17,7 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// TestMain makes the package hermetic: no real adb, xcrun or Chrome can be found, and
-// nothing touches ~/.testbuddy. Every test device gets a fake driver; this is the safety
-// net if one ever does not.
 func TestMain(m *testing.M) {
-	// Device locks off: these tests make many pools and sessions for the same fake devices
-	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
 	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	dir, err := os.MkdirTemp("", "tb-orchestrate-test")
 	if err != nil {
@@ -45,13 +40,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// fakeDriver is a device whose behavior a test scripts. It records what flows did to it.
 type fakeDriver struct {
 	name, serial, plat string
-	emulator           bool // its device.Info says Emulator
+	emulator           bool
 
 	mu       sync.Mutex
-	texts    []string // what is on screen
+	texts    []string
 	typed    []string
 	launched []string
 	closed   int
@@ -61,12 +55,12 @@ type fakeDriver struct {
 	recStop  int
 	launches int
 
-	launchFails int                // fail the first N launches; -1 = every launch
-	onLaunch    func(appID string) // runs before a launch (may block)
-	onType      func(text string)  // runs before typing (may block)
-	screenErr   error              // Screen fails
-	dieOnLaunch bool               // the connection dies for good during the next launch
-	dead        error              // why the connection is gone for good (Lost); nil = alive
+	launchFails int
+	onLaunch    func(appID string)
+	onType      func(text string)
+	screenErr   error
+	dieOnLaunch bool
+	dead        error
 }
 
 func newFake(serial, name, plat string) *fakeDriver {
@@ -160,7 +154,7 @@ func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpt
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.dead != nil {
-		return f.dead // a dead connection fails at once, as the issue's 0 ms failures did
+		return f.dead
 	}
 	f.launches++
 	f.launched = append(f.launched, a)
@@ -213,7 +207,6 @@ func (f *fakeDriver) Close() error {
 	return nil
 }
 
-// Lost reports the connection gone for good (driver.LostChecker).
 func (f *fakeDriver) Lost() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -226,7 +219,6 @@ func (f *fakeDriver) Closed() int {
 	return f.closed
 }
 
-// Keep asks the agent to stay for later runs.
 func (f *fakeDriver) Keep(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -234,7 +226,6 @@ func (f *fakeDriver) Keep(ctx context.Context) error {
 	return nil
 }
 
-// Release stops the agent (and closes the connection): counted in released and closed.
 func (f *fakeDriver) Release(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -245,8 +236,6 @@ func (f *fakeDriver) Release(ctx context.Context) error {
 
 var _ driver.Driver = (*fakeDriver)(nil)
 
-// poolOf builds a pool over the fakes, with their drivers already open (so the pool never
-// opens a real one).
 func poolOf(drvs ...*fakeDriver) *Pool {
 	var devs []device.Info
 	for _, d := range drvs {
@@ -259,7 +248,6 @@ func poolOf(drvs ...*fakeDriver) *Pool {
 	return p
 }
 
-// parseFlow parses flow text as the file <name>.yaml in a temp folder (its Name is name).
 func parseFlow(t *testing.T, name, text string) *flow.Flow {
 	t.Helper()
 	f, err := flow.ParseBytes(filepath.Join(t.TempDir(), name+".yaml"), []byte(text))
@@ -269,7 +257,6 @@ func parseFlow(t *testing.T, name, text string) *flow.Flow {
 	return f
 }
 
-// typingFlow launches com.app and types its own name, so a test can tell where it ran.
 func typingFlow(t *testing.T, name string) *flow.Flow {
 	return parseFlow(t, name, "appId: com.app\n---\n- launchApp\n- inputText: "+name+"\n")
 }
@@ -281,8 +268,6 @@ func job(f *flow.Flow, needs ...Need) *Job {
 	return &Job{Flow: f, Needs: needs}
 }
 
-// recorder captures the hooks' calls (they run on Schedule's goroutine, but the lock keeps
-// the race detector honest about reads from the test).
 type recorder struct {
 	t        *testing.T
 	mu       sync.Mutex
@@ -340,7 +325,6 @@ func (r *recorder) Finished() []Result {
 	return append([]Result(nil), r.finished...)
 }
 
-// gauge tracks how many things run at once.
 type gauge struct {
 	mu       sync.Mutex
 	cur, max int
@@ -371,7 +355,6 @@ func (g *gauge) Max() int {
 	return g.max
 }
 
-// waitFor blocks until at least n have run at once, or the timeout.
 func (g *gauge) waitFor(n int, timeout time.Duration) bool {
 	deadline := time.After(timeout)
 	for {
@@ -390,7 +373,6 @@ func (g *gauge) waitFor(n int, timeout time.Duration) bool {
 	}
 }
 
-// byName indexes results by flow name.
 func byName(rs []Result) map[string]Result {
 	out := map[string]Result{}
 	for _, r := range rs {
@@ -399,7 +381,6 @@ func byName(rs []Result) map[string]Result {
 	return out
 }
 
-// within fails the test if fn does not return in time (a scheduling deadlock).
 func within(t *testing.T, d time.Duration, fn func()) {
 	t.Helper()
 	done := make(chan struct{})

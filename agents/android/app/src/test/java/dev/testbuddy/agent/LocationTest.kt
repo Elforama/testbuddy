@@ -6,11 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The mock location the agent keeps on the shell's test providers (issue #72): the host sends
- * one "location" request per point, and the agent sends the fix again once a second on its own,
- * off the request path, until the host turns it off or the connection that set it closes.
- */
 class LocationTest {
     private val clock = FakeClock(1_000)
     private val probe = FakeProbe()
@@ -19,17 +14,15 @@ class LocationTest {
     private val tree = Tree(nodes) { clock.now }
     private val input = Input(FakeInjector(), clock) { nodes.field }
     private val device = FakeDevice()
-    /** Background work runs inline, or waits in [queued] for the test to run it. */
     private var inline = true
     private val queued = ArrayList<Runnable>()
     private val ops = Ops(device, tree, input, events, clock) { if (inline) it.run() else queued += it }
-    private val host = Any() // the connection that sends the requests
+    private val host = Any()
 
     private fun call(req: String, client: Any = host): JSONObject = JSONObject(ops.handle(req, client)!!.text)
 
     private fun fixes(at: String) = device.shells.count { it.contains("set-test-provider-location") && it.contains("--location $at ") }
 
-    // issue #72: one request sets the point; the fixes that follow come from the agent itself.
     @Test
     fun oneRequestKeepsTheFixComingEverySecond() {
         val r = call("""{"id":1,"op":"location","lat":45.5,"lon":-73.5}""")
@@ -39,8 +32,6 @@ class LocationTest {
             assertTrue(device.shells.toString(), device.shells.any { it == "cmd location providers add-test-provider $p" })
             assertTrue(device.shells.any { it == "cmd location providers set-test-provider-enabled $p true" })
         }
-        // Listed for the host to remove if the agent is killed with them on: before any is
-        // added, so a kill while adding them leaves none unlisted.
         val listed = device.shells.indexOf("echo gps network fused > ${Location.LIST}")
         assertTrue(device.shells.toString(), listed >= 0)
         assertTrue(device.shells.toString(), listed < device.shells.indexOfFirst { it.contains("add-test-provider") })
@@ -53,8 +44,6 @@ class LocationTest {
         assertEquals("the point sent at once, then once a second", 4, fixes("45.5,-73.5"))
     }
 
-    // issue #72: travel moves the point request by request; the repeats carry the latest point,
-    // and the providers are added once.
     @Test
     fun aNewPointReplacesTheRepeatedOne() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
@@ -66,7 +55,6 @@ class LocationTest {
         assertEquals("sent at once, then 1 s after the new point (not 400 ms), twice", 3, fixes("3.0,4.0"))
     }
 
-    // issue #72: the repeats end, and the providers go, when the host turns the location off...
     @Test
     fun offStopsTheRepeatsAndRemovesTheProviders() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
@@ -77,18 +65,14 @@ class LocationTest {
         val n = device.shells.size
         clock.advance(5_000)
         assertEquals(device.shells.drop(n).toString(), n, device.shells.size)
-        // Off again (Close after a reconnect to a new agent): nothing to remove.
         call("""{"id":3,"op":"location","off":true}""")
         assertEquals(n, device.shells.size)
     }
 
-    // A dropped connection keeps the point for the grace: the repeats go on, and the driver's new
-    // connection sets the point again and owns it from then on; the old connection's grace then
-    // ends nothing (issue #72).
     @Test
     fun aReconnectWithinTheGraceKeepsThePoint() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
-        ops.clientGone(Any()) // another connection: not the one that set it
+        ops.clientGone(Any())
         ops.clientGone(host)
         clock.advance(10_000)
         assertEquals("the repeats go on after the drop", 11, fixes("1.0,2.0"))
@@ -101,8 +85,6 @@ class LocationTest {
         assertEquals(12 + (Location.GRACE_MS + 5_000) / 1_000, fixes("1.0,2.0").toLong())
     }
 
-    // With no new connection (tb ended or was killed), the location goes off once the grace is
-    // over: the repeats end and the providers go.
     @Test
     fun noReconnectTurnsTheLocationOffAfterTheGrace() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
@@ -116,8 +98,6 @@ class LocationTest {
         assertEquals(n, device.shells.size)
     }
 
-    // The agent exiting on its own ("exit": tb release, Release at the end of a run) takes the
-    // providers away with it.
     @Test
     fun exitRemovesTheProviders() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
@@ -129,20 +109,18 @@ class LocationTest {
         assertEquals(n, device.shells.size)
     }
 
-    // A repeat already handed to the background thread when a new point or off comes: it sends
-    // nothing stale (issue #72).
     @Test
     fun aQueuedRepeatSendsNoStalePoint() {
         inline = false
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
-        clock.advance(1_000) // the tick fires: its repeat waits in the queue
+        clock.advance(1_000)
         assertEquals(1, queued.size)
         call("""{"id":2,"op":"location","lat":3,"lon":4}""")
         queued.removeAt(0).run()
         assertEquals("no repeat of the old point", 1, fixes("1.0,2.0"))
         assertEquals(1, fixes("3.0,4.0"))
 
-        clock.advance(1_000) // the new point's tick
+        clock.advance(1_000)
         assertEquals(1, queued.size)
         call("""{"id":3,"op":"location","off":true}""")
         val n = device.shells.size
@@ -151,8 +129,6 @@ class LocationTest {
         assertEquals(1, fixes("3.0,4.0"))
     }
 
-    // A device where no test provider can be enabled (no mock location for the shell): an error,
-    // nothing repeats, and the providers the request added are taken away again.
     @Test
     fun noProviderIsAnError() {
         device.answer = { cmd ->
@@ -168,8 +144,6 @@ class LocationTest {
         assertEquals(n, device.shells.size)
     }
 
-    // A fix that fails fails the request, and removes the providers that request added: nothing
-    // would remove them later, with no point set (review of issue #72).
     @Test
     fun aFailedFixFailsTheRequestAndRemovesWhatItAdded() {
         device.answer = { cmd ->
@@ -186,7 +160,6 @@ class LocationTest {
         assertEquals("nothing left to remove", n, device.shells.size)
     }
 
-    // A failed fix for a new point keeps the earlier point's providers and repeats.
     @Test
     fun aFailedFixKeepsTheEarlierPoint() {
         call("""{"id":1,"op":"location","lat":1,"lon":2}""")
@@ -200,8 +173,6 @@ class LocationTest {
         assertEquals(2, fixes("1.0,2.0"))
     }
 
-    // The greeting says whether a point is on: a host that did not set it (the run after a killed
-    // one, within the grace) turns it off when it connects (issue #72, second review).
     @Test
     fun helloSaysWhetherAPointIsOn() {
         assertFalse(JSONObject(ops.hello()).getBoolean("location"))

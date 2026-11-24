@@ -2,7 +2,6 @@ package main
 
 import "fmt"
 
-// agentGuide is a portable CLI reference for agents and project instructions.
 const agentGuide = `## UI testing with tb (Test Buddy)
 
 tb drives Android emulators and devices, iOS simulators, and Chrome from the shell.

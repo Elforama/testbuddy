@@ -10,14 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #280: a dialog that takes no touch while it comes in (a guard on its first second, an
-// enter transition, Android's own permission dialogs). The first tap on its button, the first
-// input its window ever got, changed nothing and no view took a click: it provably did nothing,
-// and is sent again. Each case says what the first tap's reply was and how many taps go.
-
-// swallowingDialog: an Android dialog whose "Allow" (a text in a Compose button: not clickable
-// itself) answers only from the tap numbered answersFrom (from 1). first rewrites the first
-// tap's reply (Settle NoChange and Clicked false before it).
 func swallowingDialog(answersFrom int, first func(driver.ActionResult) driver.ActionResult) *fakeDriver {
 	allow := &ui.Node{Text: "Allow", Class: "TextView", Enabled: true, Bounds: ui.Rect{L: 300, T: 400, R: 360, B: 440}}
 	given := &ui.Node{Text: "Consent: given", Class: "TextView", Enabled: true, Bounds: ui.Rect{L: 0, T: 100, R: 300, B: 140}}
@@ -68,11 +60,6 @@ func TestSwallowedTapInANewWindowIsSentAgain(t *testing.T) {
 	}
 }
 
-// Issue #317: Android's runtime permission dialog (the permission controller's Activity, a
-// clickable Button with its own view id) swallows a tap while it comes in. The agent says its
-// window came over the app (windowOver) when it floats on the app's window: the tap is sent
-// again, once, and the permission granted. An Activity's window not over the app (a new
-// screen) keeps the one tap (issue #280).
 func TestSwallowedTapOnThePermissionDialogIsSentAgain(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -117,15 +104,12 @@ func TestSwallowedTapOnThePermissionDialogIsSentAgain(t *testing.T) {
 	}
 }
 
-// The status bar's clock ticking between the tap and the look is not the tap's doing (seen on an
-// emulator: it turned a minute then). Anything else there is: a notification's icon in the bar
-// (issue #280 review), a toast.
 func TestOnlyTheClockDoesNotHoldBackTheReplay(t *testing.T) {
 	t.Parallel()
 	bar := ui.Rect{R: 400, B: 30}
 	for _, c := range []struct {
 		name  string
-		after func(taps int64) []*ui.Node // what the bar lists once tapped
+		after func(taps int64) []*ui.Node
 		want  int
 	}{
 		{"the clock ticks", func(n int64) []*ui.Node {
@@ -165,7 +149,6 @@ func TestOnlyTheClockDoesNotHoldBackTheReplay(t *testing.T) {
 	}
 }
 
-// Every case here gets exactly one tap.
 func TestTapThatMayHaveActedIsNotSentAgain(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -173,26 +156,17 @@ func TestTapThatMayHaveActedIsNotSentAgain(t *testing.T) {
 		first      func(driver.ActionResult) driver.ActionResult
 		tweak      func(f *fakeDriver)
 	}{
-		// The window already took input (the app's own window, back after a modal closed):
-		// a press that acts late and draws nothing would act twice.
 		{name: "not the window's first input", yaml: "- tapOn: Allow",
 			first: func(res driver.ActionResult) driver.ActionResult { res.WindowAge = 150 * time.Millisecond; return res }},
-		// Issue #280 review: a new Activity, the app's screen, not a window over it: a press
-		// there that acts late and draws nothing would act twice. (Compose's clickable reports
-		// no click, so the click count cannot tell.)
 		{name: "a new screen of the app", yaml: "- tapOn: Allow",
 			first: func(res driver.ActionResult) driver.ActionResult {
 				res.FirstInWindow, res.WindowAge = true, 150*time.Millisecond
 				return res
 			}},
-		// A dialog's guard lasts about a second: one 2 s old is not coming in any more.
 		{name: "a dialog past its guard", yaml: "- tapOn: Allow", first: firstIn(2 * time.Second)},
-		// The flow turned the replay off.
 		{name: "retryTapIfNoChange false", yaml: "- tapOn: {text: Allow, retryTapIfNoChange: false}",
 			first: firstIn(150 * time.Millisecond)},
-		// A window long on screen that never took input is not one coming in.
 		{name: "an old window", yaml: "- tapOn: Allow", first: firstIn(30 * time.Second)},
-		// The view reported its click after the reply: the tap acted.
 		{name: "a click after the reply", yaml: "- tapOn: Allow", first: firstIn(150 * time.Millisecond),
 			tweak: func(f *fakeDriver) {
 				var once atomic.Bool
@@ -202,7 +176,6 @@ func TestTapThatMayHaveActedIsNotSentAgain(t *testing.T) {
 					}
 				}
 			}},
-		// What the screen lists changed after the reply: the tap may have landed.
 		{name: "the screen changed", yaml: "- tapOn: Allow", first: firstIn(150 * time.Millisecond),
 			tweak: func(f *fakeDriver) {
 				screen := f.screen
@@ -231,7 +204,6 @@ func TestTapThatMayHaveActedIsNotSentAgain(t *testing.T) {
 	}
 }
 
-// A target that never answers is tapped at most twice more, and the step stands as before.
 func TestSwallowedTapIsSentAtMostTwiceMore(t *testing.T) {
 	t.Parallel()
 	f := swallowingDialog(100, firstIn(150*time.Millisecond))
@@ -241,8 +213,6 @@ func TestSwallowedTapIsSentAtMostTwiceMore(t *testing.T) {
 	}
 }
 
-// iOS: the same rule, fed by the agent's appActive: false (issue #290): a tap that went to an
-// app still on its way to the foreground, on an element that is not a button, is sent again.
 func TestIOSTapIntoAnAppStillEnteringIsSentAgain(t *testing.T) {
 	t.Parallel()
 	f := swallowingDialog(2, func(res driver.ActionResult) driver.ActionResult {
@@ -254,7 +224,6 @@ func TestIOSTapIntoAnAppStillEnteringIsSentAgain(t *testing.T) {
 	if n := tapCount(f); n != 2 {
 		t.Errorf("%d taps, want 2", n)
 	}
-	// Without it, a text that changed nothing is tapped once, as before.
 	g := swallowingDialog(2, func(res driver.ActionResult) driver.ActionResult { res.Clicked = nil; return res })
 	g.plat = "ios"
 	runWith(t, g, quick, "- tapOn: Allow")
@@ -263,9 +232,6 @@ func TestIOSTapIntoAnAppStillEnteringIsSentAgain(t *testing.T) {
 	}
 }
 
-// iOS, a guarded tap (issue #280 review): its receipt says whether the touch reached the app.
-// One that ended reached it, whatever appActive said: never sent again. Only one with no receipt
-// ("none") is.
 func TestIOSGuardedTapIntoAnAppStillEntering(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -284,8 +250,6 @@ func TestIOSGuardedTapIntoAnAppStillEntering(t *testing.T) {
 	}
 }
 
-// iOS's own case (a button that shows every touch showed none: something hidden took it) is
-// unchanged, and an explicit retryTapIfNoChange: false turns it off too.
 func TestIOSHiddenSwallowerRuleIsKept(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -300,7 +264,7 @@ func TestIOSHiddenSwallowerRuleIsKept(t *testing.T) {
 			f.mu.Lock()
 			f.tapSettle = driver.Changed
 			f.mu.Unlock()
-			f.change(true) // the hidden veil went
+			f.change(true)
 		}()
 		runWith(t, f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}, c.yaml)
 		if n := tapCount(f); n != c.want {
@@ -309,9 +273,6 @@ func TestIOSHiddenSwallowerRuleIsKept(t *testing.T) {
 	}
 }
 
-// probedApp makes f answer as the iOS agent with the probe does for a tap with Watch (issue
-// #324): Reached when the touch went to the watched button's view, which veiled says it
-// did not (something over the target took it). No Watch: no receipt, nothing reached.
 func probedApp(f *fakeDriver, veiled func() bool) {
 	f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
 		f.mu.Lock()
@@ -324,11 +285,6 @@ func probedApp(f *fakeDriver, veiled func() bool) {
 	}
 }
 
-// Issue #324: on iOS, a button whose press shows nothing accessibility reports (React Native's
-// Button and TouchableOpacity animate their opacity) is tapped where tapping changes nothing
-// (the option already selected: "Threshold: OFF" while it is off). The probe saw the touch go
-// to the button's own view, so nothing hidden took it: the step ends at once, with one tap,
-// instead of waiting the whole lookup timeout (17 s) for a veil to go.
 func TestIOSNoOpTapThatReachedTheButtonIsNotWaitedOn(t *testing.T) {
 	t.Parallel()
 	off := &ui.Node{Text: "Threshold: OFF", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 16, T: 733, R: 155, B: 771}}
@@ -349,9 +305,6 @@ func TestIOSNoOpTapThatReachedTheButtonIsNotWaitedOn(t *testing.T) {
 	}
 }
 
-// Issue #324: the veil's protection stays. A touch the probe saw go elsewhere (to a veil hidden
-// from accessibility over the button) is tapped again once the veil goes, and that tap reaches
-// the button, however long the veil stayed still.
 func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
@@ -366,12 +319,12 @@ func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
 		}
 	}
 	go func() {
-		time.Sleep(2500 * time.Millisecond) // still for a while: no change at all until it goes
+		time.Sleep(2500 * time.Millisecond)
 		veiled.Store(false)
 		f.mu.Lock()
 		f.tapSettle = driver.Changed
 		f.mu.Unlock()
-		f.change(true) // the veil went
+		f.change(true)
 	}()
 	mustPass(t, runWith(t, f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
 	if n := tapCount(f); n != 2 || reached.Load() != 1 {
@@ -379,10 +332,6 @@ func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
 	}
 }
 
-// inCell is button under (depth 2) in a cell (depth 1) of bounds cellAt, a row of a list
-// (depth 0). With cellAt under's own bounds, under is a whole row: a SwiftUI List's Button row,
-// as the bench's long list has them, which the list selects, and UIKit highlights its cell on
-// every touch.
 func inCell(under *ui.Node, cellAt ui.Rect) func() []*ui.Node {
 	list := &ui.Node{Class: "CollectionView", Scrollable: true, Enabled: true, Bounds: ui.Rect{R: 400, B: 800}}
 	under.Depth = 2
@@ -390,17 +339,11 @@ func inCell(under *ui.Node, cellAt ui.Rect) func() []*ui.Node {
 	return static(list, cell, under)
 }
 
-// lists.yaml's flake, its recovery: the first touch on a button went to something else (in the
-// bench, a pinned section header the cover rules did not know) and the screen then stayed
-// perfectly still. tb said it would tap again "when the screen changes", no change ever came, and
-// after the whole lookup timeout the step passed with that one lost tap. A still screen now gets
-// a bounded number of taps again too, for a button that is a whole list row (its cell shows every touch): here
-// the second reaches the button.
 func TestIOSTapLostOnAStillScreenIsSentAgain(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
 	var lost atomic.Int64
-	lost.Store(1) // only the first touch goes astray
+	lost.Store(1)
 	f := &fakeDriver{plat: "ios", screen: inCell(under, under.Bounds), tapSettle: driver.NoChange}
 	probedApp(f, func() bool { return lost.Add(-1) >= 0 })
 	start := time.Now()
@@ -413,9 +356,6 @@ func TestIOSTapLostOnAStillScreenIsSentAgain(t *testing.T) {
 	}
 }
 
-// ... and a tap step that never got a touch through to its button is not reported as passed:
-// with every touch taken by something over it on a still screen, the step fails, saying so,
-// after at most two more taps (a whole list row).
 func TestIOSTapThatNeverGetsThroughIsNotPassedSilently(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
@@ -427,9 +367,6 @@ func TestIOSTapThatNeverGetsThroughIsNotPassedSilently(t *testing.T) {
 	}
 }
 
-// A button whose touch tb may not see (no cell: a Flutter or custom-drawn button, a React
-// Native press whose touch went to a hosting view) that changed nothing on a still screen may
-// have had nothing to do: no tap again, and the step is not failed on that ground (as before).
 func TestIOSStillTapWithNoTouchSignalIsNotSentAgainNorFailed(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
@@ -441,10 +378,6 @@ func TestIOSStillTapWithNoTouchSignalIsNotSentAgainNorFailed(t *testing.T) {
 	}
 }
 
-// Review: a button inside a list row but not the whole row (SwiftUI's borderless or plain
-// button in a List row, a button in a custom cell) does not highlight its cell, so a press
-// with nothing to do (issue #324's no-op) changes nothing either: no tap again on a still
-// screen (a press that acts late would act twice), and the step is not failed on that ground.
 func TestIOSStillTapOnAButtonInsideARowIsNotSentAgainNorFailed(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 300, T: 310, R: 380, B: 340}}

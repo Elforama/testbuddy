@@ -23,13 +23,6 @@ import java.io.ByteArrayOutputStream
 import java.lang.reflect.Method
 import kotlin.system.exitProcess
 
-/*
- * Platform.kt's interfaces on a device: UiAutomation (connected as the shell user, Main.kt),
- * the input manager, and the agent's own threads. Everything here needs a device; the logic
- * that uses it is tested on the JVM against fakes.
- */
-
-/** The uptime clock, and timers on the "tb-events" thread. */
 class AndroidClock : Clock {
     private val thread = HandlerThread("tb-events").apply { start() }
     private val handler = Handler(thread.looper)
@@ -43,13 +36,11 @@ class AndroidClock : Clock {
     override fun cancel(task: Runnable) = handler.removeCallbacks(task)
 }
 
-/** UiAutomation's events and windows, for [Events]. */
 class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
     private val sourceIdMethod = try {
         AccessibilityEvent::class.java.getMethod("getSourceNodeId")
     } catch (_: Throwable) { null }
 
-    /** Sends UiAutomation's accessibility events to [events]. */
     fun listen(events: Events) {
         ua.setOnAccessibilityEventListener { e -> events.onEvent(read(e)) }
     }
@@ -68,7 +59,6 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
         )
     }
 
-    /** The source view: its window id and node id, combined. Hidden API (getSourceNodeId). */
     private fun sourceKey(e: AccessibilityEvent): Long? {
         val id = try { sourceIdMethod?.invoke(e) as? Long } catch (_: Throwable) { null } ?: return null
         if (id == -1L || id == Long.MAX_VALUE) return null
@@ -100,12 +90,6 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
     } catch (_: Throwable) { null }
 }
 
-/**
- * Injects touches and keys. The shell uid holds INJECT_EVENTS, so events go straight to the
- * input manager (as scrcpy does) instead of through UiAutomation, which syncs input
- * transactions around every DOWN/UP (~30 ms each). Falls back to UiAutomation if the hidden
- * API is missing.
- */
 class AndroidInjector(private val ua: UiAutomation) : Injector {
     private val manager: Any?
     private val injectMethod: Method?
@@ -119,7 +103,7 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
         var method: Method? = null
         try {
             val cls = try {
-                Class.forName("android.hardware.input.InputManagerGlobal") // Android 14+
+                Class.forName("android.hardware.input.InputManagerGlobal")
             } catch (_: ClassNotFoundException) {
                 android.hardware.input.InputManager::class.java
             }
@@ -138,8 +122,8 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
     override val density: Float get() = android.content.res.Resources.getSystem().displayMetrics.density
 
     override fun prepareSwipe() {
-        if (!useManager) return // UiAutomation's injection already synchronizes input windows.
-        val method = syncSwipe ?: return // Older platforms retain their existing path.
+        if (!useManager) return
+        val method = syncSwipe ?: return
         try {
             method.invoke(ua, true)
         } catch (t: Throwable) {
@@ -148,11 +132,10 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
         }
     }
 
-    /** False when the platform reported the event not injected (with [sync]: not delivered). */
     private fun inject(e: InputEvent, sync: Boolean): Boolean {
         if (useManager) {
             try {
-                val mode = if (sync) 2 /* WAIT_FOR_FINISH */ else 0 /* ASYNC */
+                val mode = if (sync) 2 else 0
                 return injectMethod!!.invoke(manager, e, mode) as? Boolean ?: true
             } catch (t: Throwable) {
                 Log.w(TAG, "InputManager injection failed, switching to UiAutomation: ${cause(t)}")
@@ -162,9 +145,6 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
         return ua.injectInputEvent(e, sync)
     }
 
-    // A finger, as a real touch is (and `input tap` sends): the short MotionEvent.obtain leaves
-    // the pointer's tool type unknown, and apps that tell touch from mouse by it (Android's
-    // Files app: a long press there selects only for a finger) ignore such a press.
     private val finger = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
     private val coords = arrayOf(MotionEvent.PointerCoords())
 
@@ -188,7 +168,6 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
     }
 }
 
-/** UiAutomation's windows and nodes, for [Tree]. */
 class AndroidNodes(private val ua: UiAutomation) : Nodes {
     init {
         val info = ua.serviceInfo
@@ -209,8 +188,6 @@ class AndroidNodes(private val ua: UiAutomation) : Nodes {
     }
 
     override fun focusedInput(): Field? {
-        // Compose can omit accessibility events. Ask the app for the current input node,
-        // rather than trusting a cached field or serializing the whole hierarchy.
         clearCache()
         return ua.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { AndroidField(it) }
     }
@@ -284,14 +261,11 @@ class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChil
         } else n.getChild(i)
         return child?.let { AndroidNode(it, prefetchChildren) }
     }
-    // AccessibilityNodeInfo.refresh() asks the app's process for the node by its source id
-    // (bypassing the cache): a view's id set by a delegate (React Native's testID), a virtual
-    // node (Compose) and a node with no id are all found this way (issue #321).
     override fun refresh(): Boolean = try { n.refresh() } catch (_: Throwable) { false }
 }
 
 class AndroidField(private val n: AccessibilityNodeInfo) : Field {
-    override val identity: Any get() = n // AccessibilityNodeInfo equality uses window/source IDs.
+    override val identity: Any get() = n
     override val editable: Boolean get() = n.isEditable
     override val showingHint: Boolean get() = n.isShowingHintText
     override val nativePlainText: Boolean get() = n.className?.toString() == "android.widget.EditText" && !n.isPassword
@@ -309,8 +283,6 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     }
 
     override fun canSubmitIme(): Boolean {
-        // Multiline Enter must remain a newline; custom/old providers retain
-        // ordinary key delivery unless they explicitly advertise this action.
         if (Build.VERSION.SDK_INT < 30 || !n.isEditable || !n.isFocused || n.isMultiLine) return false
         val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
         return n.actionList.any { it.id == action }
@@ -331,22 +303,16 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     }
 }
 
-/** The display, screenshots, the shell and the process. */
 class AndroidDevice(private val ua: UiAutomation) : Device {
     private val activities = HashMap<String, Boolean?>()
 
-    /**
-     * Asks the package manager (IPackageManager.getActivityInfo, by reflection: the agent has
-     * no Context) whether [cls] is an Activity [pkg] declares, disabled ones and either boot
-     * mode's included. Cached. Null when the call fails.
-     */
     override fun isActivity(pkg: String, cls: String): Boolean? = synchronized(activities) {
         val key = "$pkg/$cls"
         if (activities.containsKey(key)) return activities[key]
         val known: Boolean? = try {
             val pm = Class.forName("android.app.ActivityThread").getMethod("getPackageManager").invoke(null)
             val cn = android.content.ComponentName(pkg, cls)
-            val flags = 0x00000200 or 0x00040000 or 0x00080000 // MATCH_DISABLED_COMPONENTS, MATCH_DIRECT_BOOT_*
+            val flags = 0x00000200 or 0x00040000 or 0x00080000
             val m = pm.javaClass.methods.firstOrNull { it.name == "getActivityInfo" && it.parameterTypes.size == 3 }
                 ?: throw NoSuchMethodException("getActivityInfo")
             val f: Any = if (m.parameterTypes[1] == java.lang.Long.TYPE) flags.toLong() else flags
@@ -402,7 +368,6 @@ class AndroidDevice(private val ua: UiAutomation) : Device {
         return Shot(img.width, img.height, format, bos.toByteArray())
     }
 
-    /** Runs a shell command as the shell user, on the device: no adb round trip ([Shell]). */
     override fun shell(cmd: String, timeoutMs: Int): ShellResult = Shell.run(cmd, timeoutMs)
 
     override fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? = BinderDump.run(service, args, timeoutMs)

@@ -16,9 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Recording a real page: the video exists, plays as H.264 (or MPEG-4) and lasts as long as
-// the recording did, though the page repaints only now and then. Needs Chrome and ffmpeg:
-// runs with TB_BROWSER_TESTS=1.
 func TestRecordingInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -51,7 +48,7 @@ func TestRecordingInChrome(t *testing.T) {
 	if err := d.StartRecording(ctx, out); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(3 * time.Second) // the page repaints at 0.5, 1, 1.5 and 2 s, then stays still
+	time.Sleep(3 * time.Second)
 	if err := d.StopRecording(ctx); err != nil {
 		t.Fatal(err)
 	}

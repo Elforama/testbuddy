@@ -19,8 +19,6 @@ import (
 
 const editorSocket = "localabstract:testbuddy-editor"
 
-// Android blocks direct shell -> app Unix socket connections. Reach the
-// installed service through adbd, retaining its shell/root peer-UID check.
 func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driver.ActionResult, bool, error) {
 	var result driver.ActionResult
 	d.stateMu.Lock()
@@ -38,11 +36,7 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	}
 	var prepared struct {
 		Target json.RawMessage `json:"target"`
-		// The count before the Backspace, passed back as settle's since. A seq from agent
-		// 0.1.48 on; before, the agent's solid count, which its own settle compared with
-		// (issue #74). Either way the pair agrees, on the same agent: a settle that lands on
-		// another connection sends -1 instead (agentSince).
-		Seq int64 `json:"seq"`
+		Seq    int64           `json:"seq"`
 	}
 	if err = m.Decode(&prepared); err != nil {
 		return result, false, err
@@ -62,7 +56,6 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 		deadline = dl
 	}
 	conn.SetDeadline(deadline)
-	// No automatic retry after writing: the first request may have deleted.
 	if _, err = conn.Write(append(prepared.Target, '\n')); err != nil {
 		return result, true, err
 	}
@@ -72,8 +65,6 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	}
 	switch strings.TrimSpace(reply) {
 	case "unavailable":
-		// The helper sent nothing. Recheck the same editor at the point of
-		// injection, since the accessibility service and shell can disagree.
 		result, err := d.action(ctx, "key", o, map[string]any{"code": 67, "expectedEditor": prepared.Target}, 0)
 		return result, true, err
 	case "sent":
@@ -107,16 +98,8 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	return result, true, nil
 }
 
-// dialEditor connects to the editor service through its adb forward; the caller holds
-// editorMu. The forward does not last as long as the driver: an adb server restart drops it
-// (issue #69). A dial that fails has written nothing, so forwarding again and dialing once more
-// is safe. Nothing after a write is ever retried: a Backspace sent twice deletes two characters.
 func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
 	if d.editorOld.Swap(false) && d.editorPort != 0 {
-		// The agent connection was replaced: keep the port unless adb no longer forwards it to
-		// the editor, where something else may answer on it now. Unknown (adb cannot list) keeps
-		// it: a dead one is still caught by the dial below. Never remove it blindly: after an adb
-		// restart, another forward may own the number.
 		if listed, known := d.editorForwardListed(ctx, d.editorPort); known && !listed {
 			d.editorPort = 0
 		}
@@ -138,11 +121,8 @@ func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
 			return conn, nil
 		}
 		if ctx.Err() != nil || !connRefused(err) {
-			// Cut short, or out of sockets: that says nothing about the forward. Keep it.
 			return nil, err
 		}
-		// Refused: nothing listens on the port, so the forward is gone. Forget it, so a later
-		// Backspace forwards again even when this one gives up.
 		d.editorPort = 0
 		if retried {
 			return nil, err
@@ -150,8 +130,6 @@ func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
 	}
 }
 
-// connRefused reports whether a dial was refused: nothing listened on the port. Windows
-// reports WSAECONNREFUSED (10061), which syscall.ECONNREFUSED does not match there.
 func connRefused(err error) bool {
 	var errno syscall.Errno
 	if !errors.As(err, &errno) {
@@ -160,8 +138,6 @@ func connRefused(err error) bool {
 	return errno == syscall.ECONNREFUSED || runtime.GOOS == "windows" && errno == 10061
 }
 
-// editorForwardListed reports whether adb lists local port as this device's forward to the
-// editor, on any line of `adb forward --list`. known is false when adb could not list them.
 func (d *Driver) editorForwardListed(ctx context.Context, port int) (listed, known bool) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -186,8 +162,6 @@ func (d *Driver) closeEditorForward() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	// `adb forward --remove tcp:N` matches the local port only, whatever -s says: after an adb
-	// restart, N may be another device's forward. Remove it only when adb lists it as ours.
 	if listed, _ := d.editorForwardListed(ctx, d.editorPort); listed {
 		d.adb.Run(ctx, "forward", "--remove", "tcp:"+strconv.Itoa(d.editorPort))
 	}

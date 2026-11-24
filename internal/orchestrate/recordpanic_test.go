@@ -9,25 +9,19 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// issue #107: with --record, a flow that crashes (a panic, recovered by runSafely) stops
-// every recording it started, exactly once, and its result (what the console, JSON, HTML
-// and JUnit reports list) still has the videos, as a failure naming the crash. Single-device
-// flows left the recording running; neither kind kept its videos in the result.
 func TestScheduleRecordedPanicStopsRecordingsAndKeepsVideos(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		yaml  string
 		needs []Need
-		roles []string // the videos' roles, in order
+		roles []string
 	}{
 		{name: "single device", yaml: "appId: com.app\n---\n- launchApp\n- inputText: x\n",
 			needs: []Need{{}}, roles: []string{""}},
 		{name: "multi device", yaml: twoRoles + "- alice: [launchApp]\n- bob: [{inputText: x}]\n",
 			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
-		// a role of a parallel: block runs on its own goroutine: its crash ended the process
 		{name: "parallel block", yaml: twoRoles + "- parallel:\n    alice: [launchApp]\n    bob: [{inputText: x}]\n",
 			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
-		// onFlowStart runs on every role at once, as a parallel: block does
 		{name: "multi-device onFlowStart", yaml: "appId: com.app\ndevices:\n  alice: android\n  bob: android\nonFlowStart:\n  - inputText: x\n---\n- alice: [launchApp]\n",
 			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
 	} {

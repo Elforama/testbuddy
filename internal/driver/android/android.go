@@ -1,4 +1,3 @@
-// Package android drives an Android device or emulator through the Test Buddy agent.
 package android
 
 import (
@@ -34,51 +33,39 @@ func agentHash() string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// Driver is an Android device driven through its agent.
 type Driver struct {
 	adb        *device.ADBDevice
 	info       device.Info
-	connP      atomic.Pointer[wire.Conn] // the current agent connection
-	stateMu    sync.Mutex                // guards port, w, h, sdk and seqBase: a reconnect rewrites them
+	connP      atomic.Pointer[wire.Conn]
+	stateMu    sync.Mutex
 	port       int
 	editorMu   sync.Mutex
-	editorPort int         // the local port of the adb forward to the editor service, or 0
-	editorOld  atomic.Bool // a new agent connection since editorPort was set: check it with adb
+	editorPort int
+	editorOld  atomic.Bool
 	w, h       int
 	sdk        int
 	mu         sync.Mutex
-	launch     map[string]string // package -> launcher component
-	webViewApp string            // app with DevTools reads enabled for this flow
+	launch     map[string]string
+	webViewApp string
 
-	recordPath string
-	// recordCmd is the recording's adb shell (recording.go). Not locked: one flow's runner
-	// starts and stops recordings, and Close or Release come after it (orchestrate.Schedule
-	// waits for every run before the pool is closed).
+	recordPath  string
 	recordCmd   *tether.Proc
-	recordParts []string      // the files the last recording was saved as (recording.go)
-	recordT0    time.Time     // when screenrecord said it started the last recording (zero: it did not say)
-	clockAhead  time.Duration // how far the device's clock is ahead of tb's (recording.go)
-	clockKnown  bool          // clockAhead was measured
-	recordAny   *bool         // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
+	recordParts []string
+	recordT0    time.Time
+	clockAhead  time.Duration
+	clockKnown  bool
+	recordAny   *bool
 
-	ridBase string       // this driver's request-token prefix (call)
-	ridNext atomic.Int64 // its counter
+	ridBase string
+	ridNext atomic.Int64
 
-	locMu sync.Mutex               // serializes setLocation and its stop
-	locAt atomic.Pointer[locPoint] // the point on the test providers, nil when none (adopt reads it)
-	// resumeMu guards resumeDone, which is set while adopt's resumeLocation sends the point on
-	// a new connection and closed when it is done: a stopLocation meanwhile leaves the "off" to
-	// it, so the agent gets one "off", after the point (issue #335 review).
+	locMu      sync.Mutex
+	locAt      atomic.Pointer[locPoint]
 	resumeMu   sync.Mutex
 	resumeDone chan struct{}
 
-	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
-	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
-	// events reach subscribers through the driver, so waits survive a reconnect.
-	connMu sync.Mutex // serializes reconnects; never held while sending a request
-	closed atomic.Bool
-	// closing closes when the driver does (markClosed): a reconnect under way stops waiting
-	// and trying then (issue #335). Made on first use: drivers are built in several places.
+	connMu      sync.Mutex
+	closed      atomic.Bool
 	closingOnce sync.Once
 	closingCh   chan struct{}
 	closeOnce   sync.Once
@@ -87,27 +74,20 @@ type Driver struct {
 	subMu       sync.Mutex
 	subs        map[int]chan driver.Event
 	nextSub     int
-	gaveUp      atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
-	// gaveUpOn is the dropped connection a reconnect already tried for its full reconnectFor
-	// and gave up on (guarded by connMu): a later reconnect of the same drop tries once.
-	gaveUpOn *wire.Conn
+	gaveUp      atomic.Pointer[lostConn]
+	gaveUpOn    *wire.Conn
 
-	notesMu sync.Mutex
-	notes   []string // for the run's trace (Notes)
-	// windowFixSeen holds the lines noteOncePerStep noted since Notes last handed them out (a
-	// read's windowFix, a WebView page not read), so a wait's many reads note each once per step.
+	notesMu       sync.Mutex
+	notes         []string
 	windowFixSeen map[string]bool
 }
 
-// note keeps a line for the run's trace (driver.Noter).
 func (d *Driver) note(s string) {
 	d.notesMu.Lock()
 	d.notes = append(d.notes, s)
 	d.notesMu.Unlock()
 }
 
-// Notes hands out what the driver did on its own since the last call (driver.Noter): a
-// keyboard hideKeyboard closed after it came up late.
 func (d *Driver) Notes() []string {
 	d.notesMu.Lock()
 	defer d.notesMu.Unlock()
@@ -117,7 +97,6 @@ func (d *Driver) Notes() []string {
 	return n
 }
 
-// lostConn is a dropped connection the driver could not replace, and why.
 type lostConn struct {
 	conn *wire.Conn
 	err  error
@@ -129,9 +108,6 @@ var (
 	_ driver.Noter       = (*Driver)(nil)
 )
 
-// Lost reports the agent out of reach for good (driver.LostChecker): its connection dropped
-// and reconnecting gave up (the "disconnected" event). A later request that reconnects after
-// all clears it.
 func (d *Driver) Lost() error {
 	g := d.gaveUp.Load()
 	if g == nil || d.closed.Load() || d.conn() != g.conn {
@@ -140,7 +116,6 @@ func (d *Driver) Lost() error {
 	return fmt.Errorf("the tb agent could not be reached again: %v", g.err)
 }
 
-// Open connects to the agent on the device, starting it if it is not already running.
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	d := &Driver{adb: device.NewADB(info.Serial), info: info, launch: map[string]string{}, subs: map[int]chan driver.Event{},
 		ridBase: strconv.FormatInt(time.Now().UnixNano(), 36)}
@@ -150,18 +125,9 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	return d, nil
 }
 
-// open connects to the agent, as connect does. In CI mode, an emulator whose agent runs, says
-// hello and then does not answer "info", even when asked again with a longer deadline
-// (Android itself stuck: seen on CI after a launch that never came up, when no window or
-// accessibility call returned any more), is restarted, once per run, and the agent started
-// again on it (issue #217); otherwise every later flow fails the same way. Outside CI mode,
-// and on a phone, nothing is restarted: the error says to restart the device. Only open
-// restarts: a reconnect mid-flow does not.
 func (d *Driver) open(ctx context.Context) error {
 	err := d.connect(ctx)
 	var ns *notStartedError
-	// CI mode only (issue #217): a reboot ends what else runs on the emulator (screenrecord,
-	// other sessions' forwards), which a developer's emulator must not have done to it.
 	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !ci.On() || ctx.Value(noRestartKey{}) != nil || !takeRestart(d.info.Serial) {
 		return err
 	}
@@ -178,16 +144,10 @@ func (d *Driver) open(ctx context.Context) error {
 
 type noRestartKey struct{}
 
-// WithoutRestart marks ctx so that Open does not restart a stuck emulator (CI mode, issue
-// #217): an open only to read a failed flow's screen (issue #101) would read a rebooted
-// device's launcher, and would use up the run's one restart, which the next flow's open needs.
 func WithoutRestart(ctx context.Context) context.Context {
 	return context.WithValue(ctx, noRestartKey{}, true)
 }
 
-// restarted holds the emulators open restarted in this run: one restart each, so a device
-// that stays stuck fails at once instead of being restarted for every flow. A reboot that
-// failed uses up the run's restart too.
 var (
 	restartMu sync.Mutex
 	restarted = map[string]bool{}
@@ -209,34 +169,25 @@ func wasRestarted(serial string) bool {
 	return restarted[serial]
 }
 
-// restartBoot bounds an emulator's restart, from the reboot to sys.boot_completed.
 const restartBoot = 3 * time.Minute
 
-// RestartBoot is restartBoot for the pool, whose reopen of a lost device must leave room for
-// the CI-mode restart open may do (issue #101).
 const RestartBoot = restartBoot
 
-// restartDevice reboots the device and waits until Android has booted and the screen is
-// awake, as the emulator was before its run.
 func (d *Driver) restartDevice(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, restartBoot)
 	defer cancel()
-	// The boot's id tells the new boot from the old: right after `adb reboot` returns, adb can
-	// still reach the old one, whose sys.boot_completed is 1.
 	const bootState = "echo $(cat /proc/sys/kernel/random/boot_id) $(getprop sys.boot_completed)"
 	before, _ := d.adb.Shell(ctx, bootState)
 	oldBoot := strings.Fields(before)
 	if len(oldBoot) != 2 {
-		// Without the old boot's id, the old boot would pass for the new one.
 		return fmt.Errorf("could not read its boot id (%q), so it was not rebooted", strings.TrimSpace(before))
 	}
 	if _, err := d.adb.Run(ctx, "reboot"); err != nil {
 		return err
 	}
 	for {
-		// Device start-up only, never during a test: nothing tells the host when boot ends.
 		wctx, wcancel := context.WithTimeout(ctx, 5*time.Second)
-		d.adb.Run(wctx, "wait-for-device") // returns at once while adb sees it
+		d.adb.Run(wctx, "wait-for-device")
 		out, _ := d.adb.Shell(wctx, bootState)
 		wcancel()
 		if f := strings.Fields(out); len(f) == 2 && f[0] != oldBoot[0] && f[1] == "1" {
@@ -250,12 +201,10 @@ func (d *Driver) restartDevice(ctx context.Context) error {
 	}
 	kctx, kcancel := context.WithTimeout(ctx, 5*time.Second)
 	defer kcancel()
-	d.adb.Shell(kctx, "input keyevent 82") // wake the screen and dismiss an insecure lock screen
+	d.adb.Shell(kctx, "input keyevent 82")
 	return nil
 }
 
-// notStartedError is an agent start that failed. stuck: the agent said hello and then did not
-// answer "info", twice, while adb sees the device and the agent's process runs (issue #217).
 type notStartedError struct {
 	msg   string
 	stuck bool
@@ -265,10 +214,6 @@ type notStartedError struct {
 func (e *notStartedError) Error() string { return e.msg }
 func (e *notStartedError) Unwrap() error { return e.err }
 
-// notStarted is the error for an agent start that failed with err. It says whether adb sees
-// the device, whether the agent's process runs, and what to do (issue #217), then quotes the
-// agent's log. hung: dialHello's flag, the agent said hello and then did not answer "info"
-// even with the longer deadline; nothing else is ever taken for a stuck Android.
 func (d *Driver) notStarted(ctx context.Context, err error, logTail string, hung bool) error {
 	stuck, why := d.diagnose(ctx, hung)
 	msg := fmt.Sprintf("the Test Buddy agent did not start on %s: %v; %s", d.info.Serial, err, why)
@@ -278,8 +223,6 @@ func (d *Driver) notStarted(ctx context.Context, err error, logTail string, hung
 	return &notStartedError{msg: msg, stuck: stuck, err: err}
 }
 
-// diagnose looks at the device after a failed start: adb's state for it, then the agent's
-// process. stuck: hung, and both are there, so Android itself did not answer the agent.
 func (d *Driver) diagnose(ctx context.Context, hung bool) (stuck bool, why string) {
 	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -299,8 +242,6 @@ func (d *Driver) diagnose(ctx context.Context, hung bool) (stuck bool, why strin
 		return false, fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s)`, pid)
 	}
 	if !ci.On() {
-		// Outside CI mode "info" is asked once (connectOnce): a slow device is not a stuck one
-		// (issue #217), so the message does not say Android itself is not answering.
 		why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer "info" within %s (slow or stuck)`, pid, infoWait)
 		if !d.info.Emulator {
 			return true, why + ": if it stays so, restart the device"
@@ -321,14 +262,11 @@ func (d *Driver) connect(ctx context.Context) error { return d.connectOnce(ctx, 
 
 func (d *Driver) connectRetry(ctx context.Context) error { return d.connectOnce(ctx, true) }
 
-// stopLeftoverDriver stops Maestro's on-device driver (legacy.AndroidDriverPackages) when
-// Maestro is not running on this machine: an emulator snapshot often restores one, and it
-// holds the device's only UiAutomation slot.
 func (d *Driver) stopLeftoverDriver(ctx context.Context) bool {
 	if out, _ := exec.Command("pgrep", "-f", legacy.HostProcessPattern()).Output(); len(strings.TrimSpace(string(out))) > 0 {
 		return false
 	}
-	pkgs := legacy.AndroidDriverPackages() // the test package, then the app
+	pkgs := legacy.AndroidDriverPackages()
 	app := pkgs[len(pkgs)-1]
 	out, _ := d.adb.Shell(ctx, "pidof "+app)
 	if strings.TrimSpace(out) == "" {
@@ -344,8 +282,6 @@ func (d *Driver) stopLeftoverDriver(ctx context.Context) bool {
 }
 
 func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
-	// Fast path: an agent from an earlier run is still serving behind an existing forward,
-	// or behind a new one (an adb server restart drops forwards, not the agent).
 	port := d.adb.ExistingForward(ctx, socketName)
 	if port == 0 {
 		port, _ = d.adb.Forward(ctx, socketName)
@@ -365,14 +301,11 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 	if port == 0 {
 		var err error
 		if port, err = d.adb.Forward(ctx, socketName); err != nil {
-			return d.notStarted(ctx, err, "", false) // never a stuck Android: no agent was reached
+			return d.notStarted(ctx, err, "", false)
 		}
 	}
 	c, hello, hung, err := dialAgent(port, 15*time.Second, infoWait)
 	if hung && ci.On() {
-		// Said hello, then no "info" in time: a slow device is not a stuck one (issue #217).
-		// Ask once more, on a new connection, with a longer deadline. CI mode only, with the
-		// restart it decides (open): outside CI the start fails at once, as before.
 		c, hello, hung, err = dialAgent(port, 15*time.Second, infoRetryWait)
 	}
 	if err != nil {
@@ -385,35 +318,27 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 	return d.adopt(c, port, hello)
 }
 
-// infoWait bounds the agent's answer to "info", its first request on a new connection.
 var infoWait = 3 * time.Second
 
-// infoRetryWait bounds "info" asked again after an agent said hello and let infoWait pass:
-// only a second miss counts as Android itself not answering (issue #217).
 var infoRetryWait = 12 * time.Second
 
 type hello struct {
-	Version string  `json:"version"`
-	SDK     int     `json:"sdk"`
-	W       int     `json:"w"`
-	H       int     `json:"h"`
-	Density float64 `json:"density"`
-	// LocationOn: the agent's greeting says a mock location is on (one this driver may not
-	// have set: issue #72).
-	LocationOn bool  `json:"-"`
-	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
+	Version    string  `json:"version"`
+	SDK        int     `json:"sdk"`
+	W          int     `json:"w"`
+	H          int     `json:"h"`
+	Density    float64 `json:"density"`
+	LocationOn bool    `json:"-"`
+	Seq        int64   `json:"-"`
 }
 
 func agentVersion() string { return "0.1.67" }
 
-// dialHello connects to the agent, as dialAgent does with infoWait.
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, h, _, err := dialAgent(port, timeout, infoWait)
 	return c, h, err
 }
 
-// dialAgent connects to the agent and asks "info" (within infoWait) and "ping". hung: the
-// agent said hello, then did not answer "info" in time (issue #217).
 func dialAgent(port int, timeout, infoWait time.Duration) (_ *wire.Conn, _ hello, hung bool, _ error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
 	if err != nil {
@@ -444,17 +369,11 @@ func dialAgent(port int, timeout, infoWait time.Duration) (_ *wire.Conn, _ hello
 	return c, h, false, nil
 }
 
-// adopt makes c the driver's connection. With the accessibility service on, it first enables
-// NoopService over c itself, not through d.call: adopt runs inside reconnect, which holds
-// connMu, and a drop seen by d.call would reconnect again and wait on connMu forever (issue
-// #67). If c drops there, adopt closes it and fails, and the caller's next attempt tries again.
 func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	if d.closed.Load() {
-		// a reconnect that connected as the driver closed: keep nothing open (issue #335)
 		c.Close()
 		return errDriverClosed
 	}
-	// Subscribe before anything else so events pushed meanwhile are buffered for the pump.
 	sub := c.Subscribe()
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
 		c.Call("sh", map[string]any{"cmd": `cur=$(settings get secure enabled_accessibility_services); case "$cur" in *` + noopService + `*) ;; null|"") settings put secure enabled_accessibility_services ` + noopService + ` ;; *) settings put secure enabled_accessibility_services "$cur:` + noopService + `" ;; esac`, "timeout": 5000}, 5*time.Second)
@@ -462,41 +381,28 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 		case <-c.Done():
 			c.Close()
 			return fmt.Errorf("the agent connection dropped while enabling the accessibility service: %v", c.Err())
-		default: // the command's own result is not needed, as before
+		default:
 		}
 	}
-	// The agent's count as of now: from ping, or from an event already pushed on c.
 	agent := max(h.Seq, c.Seq(), c.SettledSeq())
 	d.stateMu.Lock()
 	if d.connP.Load() != nil {
-		// A restarted agent counts from 0 again, and nothing tells it from the same agent:
-		// move past every seq seen, so no screen read before the reconnect counts as current.
 		d.seqBase = d.lastSeq.Load() + 1
 	}
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
-	// The connection changes with its base, under the same lock (issue #68): a count is never
-	// mapped with the base of another connection.
 	d.connP.Store(c)
-	d.raiseLocked(d.seqBase + agent) // attaching to a running agent starts Seq at its count, not 0
+	d.raiseLocked(d.seqBase + agent)
 	d.stateMu.Unlock()
 	if d.closed.Load() {
-		// Closed while adopt enabled the accessibility service (up to 5 s): Close closed the
-		// connection it found, the one before c. Close c too, and start no pump on a closed
-		// driver (issue #335 review). A Close after this check closes c itself: it marks the
-		// driver closed before it reads the connection.
 		c.Close()
 		return errDriverClosed
 	}
-	// A new connection often means adb lost its forwards (an adb server restart drops them
-	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
-	// while its calls may reconnect, and so run adopt.
 	d.editorOld.Store(true)
 	d.resumeLocation(c, h.LocationOn)
 	go d.pump(c, sub)
 	return nil
 }
 
-// startAgent pushes the agent (only when this build is not on the device) and starts it.
 func (d *Driver) startAgent(ctx context.Context) error {
 	remote := "/data/local/tmp/tb-agent-" + agentHash() + ".apk"
 	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; "+killAgent+removeLeftLocation+"for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
@@ -512,14 +418,10 @@ func (d *Driver) startAgent(ctx context.Context) error {
 			return err
 		}
 	}
-	// The same APK, installed, provides NoopService: an enabled accessibility service makes
-	// Jetpack Compose send accessibility events (it sends none otherwise), so Compose screens
-	// are event-driven too. Install only when the installed copy differs; enable it if needed.
 	setup := ""
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
 		setup = serviceSetup(remote)
 	}
-	// nohup + background: the agent outlives this adb shell and later runs reconnect to it.
 	cmd := setup + fmt.Sprintf("CLASSPATH=%s nohup app_process / --nice-name=tb-agent dev.testbuddy.agent.Main > /data/local/tmp/tb-agent.log 2>&1 &", remote)
 	if _, err := d.adb.Shell(ctx, cmd); err != nil {
 		return err
@@ -558,28 +460,18 @@ func (d *Driver) Size() (int, int) {
 	return d.w, d.h
 }
 
-// Seq is the highest change count seen: from pushed "changed" and "settled" events (the agent
-// pushes a burst's trailing change when its coalescing window ends, issue #87), tree and action replies,
-// and ping on attach. It never goes backwards (issue #68).
 func (d *Driver) Seq() int64 {
 	d.stateMu.Lock()
 	defer d.stateMu.Unlock()
-	c := d.connP.Load() // read with its base: adopt changes both under stateMu
+	c := d.connP.Load()
 	d.raiseLocked(d.seqBase + max(c.Seq(), c.SettledSeq()))
 	return d.lastSeq.Load()
 }
 
-// conn is the current agent connection.
 func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
 
-// seq maps an agent change count read on the current connection (seqOn).
 func (d *Driver) seq(agent int64) int64 { return d.seqOn(d.conn(), agent) }
 
-// seqOn maps an agent change count read on connection c to the driver's, which never goes
-// backwards. The base, the current connection and lastSeq change together under stateMu, so a
-// count is never mapped with another connection's base (issue #68). A count from a connection
-// that is no longer current (a reply decoded after a reconnect) maps just below the current
-// base and raises nothing: whatever it describes reads as stale and is read again.
 func (d *Driver) seqOn(c *wire.Conn, agent int64) int64 {
 	d.stateMu.Lock()
 	defer d.stateMu.Unlock()
@@ -589,7 +481,6 @@ func (d *Driver) seqOn(c *wire.Conn, agent int64) int64 {
 	return d.raiseLocked(d.seqBase + agent)
 }
 
-// raiseLocked records v as seen and returns it. stateMu is held: every write to lastSeq is.
 func (d *Driver) raiseLocked(v int64) int64 {
 	if v > d.lastSeq.Load() {
 		d.lastSeq.Store(v)
@@ -597,14 +488,11 @@ func (d *Driver) raiseLocked(v int64) int64 {
 	return v
 }
 
-// closing is closed once the driver is (markClosed).
 func (d *Driver) closing() chan struct{} {
 	d.closingOnce.Do(func() { d.closingCh = make(chan struct{}) })
 	return d.closingCh
 }
 
-// markClosed marks the driver closed: a reconnect under way ends at its next step, and none
-// starts (issue #335).
 func (d *Driver) markClosed() {
 	d.closed.Store(true)
 	d.closeOnce.Do(func() { close(d.closing()) })
@@ -612,20 +500,17 @@ func (d *Driver) markClosed() {
 
 func (d *Driver) Close() error {
 	d.markClosed()
-	// drop the record of a given-up connection (a reconnect running now ends at its next step,
-	// so Close does not wait for it: it records nothing once closed)
 	if d.connMu.TryLock() {
 		d.gaveUpOn = nil
 		d.connMu.Unlock()
 	}
 	d.endRecording(context.Background())
 	d.stopLocation()
-	d.waitResume(context.Background()) // its "off" goes out before the connection closes; its calls are bounded
+	d.waitResume(context.Background())
 	d.closeEditorForward()
 	return d.conn().Close()
 }
 
-// Conn exposes the raw agent connection (for diagnostics).
 func (d *Driver) Conn() *wire.Conn { return d.conn() }
 
 func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
@@ -633,15 +518,11 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 	return m, err
 }
 
-// callOn is call, also returning the connection that answered: a seq in the reply maps with
-// that connection's base (seqOn).
 func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, *wire.Conn, error) {
 	if debug && op != "tap" && op != "swipe" && op != "key" && op != "type" {
 		t0 := time.Now()
 		defer func() { fmt.Fprintf(os.Stderr, "[tb] %s %dms\n", op, time.Since(t0).Milliseconds()) }()
 	}
-	// A cancelled run sends nothing, and a wait for the answer ends with the run: the late
-	// answer is dropped and the connection kept (wire.CallContext; issue #202).
 	if err := ctx.Err(); err != nil {
 		return nil, d.conn(), err
 	}
@@ -651,8 +532,6 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		}
 	}
 	if stampedOps[op] {
-		// A request token: if the connection drops and the request is sent again, the agent
-		// answers it from its first run instead of tapping or typing twice.
 		q := make(map[string]any, len(p)+1)
 		for k, v := range p {
 			q[k] = v
@@ -667,7 +546,7 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		return m, c, err
 	}
 	select {
-	case <-c.Done(): // the connection dropped: reconnect and send it once more
+	case <-c.Done():
 	default:
 		return m, c, err
 	}
@@ -679,22 +558,14 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 	return m, c, err
 }
 
-// A settle's "since" (issue #74): the agent compares it with its own seq, which counts from 0
-// on each agent and is reached through the connection's base. callOn turns it into that
-// connection's count when it sends the request, on a reconnect too, so it is never compared
-// with another agent's count.
 type (
-	// driverSince is a count in the driver's terms (Seq).
 	driverSince int64
-	// agentSince is a count an agent gave on connection conn (an editorTarget reply).
-	agentSince struct {
+	agentSince  struct {
 		conn *wire.Conn
 		seq  int64
 	}
 )
 
-// sinceOn returns p with its "since" as connection c's agent count. A count from before c's
-// agent (an earlier connection's) becomes -1: every change on c's agent counts as after it.
 func (d *Driver) sinceOn(c *wire.Conn, p map[string]any) map[string]any {
 	var v int64
 	switch s := p["since"].(type) {
@@ -722,16 +593,11 @@ func (d *Driver) sinceOn(c *wire.Conn, p map[string]any) map[string]any {
 	return q
 }
 
-// stampedOps carry a request token (call): every op that changes the device. Reads are sent
-// again as they are.
 var stampedOps = map[string]bool{
 	"tap": true, "doubleTap": true, "press": true, "swipe": true, "key": true, "type": true,
 	"erase": true, "clear": true, "sh": true, "rotate": true,
 }
 
-// pump forwards one connection's pushed events to the driver's subscribers. When the
-// connection drops it reconnects (with back-off, briefly) and tells subscribers only if that
-// fails.
 func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	for m := range sub {
 		var e struct {
@@ -741,9 +607,8 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seqOn(c, m.Seq), Pkg: e.Pkg})
 	}
 	if d.conn() != c || d.closed.Load() {
-		return // replaced by a newer connection, or closed on purpose
+		return
 	}
-	// reconnect gives up after its window; ctx only bounds an attempt that hangs past it
 	ctx, cancel := context.WithTimeout(context.Background(), reconnectWindow()+15*time.Second)
 	defer cancel()
 	if err := d.reconnect(ctx, c); err != nil && !d.closed.Load() {
@@ -763,16 +628,12 @@ func (d *Driver) fanout(e driver.Event) {
 	}
 }
 
-// reconnect replaces a dropped connection (once per drop, whoever notices first).
 func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	d.connMu.Lock()
 	defer d.connMu.Unlock()
 	if d.conn() != dropped {
-		return nil // someone else already reconnected
+		return nil
 	}
-	// A closed driver does not reconnect, and a Close ends a reconnect under way: one that
-	// went on ran adb, and could start the agent, for its whole window after the driver was
-	// done with (issue #335).
 	if d.closed.Load() {
 		return errDriverClosed
 	}
@@ -785,13 +646,6 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		case <-ctx.Done():
 		}
 	}()
-	// The device may be gone for a while (an emulator going offline under load, an adb
-	// server restart, a USB hiccup): keep trying for up to reconnectWindow, waiting for adb to
-	// see the device between attempts. Never restart the adb server: other devices use it.
-	// A drop that a reconnect already tried for that long and gave up on (the device gone for
-	// good: its emulator killed) is tried once more, not for the window again: each request
-	// of a step, and the one that waited for that reconnect, would otherwise hold the step for
-	// as long again (issue #101). One attempt still reaches a device that is back.
 	start := time.Now()
 	window := reconnectWindow()
 	if d.gaveUpOn == dropped {
@@ -805,7 +659,6 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		}
 		if err = d.connect(ctx); err == nil {
 			d.gaveUpOn = nil
-			// a drop between flows is noted in the next flow's log, before its steps
 			d.note(fmt.Sprintf("the connection to the tb agent dropped at %s (during this flow, or before it began): tb reconnected in %.1f s",
 				start.Format("15:04:05.0"), time.Since(start).Seconds()))
 			return nil
@@ -817,12 +670,11 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 			return err
 		}
 		if ctx.Err() != nil {
-			return err // the request's own time is up, or the driver closed: not a give-up on the device
+			return err
 		}
-		// never past the deadline: the last attempt is made at it
 		wait := min(time.Duration(attempt+1)*500*time.Millisecond, 3*time.Second, max(time.Until(deadline), 0))
 		wctx, cancel := context.WithTimeout(ctx, wait)
-		d.adb.Run(wctx, "wait-for-device") // returns at once when the device is there
+		d.adb.Run(wctx, "wait-for-device")
 		cancel()
 		select {
 		case <-ctx.Done():
@@ -832,15 +684,10 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	}
 }
 
-// errDriverClosed ends a reconnect once the driver is closed (issue #335).
 var errDriverClosed = errors.New("the driver is closed")
 
-// reconnectFor: how long a dropped agent connection is retried before the step fails.
 var reconnectFor = 45 * time.Second
 
-// reconnectWindow is reconnectFor, twice that in CI mode: a CI emulator can go offline for
-// about a minute under load, which a step rode out before a lost device stopped costing it a
-// second window (issue #101). A CI-only allowance; outside CI the window is reconnectFor.
 func reconnectWindow() time.Duration {
 	if ci.On() {
 		return 2 * reconnectFor
@@ -871,7 +718,6 @@ func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
 }
 
 func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeout time.Duration) (driver.SettleResult, error) {
-	// since is the driver's count (Seq): sent as the answering agent's own (sinceOn, issue #74).
 	m, err := d.call(ctx, "settle", map[string]any{"since": driverSince(since), "noChange": noChangeMs, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
 	if err != nil {
 		return "", err
@@ -883,35 +729,23 @@ func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeou
 	return driver.SettleResult(r.Result), nil
 }
 
-// Release stops tb's agent on the device and frees it for other tools: the agent holds the
-// device's only UiAutomation slot (another test tool, uiautomator or an instrumentation cannot
-// start while it runs), and the accessibility service it enabled is turned off again. The next
-// tb run starts the agent again (about a second).
-//
-// Release is cleanup: it runs to its end even when ctx is cancelled (a run stopped with
-// Ctrl-C still frees its devices), bounded by releaseWait (issue #202).
 func (d *Driver) Release(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseWait)
 	defer cancel()
 	d.markClosed()
 	d.endRecording(ctx)
 	d.stopLocation()
-	d.waitResume(ctx) // its "off" goes out before the connection closes, within releaseWait
+	d.waitResume(ctx)
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
-		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
-		// 2 s instead of waiting out that request's bound; stopAgent ends the agent anyway.
 		c.CallUnqueued(ctx, "exit", nil, 2*time.Second)
 		c.Close()
 	}
 	return stopAgent(ctx, d.adb)
 }
 
-// releaseWait bounds Release.
-var releaseWait = 10 * time.Second // a var for the tests
+var releaseWait = 10 * time.Second
 
-// ReleaseDevice stops a tb agent left running on a device, with no connection to it (one a
-// crashed or killed run left, or one kept with --keep-agents).
 func ReleaseDevice(ctx context.Context, serial string) error {
 	return stopAgent(ctx, device.NewADB(serial))
 }
@@ -925,28 +759,18 @@ func stopAgent(ctx context.Context, adb *device.ADBDevice) error {
 	return err
 }
 
-// removeLeftLocation removes the mock location providers an agent stopped with a signal leaves
-// (issue #72): one that ends on its own turns its location off, one that is killed cannot. The
-// agent lists the providers it added in locationList while they are on (agent Location.kt).
 const removeLeftLocation = `m=` + locationList + `; if [ -f $m ]; then for p in $(cat ` + locationList + `); do cmd location providers remove-test-provider $p; done; rm -f ` + locationList + `; fi; `
 
 const locationList = "/data/local/tmp/tb-location-providers"
 
-// killAgent ends a running agent before a new one starts: SIGTERM, up to 1 s for it to go, then
-// SIGKILL for what is left (issue #217). An old agent that is slow to exit, or stopped, would
-// otherwise keep the socket, and the new agent could not serve.
 const killAgent = `pids=$(pidof tb-agent) && { kill $pids; for i in 1 2 3 4 5; do pidof tb-agent >/dev/null || break; sleep 0.2; done; ` +
 	`left=$(pidof tb-agent) && kill -9 $left; }; `
 
-// Keep asks the agent to stay after this connection closes (for a later run, --keep-agents):
-// by default an agent left without a connection exits within a minute.
 func (d *Driver) Keep(ctx context.Context) error {
 	c := d.conn()
 	if c == nil {
 		return nil
 	}
-	// Cleanup: sent on a cancelled run too, and unqueued, so a request the run gave up on does
-	// not hold it past its own 2 s; the agent still gets it once that request is done (#202).
 	_, err := c.CallUnqueued(context.WithoutCancel(ctx), "keep", nil, 2*time.Second)
 	return err
 }

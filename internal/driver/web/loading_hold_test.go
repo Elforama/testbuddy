@@ -1,8 +1,5 @@
 package web
 
-// Issue #79 review: which pending requests keep a ready page's unfinished load counting, the
-// DOM clock that polling does not move, and a same-document back on a stalled load.
-
 import (
 	"encoding/json"
 	"testing"
@@ -14,9 +11,6 @@ func request(id, typ, u string) json.RawMessage {
 		"documentURL": "https://shop.example.com/", "request": map[string]string{"url": u}})
 }
 
-// What a ready page's unfinished load may be given up on: images, media, beacons, and
-// third-party scripts and frames (ads, analytics) never answering do not hold it; the site's
-// own scripts and frames, and stylesheets and fonts from anywhere, do.
 func TestHoldsLoad(t *testing.T) {
 	page := "https://shop.example.com/"
 	for _, c := range []struct {
@@ -41,8 +35,6 @@ func TestHoldsLoad(t *testing.T) {
 	}
 }
 
-// An app's own bundle still on its way holds the load however quiet the DOM is; once it ends,
-// the load may be given up on (an image is still pending).
 func TestPendingScriptHoldsLoad(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	d := newBareDriver()
@@ -62,7 +54,7 @@ func TestPendingScriptHoldsLoad(t *testing.T) {
 			t.Errorf("held requests %v, want the site's script only", d.loadPending)
 		}
 	})
-	d.onEvent("Network.loadingFinished", raw(map[string]string{"requestId": "js"}), "frame-session") // another session's id
+	d.onEvent("Network.loadingFinished", raw(map[string]string{"requestId": "js"}), "frame-session")
 	backdate(d)
 	if stale, _ := staleNow(d); stale {
 		t.Fatal("a frame session's request end released the page's script")
@@ -73,8 +65,6 @@ func TestPendingScriptHoldsLoad(t *testing.T) {
 		t.Error("the script ended and the DOM is quiet, but the load still counts")
 	}
 
-	// A new document drops the old one's requests; a held request counts up to the load
-	// timeout, not for ever.
 	d.onEvent("Page.frameStartedLoading", raw(map[string]string{"frameId": "main"}), "")
 	d.onEvent("Page.frameNavigated", raw(map[string]any{"frame": map[string]string{"id": "main", "url": "https://shop.example.com/2"}}), "")
 	locked(d, func() {
@@ -95,8 +85,6 @@ func TestPendingScriptHoldsLoad(t *testing.T) {
 	}
 }
 
-// Requests starting and ending (a page polling every second) are not the DOM changing, so
-// they do not put back giving up on a stalled load.
 func TestPollingDoesNotHoldStalledLoad(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -110,9 +98,6 @@ func TestPollingDoesNotHoldStalledLoad(t *testing.T) {
 	}
 }
 
-// Going back to a fragment entry on a page whose load never ended starts a load with no
-// DOMContentLoaded of its own (Chrome: frameStartedLoading, then navigatedWithinDocument,
-// and nothing else). The document is still the ready one.
 func TestSameDocumentBackOnStalledLoad(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -129,7 +114,6 @@ func TestSameDocumentBackOnStalledLoad(t *testing.T) {
 	}
 	eventually(t, "the page settles after a same-document back", func() bool { return settledNow(d) })
 
-	// A new document is not ready until its own DOMContentLoaded.
 	d.onEvent("Page.frameStartedLoading", raw(map[string]string{"frameId": "main"}), "")
 	d.onEvent("Page.frameNavigated", raw(map[string]any{"frame": map[string]string{"id": "main", "url": "https://shop.example.com/next"}}), "")
 	d.onEvent("Page.navigatedWithinDocument", raw(map[string]any{"frameId": "main", "url": "https://shop.example.com/next#a"}), "")

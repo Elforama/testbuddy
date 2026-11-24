@@ -13,13 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #79 in headless Chrome: a page whose load never ends (a request that never answers
-// holds the load event back) against pages whose load is only slow. Needs Chrome: runs with
-// TB_BROWSER_TESTS=1.
-
-// loadServer serves page at / and, for its subresources: /hang.* never answers while the
-// test runs; /slow.js answers after 3 s with a script that fills #app; /slow.html (a frame)
-// after 3 s; /slow.woff2 after 3.5 s.
 func loadServer(t *testing.T, page string) string {
 	t.Helper()
 	hang := make(chan struct{})
@@ -57,7 +50,7 @@ func loadServer(t *testing.T, page string) string {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(hang) }) // runs before srv.Close: lets the handlers return
+	t.Cleanup(func() { close(hang) })
 	return srv.URL + "/"
 }
 
@@ -91,11 +84,6 @@ const hangingImagePage = `<!doctype html><html><body style="margin:0">
 <img src="/hang.png">
 </body></html>`
 
-// A page whose image never answers (a stalled ad pixel or analytics call) holds the load
-// event back for good. Issue #79: opening it took the full 30 s load timeout, WaitSettled
-// its whole 5 s, and every tap 5 s with settle=timeout. Once the DOM is ready and has been
-// quiet for loadGrace, the stalled load no longer counts as busy, and the trace says the
-// page is still loading.
 func TestHangingSubresourceInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	link := loadServer(t, hangingImagePage)
@@ -136,16 +124,13 @@ func TestHangingSubresourceInChrome(t *testing.T) {
 	}
 }
 
-// Issue #79 review: on a page whose load never ends, going back to a fragment entry (#frag,
-// then pushState, then back) makes Chrome start a "load" with no DOMContentLoaded and no
-// end. The page was then busy for good: WaitSettled ran out every time.
 func TestHangingSubresourceSameDocumentBackInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	if err := d.LaunchApp(ctx, loadServer(t, hangingImagePage), driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	d.WaitSettled(ctx, 5*time.Second)
-	for _, y := range []int{150, 90} { // #frag, then pushState
+	for _, y := range []int{150, 90} {
 		if _, err := d.Tap(ctx, 100, y, driver.ActionOpts{}); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +150,6 @@ func TestHangingSubresourceSameDocumentBackInChrome(t *testing.T) {
 	}
 }
 
-// Issue #79 review: a same-site frame that arrives 3 s in is part of the page: waited for.
 func TestSlowFrameInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	link := loadServer(t, `<!doctype html><html><body><img src="/hang.png"><iframe src="/slow.html"></iframe></body></html>`)
@@ -180,9 +164,6 @@ func TestSlowFrameInChrome(t *testing.T) {
 	}
 }
 
-// Issue #79 review: a single-page app whose bundle (an async, same-site script) arrives 3 s
-// after DOMContentLoaded. The DOM is quiet meanwhile, but the page is not ready: launchApp
-// must wait for the bundle, not give up after the grace on an empty shell.
 func TestSlowAppBundleInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	link := loadServer(t, `<!doctype html><html><body><div id="app"></div><script async src="/slow.js"></script></body></html>`)
@@ -198,8 +179,6 @@ func TestSlowAppBundleInChrome(t *testing.T) {
 	}
 }
 
-// Issue #79 review: on a page whose image never answers, a web font that arrives 3.5 s in
-// moves text when it lands, so it is waited for.
 func TestSlowFontInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	link := loadServer(t, `<!doctype html><html><head><style>
@@ -217,9 +196,6 @@ body { font-family: Slow, sans-serif; }
 	}
 }
 
-// A same-site script that never answers could still be the page's own code: tb keeps waiting
-// for it, as for any load, up to the 30 s load timeout. This checks it is still waited for
-// well past the grace.
 func TestHangingScriptInChrome(t *testing.T) {
 	d, ctx := openChrome(t)
 	link := loadServer(t, `<!doctype html><html><body><div id="app">Shell</div><script async src="/hang.js"></script></body></html>`)

@@ -17,9 +17,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// fakeDriver is a device whose screen and events the test controls. It counts screen
-// reads, so tests can prove waits do not poll. It records every call it gets (calls, and
-// per-method slices) and can be told to fail any method (errs, keyed by method name).
 type fakeDriver struct {
 	mu          sync.Mutex
 	screen      func() []*ui.Node
@@ -29,60 +26,59 @@ type fakeDriver struct {
 	taps        []([2]int)
 	swipes      []driver.ActionOpts
 	swipeMs     []time.Duration
-	swipeTries  int // Swipe calls, those that failed too
+	swipeTries  int
 	subs        []chan driver.Event
-	onSwipe     func(x1, y1, x2, y2 int) // what a swipe does to the screen (default: shows the target after 3)
-	waits       atomic.Int64             // WaitSettled calls
+	onSwipe     func(x1, y1, x2, y2 int)
+	waits       atomic.Int64
 	tapOpts     []driver.ActionOpts
-	keyboard    *ui.Rect   // a keyboard window over the app, if set
-	kbNodes     []*ui.Node // the keyboard window's own nodes (its keys, its header), if set
-	plat        string     // "android" unless set
+	keyboard    *ui.Rect
+	kbNodes     []*ui.Node
+	plat        string
 	onTap       func(x, y int)
-	clicked     func(x, y int) *bool                                     // what a tap reports about a view taking its click (nil: unknown)
-	clicks      atomic.Int64                                             // the agent's click count (Clicks); taps report it as it was before them
-	notInjected func(n int) string                                       // what the n-th tap (from 1) reports of its touch not injected ("": injected)
-	tapReply    func(n int, res driver.ActionResult) driver.ActionResult // rewrites the n-th tap's (from 1) reply, if set
-	sysAlert    func() []*ui.Node                                        // nodes of a system window over the app (an iOS alert), if set
-	appAbove    func() *ui.Window                                        // another app window over the app's (a dialog, picture-in-picture), if set and not nil
-	size        [2]int                                                   // what Size reports (default 400x800)
-	rotated     atomic.Bool                                              // Size reports its width and height swapped (a turn to landscape)
-	onOrient    func(o string)                                           // what setOrientation does to the screen, if set
-	winID       atomic.Int64                                             // the app window's id (a new Activity gets a new one)
-	noApp       atomic.Bool                                              // the screen has no app window
-	unread      atomic.Int32                                             // windows listed but not readable (Screen.Unread)
+	clicked     func(x, y int) *bool
+	clicks      atomic.Int64
+	notInjected func(n int) string
+	tapReply    func(n int, res driver.ActionResult) driver.ActionResult
+	sysAlert    func() []*ui.Node
+	appAbove    func() *ui.Window
+	size        [2]int
+	rotated     atomic.Bool
+	onOrient    func(o string)
+	winID       atomic.Int64
+	noApp       atomic.Bool
+	unread      atomic.Int32
 
-	// Recording and configuration added for the wider command tests.
-	calls     []string            // every non-read call, "Method arg..." in order
-	tapKind   []string            // per tap: "tap", "double" or "long"
-	holds     []time.Duration     // per long press: the hold
-	swipeAt   [][4]int            // per swipe: x1, y1, x2, y2
-	typed     []string            // TypeText texts
-	typeOpts  []driver.ActionOpts // TypeText options
-	erased    []int               // EraseText counts
-	keys      []string            // PressKey keys
-	keyOpts   []driver.ActionOpts // PressKey options
-	launches  []launchCall        // LaunchApp calls
-	perms     []permCall          // SetPermissions calls
-	links     []linkCall          // OpenLink calls
-	locs      [][2]float64        // SetLocation calls
-	orients   []string            // SetOrientation calls
-	media     [][]string          // AddMedia calls
-	recs      []string            // StartRecording paths
-	waitDur   []time.Duration     // WaitSettled timeouts
-	errs      map[string]error    // method name -> error to return
-	screenErr []error             // errors the next Screen reads return, one each (issue #373)
-	tapSettle driver.SettleResult // Tap/DoubleTap/LongPress result ("" = Changed)
-	keySettle driver.SettleResult // PressKey result ("" = none, as an agent that does not say)
-	shot      []byte              // Screenshot bytes
-	draw      func() image.Image  // what is drawn, at 400x800 (Screenshot scales it), if set
-	kbShown   bool                // Screen reports the keyboard as shown
-	onWait    func()              // runs inside WaitSettled (a change while settling)
-	fg        string              // Foreground ("app" unless set)
-	onType    func(text string)   // what typing does to the screen
-	onPress   func(key string)    // what a key press does to the screen
-	onLaunch  func(app string)    // what launching does
-	pkg       func() string       // the app window's package or bundle id ("app" unless set)
-	onLink    func(link string)   // what opening a link does
+	calls     []string
+	tapKind   []string
+	holds     []time.Duration
+	swipeAt   [][4]int
+	typed     []string
+	typeOpts  []driver.ActionOpts
+	erased    []int
+	keys      []string
+	keyOpts   []driver.ActionOpts
+	launches  []launchCall
+	perms     []permCall
+	links     []linkCall
+	locs      [][2]float64
+	orients   []string
+	media     [][]string
+	recs      []string
+	waitDur   []time.Duration
+	errs      map[string]error
+	screenErr []error
+	tapSettle driver.SettleResult
+	keySettle driver.SettleResult
+	shot      []byte
+	draw      func() image.Image
+	kbShown   bool
+	onWait    func()
+	fg        string
+	onType    func(text string)
+	onPress   func(key string)
+	onLaunch  func(app string)
+	pkg       func() string
+	onLink    func(link string)
 }
 
 type launchCall struct {
@@ -104,7 +100,6 @@ func (f *fakeDriver) node(text, id string, top int) *ui.Node {
 	return &ui.Node{Text: text, ID: id, Bounds: ui.Rect{L: 0, T: top, R: 400, B: top + 50}, Enabled: true, Clickable: true}
 }
 
-// change bumps the change counter and pushes "changed"; settle pushes "settled".
 func (f *fakeDriver) change(settle bool) {
 	f.mu.Lock()
 	f.seq++
@@ -120,7 +115,6 @@ func (f *fakeDriver) change(settle bool) {
 	}
 }
 
-// push sends one event to every subscriber as is.
 func (f *fakeDriver) push(e driver.Event) {
 	f.mu.Lock()
 	subs := append([]chan driver.Event(nil), f.subs...)
@@ -130,7 +124,6 @@ func (f *fakeDriver) push(e driver.Event) {
 	}
 }
 
-// record logs a call and returns the error configured for the method.
 func (f *fakeDriver) record(method string, args ...any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -142,7 +135,6 @@ func (f *fakeDriver) record(method string, args ...any) error {
 	return f.errs[method]
 }
 
-// called reports the recorded calls whose method is m.
 func (f *fakeDriver) called(m string) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -215,12 +207,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	sw, sh := f.Size()
 	w := &ui.Window{ID: int(f.winID.Load()), Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
 	if f.noApp.Load() {
-		w.Type = "system" // the app's window not readable (a window being replaced)
+		w.Type = "system"
 	}
 	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1,
 		Unread: int(f.unread.Load())}
 	for i, n := range nodes {
-		n.Ref = i + 1 // as the Android agent numbers the nodes of a window it wrote (issue #321)
+		n.Ref = i + 1
 	}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
@@ -279,7 +271,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	f.taps = append(f.taps, [2]int{x, y})
 	f.tapOpts = append(f.tapOpts, o)
 	f.tapKind = append(f.tapKind, kind)
-	before := f.clicks.Load() // the agent takes the count as the action starts
+	before := f.clicks.Load()
 	on := f.onTap
 	clicked := f.clicked
 	err := f.errs["Tap"]
@@ -349,7 +341,7 @@ func (f *fakeDriver) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Durat
 		return driver.ActionResult{Settle: driver.Changed}, nil
 	}
 	if n >= 3 {
-		f.change(true) // the target scrolls into view after the third drag
+		f.change(true)
 	}
 	return driver.ActionResult{Settle: driver.Changed}, nil
 }
@@ -406,8 +398,6 @@ func (f *fakeDriver) Screenshot(ctx context.Context, s float64, fm string) ([]by
 	return scaledPNG(draw(), s), nil
 }
 
-// scaledPNG is img scaled by s (nearest pixel), as a PNG: what a device's downscaled
-// screenshot gives.
 func scaledPNG(img image.Image, s float64) []byte {
 	b := img.Bounds()
 	w, h := max(1, int(float64(b.Dx())*s)), max(1, int(float64(b.Dy())*s))

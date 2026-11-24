@@ -7,9 +7,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #290 review: a tap the agent held while the app came to the foreground is traced, and
-// one sent with the app still not active (at the agent's cap) is always traced: an app stuck
-// entering under an overlay SpringBoard does not list never costs 3 s unnoticed.
 func TestTapTracesTheWaitForTheAppToTakeInput(t *testing.T) {
 	for _, c := range []struct {
 		name   string

@@ -1,10 +1,5 @@
 package web
 
-// A main-frame load that never ends (issue #79): once the page's DOM is ready and has been
-// quiet for loadGrace, the unfinished load stops holding the page unsettled and stops holding
-// navigation back. Driven by injected events; the grace is passed by back-dating the last
-// change rather than by sleeping, except where the navigation's own wait is measured.
-
 import (
 	"strings"
 	"testing"
@@ -25,21 +20,17 @@ func staleNow(d *Driver) (stale, ready bool) {
 	return d.stale, d.ready
 }
 
-// startLoad: the main frame starts loading and its DOM becomes ready; the load never ends.
 func startLoad(d *Driver) {
 	d.onEvent("Page.frameNavigated", raw(map[string]any{"frame": map[string]string{"id": "main", "url": "https://shop.example.com/"}}), "")
 	d.onEvent("Page.frameStartedLoading", raw(map[string]string{"frameId": "main"}), "")
 	d.onEvent("Page.domContentEventFired", raw(map[string]any{}), "")
 }
 
-// backdate makes the last change older than the load grace and runs the stale check.
 func backdate(d *Driver) {
 	locked(d, func() { d.domAt = time.Now().Add(-loadGraceNow() - time.Millisecond) })
 	d.onStale()
 }
 
-// Issue #79: a ready page whose load never ends settles once its DOM has been quiet for
-// loadGrace, and the trace says it is still loading.
 func TestStalledLoadStopsCounting(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	d := newBareDriver()
@@ -48,7 +39,7 @@ func TestStalledLoadStopsCounting(t *testing.T) {
 	if settledNow(d) {
 		t.Fatal("a page whose DOM just became ready counts as settled")
 	}
-	d.onStale() // too early: the DOM changed just now
+	d.onStale()
 	if stale, _ := staleNow(d); stale || settledNow(d) {
 		t.Fatal("the load stopped counting before the grace")
 	}
@@ -66,15 +57,12 @@ func TestStalledLoadStopsCounting(t *testing.T) {
 		t.Errorf("notes %q", notes)
 	}
 
-	// A new load is waited for afresh.
 	d.onEvent("Page.frameStartedLoading", raw(map[string]string{"frameId": "main"}), "")
 	if stale, ready := staleNow(d); stale || ready || settledNow(d) {
 		t.Error("a new load did not count as busy")
 	}
 }
 
-// Before the DOM is ready the load counts however long it takes: no DOMContentLoaded, no
-// giving up (a page still parsing, or waiting on a script it needs).
 func TestLoadBeforeDOMReadyCounts(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -91,7 +79,6 @@ func TestLoadBeforeDOMReadyCounts(t *testing.T) {
 	})
 }
 
-// A load that ends normally needs none of this: the stale check that fires later does nothing.
 func TestFinishedLoadNotStale(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -103,7 +90,6 @@ func TestFinishedLoadNotStale(t *testing.T) {
 	}
 }
 
-// The DOM changing pushes the giving up back: the timer re-arms from the latest change.
 func TestStaleWaitsForQuietDOM(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	d := newBareDriver()
@@ -116,7 +102,6 @@ func TestStaleWaitsForQuietDOM(t *testing.T) {
 	}
 }
 
-// In CI mode the grace is longer: on a slow runner a page's own scripts arrive later.
 func TestLoadGraceCI(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	if g := loadGraceNow(); g != 5*time.Second {
@@ -128,8 +113,6 @@ func TestLoadGraceCI(t *testing.T) {
 	}
 }
 
-// Issue #79: launchApp on a page whose image never answers returned only at the 30 s load
-// timeout. Now it returns once the DOM has been ready and quiet for loadGrace.
 func TestNavigateStalledLoad(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	page, d := inputPage(t)
@@ -139,7 +122,6 @@ func TestNavigateStalledLoad(t *testing.T) {
 			page.event("Page.frameNavigated", map[string]any{"frame": map[string]string{"id": "main", "url": "https://shop.example.com/"}}, "")
 			page.event("Page.frameStartedLoading", map[string]string{"frameId": "main"}, "")
 			page.event("Page.domContentEventFired", map[string]any{"timestamp": 1}, "")
-			// no Page.loadEventFired: an image on the page never answers
 		}()
 		return map[string]any{"frameId": "main", "loaderId": "L1"}
 	})

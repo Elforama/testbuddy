@@ -1,9 +1,5 @@
 package ios
 
-// Issue #215: a port that accepts a connection but never says hello (a process that is not a
-// tb runner, or a runner of ours so stuck its connection thread is dead) is occupied, not free:
-// connect must not start a runner there, which could not bind it.
-
 import (
 	"fmt"
 	"net"
@@ -14,8 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// silentListener accepts connections on port and never writes to them; the func it returns
-// stops it (as ending the process holding the port would).
 func silentListener(t *testing.T, port int) func() {
 	t.Helper()
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -50,9 +44,6 @@ func silentListener(t *testing.T, port int) func() {
 	return stop
 }
 
-// Issue #215: a runner started on the next port while the preferred one was held is reused by
-// the next Open once the preferred port is free again (its holder, a stuck runner of ours, was
-// ended): not replaced by a new runner on the preferred port, which would end it.
 func TestConnectReusesTheRunnerPastAFreedPort(t *testing.T) {
 	ts := stubTools(t)
 	stubProcs(t)
@@ -82,7 +73,6 @@ func TestConnectReusesTheRunnerPastAFreedPort(t *testing.T) {
 	}
 }
 
-// Issue #215: the holder of a silent port is named from lsof -Fpc output.
 func TestLsofHolder(t *testing.T) {
 	for out, want := range map[string]string{
 		"p123\ncpython3\nf4\n":            "pid 123 (python3)",
@@ -96,8 +86,6 @@ func TestLsofHolder(t *testing.T) {
 	}
 }
 
-// Issue #215: the preferred port is held by something that never says hello: the runner is
-// started on the next port of the range, and what holds the port is left alone.
 func TestConnectSkipsAPortThatNeverSaysHello(t *testing.T) {
 	ts := stubTools(t)
 	stubProcs(t)
@@ -118,13 +106,11 @@ func TestConnectSkipsAPortThatNeverSaysHello(t *testing.T) {
 	}
 }
 
-// Issue #215: every port of the simulator's range is held by something that never says hello:
-// Open fails at once and says the ports are held, without starting a runner that cannot bind.
 func TestConnectFailsWhenEveryPortIsHeld(t *testing.T) {
 	ts := stubTools(t)
 	stubProcs(t)
 	old := portTries
-	portTries = 3 // each silent port costs the probe's 2 s hello wait
+	portTries = 3
 	t.Cleanup(func() { portTries = old })
 	port := freePorts(t, portTries)
 	udid := udidFor(t, port)

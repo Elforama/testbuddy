@@ -18,8 +18,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// issue #58: SIGTERM (or Ctrl-C) stops the daemon the orderly way, closing every open
-// session's driver before it exits.
 func TestDaemonSignalClosesDrivers(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no SIGTERM to send on Windows")
@@ -29,7 +27,7 @@ func TestDaemonSignalClosesDrivers(t *testing.T) {
 	addDev(s, web, "")
 	srv, served := serveService(t, s, time.Hour)
 	defer srv.StopOnSignals(syscall.SIGTERM)()
-	dialDaemon(t).Close() // listening
+	dialDaemon(t).Close()
 	p, _ := os.FindProcess(os.Getpid())
 	if err := p.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
@@ -38,9 +36,6 @@ func TestDaemonSignalClosesDrivers(t *testing.T) {
 	checkClosed(t, s, "SIGTERM", web)
 }
 
-// closeWatch is a driver that records whether a command still used it after it was closed
-// (a command reads the screen as it ends). The closer holds the device lock while it closes
-// the driver (issue #153), so the lock itself cannot tell.
 type closeWatch struct {
 	*fakeDriver
 	closed   atomic.Bool
@@ -59,8 +54,6 @@ func (c *closeWatch) Screen(ctx context.Context) (*ui.Screen, error) {
 	return c.fakeDriver.Screen(ctx)
 }
 
-// issue #58: a command still running when the daemon stops is cancelled, and has ended,
-// before its device's driver is closed; its client is told why.
 func TestDaemonStopCancelsCommandsBeforeClosing(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -81,7 +74,7 @@ func TestDaemonStopCancelsCommandsBeforeClosing(t *testing.T) {
 	defer first.Close()
 	request(first, "do", map[string]any{"commands": "extendedWaitUntil:\n  visible: Never there\n  timeout: 20000\n"})
 	deadline := time.Now().Add(5 * time.Second)
-	for d.mu.TryLock() { // the wait has started once it holds the device
+	for d.mu.TryLock() {
 		d.mu.Unlock()
 		if time.Now().After(deadline) {
 			t.Fatal("the do did not start")
@@ -115,7 +108,6 @@ func TestDaemonStopCancelsCommandsBeforeClosing(t *testing.T) {
 	}
 }
 
-// stuckDriver's Close never returns (until the test ends); Kill is counted.
 type stuckDriver struct {
 	*fakeDriver
 	unblock chan struct{}
@@ -125,8 +117,6 @@ type stuckDriver struct {
 func (s *stuckDriver) Close() error { <-s.unblock; return nil }
 func (s *stuckDriver) Kill()        { s.kills.Add(1) }
 
-// issue #58: a driver that does not close in time cannot keep the daemon from exiting:
-// CloseAll returns when its time is up, and kills what it can (web: Chrome's process).
 func TestCloseAllKillsAStuckDriver(t *testing.T) {
 	s := New()
 	f := newFake("chrome", "Chrome", device.Web)
@@ -148,8 +138,6 @@ func TestCloseAllKillsAStuckDriver(t *testing.T) {
 	}
 }
 
-// serveService runs s on a daemon server with the given idle limit; served receives Serve's
-// result.
 func serveService(t *testing.T, s *Service, idle time.Duration) (*daemon.Server, chan error) {
 	t.Helper()
 	t.Setenv("TB_HOME", t.TempDir())
@@ -178,7 +166,7 @@ func dialDaemon(t *testing.T) net.Conn {
 		if time.Now().After(deadline) {
 			t.Fatalf("daemon did not listen: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond) // server start-up only
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -194,8 +182,6 @@ func waitServed(t *testing.T, served chan error, why string) {
 	}
 }
 
-// checkClosed checks that every open session's driver was closed once, and that phone
-// agents were kept for the next run (Close, not Release: the same as a `tb test` run's end).
 func checkClosed(t *testing.T, s *Service, why string, fakes ...*fakeDriver) {
 	t.Helper()
 	for _, f := range fakes {
@@ -216,9 +202,6 @@ func checkClosed(t *testing.T, s *Service, why string, fakes ...*fakeDriver) {
 	}
 }
 
-// issue #58: `tb daemon stop` closes every open session's driver before the daemon exits
-// (a web session's Chrome and its temporary profile were left behind), and the stop
-// command's answer still reaches the client.
 func TestDaemonStopClosesDrivers(t *testing.T) {
 	s := New()
 	web := newFake("chrome", "Chrome", device.Web)
@@ -246,7 +229,6 @@ func TestDaemonStopClosesDrivers(t *testing.T) {
 	checkClosed(t, s, "tb daemon stop", web, phone)
 }
 
-// issue #58: the daemon's idle exit closes every open session's driver too.
 func TestDaemonIdleExitClosesDrivers(t *testing.T) {
 	s := New()
 	web := newFake("chrome", "Chrome", device.Web)

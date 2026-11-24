@@ -5,12 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The editor settings read from dumps captured on emulators (issues #70 and #99), API 30-34
- * google_apis arm64 images, the bench's Compose toolkit screen: its multi-line field
- * (`tk_notes`, inputType=0x28001 imeOptions=0x42000000) or the single-line one (`tk_field`,
- * 0x8001 / Done 0x2000006) focused, the AOSP keyboard up. In src/test/resources/ime.
- */
 class CapturedDumpsTest {
     private fun res(name: String): ByteArray =
         javaClass.classLoader!!.getResourceAsStream("ime/$name")!!.use { it.readBytes() }
@@ -25,7 +19,6 @@ class CapturedDumpsTest {
 
     @Test
     fun android12To14PrintTheServiceStateBareAndItIsReadAlone() {
-        // `dumpsys input_method --proto`: opens with 0x1a (field 3), no IMMTRACE, about 500 bytes.
         for (sdk in 31..34) {
             for ((file, want) in listOf("multiline" to multiLine, "singleline" to singleLine)) {
                 val b = res("api$sdk-$file-proto.bin")
@@ -42,15 +35,11 @@ class CapturedDumpsTest {
 
     @Test
     fun android11PrintsTextForTheProtoOptionWithTheClientsSection() {
-        // API 30: `--proto` prints the text dump. The service prints no current editor; the
-        // client's `mCurrentTextBoxAttribute:` and the keyboard's `mInputEditorInfo:` hold it.
-        // The excerpt also has the start-input history, whose types must not be taken.
         val text = String(res("api30-multiline-text.txt"), Charsets.UTF_8)
         assertEquals(multiLine, EditorSettings.parse(text, "dev.testbuddy.bench"))
         val d = device(30, ShellResult(0, text, false))
         assertEquals(multiLine, EditorSettings.read(d, "dev.testbuddy.bench"))
         assertEquals(listOf("dumpsys input_method --proto"), d.shells)
-        // The keyboard's copy alone, as when the client section is left out.
         assertEquals(multiLine, EditorSettings.parse(text.replace("mCurrentTextBoxAttribute:", "mOther:")))
     }
 

@@ -2,7 +2,6 @@ import Foundation
 import XCTest
 @testable import TBAgentCore
 
-/// Records the paths a gesture builds, in place of XCTest's XCPointerEventPath.
 final class Recorder: PathBuilder {
     enum Step: Equatable {
         case down(CGPoint, TimeInterval)
@@ -12,12 +11,10 @@ final class Recorder: PathBuilder {
 
     final class Path {
         var steps: [Step] = []
-        /// The moves of an explicit drag: point, offset, duration.
         var drag: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = []
         var dragLiftAt: TimeInterval?
     }
 
-    /// Whether this "Xcode" has explicit move events.
     var explicit = true
 
     func touch(at p: CGPoint, offset: TimeInterval) -> Path {
@@ -38,7 +35,6 @@ final class Recorder: PathBuilder {
     }
 }
 
-/// The timing of the iOS agent's gestures: tb's taps, swipes and drags are only as good as it.
 final class GesturesTests: XCTestCase {
     private let rec = Recorder()
 
@@ -79,40 +75,25 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.timeout, 10.45, accuracy: 1e-9)
     }
 
-    /// Issue #127: a swipe from a slider left it at 71 instead of 80+ on a slow simulator. The
-    /// finger lifted while still gliding: when the app was behind, the last moves reached it in
-    /// one batch with the lift, and the slider settled where its thumb had got to, not where the
-    /// finger was (and a batch with the touch down loses its moves the same way: a control in a
-    /// scroll view only gets the touch once the scroll view's 150 ms touch delay ran out). A
-    /// swipe that places what it starts on rests at its start before it moves and at its end
-    /// before it lifts.
     func testASwipeThatPlacesAControlRestsBeforeMovingAndBeforeLifting() throws {
         let a = CGPoint(x: 201, y: 606), z = CGPoint(x: 401, y: 606)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
         let moves = g.paths[0].drag
         let r = Gestures.swipeRestS, e = Gestures.swipeEndCreepS
-        let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y) // the glide stops short; the finger creeps the rest
+        let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y)
         XCTAssertEqual(moves.map { $0.p }, [a, a, y, z], "the finger should rest at the start, glide, then creep to the end: \(g.paths[0].steps)")
         guard moves.count == 4 else { return }
         XCTAssertEqual(moves[1].offset, 0, accuracy: 1e-9)
-        XCTAssertEqual(moves[1].duration, r, accuracy: 1e-9)   // still at the start
+        XCTAssertEqual(moves[1].duration, r, accuracy: 1e-9)
         XCTAssertEqual(moves[2].offset, r, accuracy: 1e-9)
-        XCTAssertEqual(moves[2].duration, 0.4, accuracy: 1e-9) // the glide: the flow's duration
+        XCTAssertEqual(moves[2].duration, 0.4, accuracy: 1e-9)
         XCTAssertEqual(moves[3].offset, r + 0.4, accuracy: 1e-9)
-        XCTAssertEqual(moves[3].duration, e, accuracy: 1e-9)   // creeping at the end
-        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, r + 0.4 + e, accuracy: 1e-9) // lifted only then
+        XCTAssertEqual(moves[3].duration, e, accuracy: 1e-9)
+        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, r + 0.4 + e, accuracy: 1e-9)
         XCTAssertEqual(g.timeout, 10 + r + 0.4 + e, accuracy: 1e-9)
         XCTAssertGreaterThan(r, 0.15, "longer than a scroll view's touch delay")
     }
 
-    /// Issue #182: #127's rests were not enough. In CI the bench app stopped handling events
-    /// about 130 ms into the glide, for about 925 ms (its simulator log: no accessibility event,
-    /// an idle request answered 680 ms late), and the slider settled at 74, not 100. Measured
-    /// with a touch logger and the app stopped 900 ms of every 1.2 s: the moves that came during
-    /// a stall reach the app as one move, a slider's pan that begins on it needs another move to
-    /// follow the finger, and a finger held still sends none (56 instead of 100). So the finger
-    /// does not stand still at the end: it creeps the last few points, for long enough that it
-    /// still moves once a stall like that one is over, even one that starts as the glide ends.
     func testASwipeThatPlacesAControlKeepsMovingAtTheEndPastAStallOfASecond() throws {
         let a = CGPoint(x: 201, y: 606), z = CGPoint(x: 401, y: 606)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
@@ -126,14 +107,12 @@ final class GesturesTests: XCTestCase {
         XCTAssertLessThanOrEqual(creep / moves[3].duration, 10, "too fast at the lift: it would fling")
         XCTAssertGreaterThanOrEqual(moves[3].duration, stall + frames + 0.5, "the creep should outlast #182's stall, with half a second to spare")
         XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, moves[3].offset + moves[3].duration, accuracy: 1e-9)
-        // The rest before moving is unchanged: past a scroll view's touch delay, short of a long press.
         XCTAssertEqual(moves[0].p, a)
         XCTAssertEqual(moves[1].p, a)
         XCTAssertEqual(moves[1].duration, Gestures.swipeRestS, accuracy: 1e-9)
         XCTAssertLessThan(Gestures.swipeRestS, 0.5)
     }
 
-    /// Issue #127, in an Xcode without explicit move events: the same rests, by moveToPoints.
     func testWithoutExplicitMovesARestingSwipeStillRests() throws {
         rec.explicit = false
         let a = CGPoint(x: 10, y: 600), z = CGPoint(x: 300, y: 600)
@@ -143,7 +122,6 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps, [.down(a, 0), .move(a, r), .move(y, r + 0.4), .move(z, r + 0.4 + e), .lift(r + 0.4 + e)])
     }
 
-    /// A swipe that does not place a control (a direction, two points) still lifts moving and flings.
     func testASwipeThatDoesNotRestStillLiftsMoving() throws {
         let g = try Gestures.swipe(rec, from: CGPoint(x: 100, y: 600), to: CGPoint(x: 100, y: 200), ms: 400, rest: false)
         XCTAssertEqual(g.paths[0].steps.last, .lift(0.05 + 0.4))
@@ -166,14 +144,11 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(moves[3].offset, 0.19, accuracy: 1e-9)
         XCTAssertEqual(moves[1].duration, 0.04, accuracy: 1e-9)
         XCTAssertEqual(moves[2].duration, 0.15, accuracy: 1e-9)
-        // The tail: 20 pt at 200 pt/s, too slow to fling on.
         XCTAssertEqual(moves[3].duration, 0.1, accuracy: 1e-9)
         XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, 0.29, accuracy: 1e-9)
         XCTAssertEqual(g.timeout, 10.29, accuracy: 1e-9)
     }
 
-    /// The tail a scrollUntilVisible drag ends on: 20 pt at 200 pt/s; 40 pt in the host's CI mode
-    /// (an app that stalls through a short one); over Flutter, 40 pt at 80 pt/s in either mode.
     func testADragsTailByToolkitAndCIMode() throws {
         XCTAssertTrue(Gestures.tail(flutter: false, ci: false) == (20, 200))
         XCTAssertTrue(Gestures.tail(flutter: false, ci: true) == (40, 200))
@@ -196,8 +171,8 @@ final class GesturesTests: XCTestCase {
     func testAShortDragScalesItsKickAndTail() throws {
         let g = try Gestures.drag(rec, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 40, y: 0))
         let moves = g.paths[0].drag
-        XCTAssertEqual(Double(moves[1].p.x), 4, accuracy: 1e-9)  // len / 10
-        XCTAssertEqual(Double(moves[2].p.x), 30, accuracy: 1e-9) // tail len / 4
+        XCTAssertEqual(Double(moves[1].p.x), 4, accuracy: 1e-9)
+        XCTAssertEqual(Double(moves[2].p.x), 30, accuracy: 1e-9)
     }
 
     func testWithoutExplicitMovesADragArrivesAtEachPoint() throws {
@@ -211,9 +186,6 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps[4], .lift(at))
     }
 
-    /// Issue #111: a drag testmanagerd confirmed only once its 5 s wait for the app's "touches
-    /// completed" timed out is reported as unconfirmed; one the app confirmed, or one confirmed
-    /// in the usual ~200 ms, is not.
     func testADragConfirmedOnlyImplicitlyIsUnconfirmed() throws {
         let g = try Gestures.drag(rec, from: CGPoint(x: 0, y: 400), to: CGPoint(x: 0, y: 0))
         XCTAssertTrue(g.early)
@@ -233,28 +205,21 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps, [.down(CGPoint(x: 10, y: 10), 0), .lift(Gestures.tapHoldMs / 1000)])
     }
 
-    /// Issue #330: drag and drop (SwiftUI .onDrag/.onMove, a table view's reorder) lifts the item
-    /// only after the finger has rested on it about half a second; a swipe that moves at once is
-    /// a scroll, and the rows stay where they were. A press-and-hold drag goes down, stays still
-    /// for the hold, moves in even steps, rests where it drops, and lifts there.
     func testAPressAndHoldDragRestsThenMovesInStepsThenRestsAndLifts() throws {
-        let a = CGPoint(x: 200, y: 275), z = CGPoint(x: 200, y: 375) // 100 pt down: 5 steps of 20 pt
+        let a = CGPoint(x: 200, y: 275), z = CGPoint(x: 200, y: 375)
         let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.8, ms: 1000)
         let moves = g.paths[0].drag
         XCTAssertEqual(moves.map { $0.p }, [a, a, CGPoint(x: 200, y: 295), CGPoint(x: 200, y: 315), CGPoint(x: 200, y: 335),
                                             CGPoint(x: 200, y: 355), z, z])
         guard moves.count == 8 else { return }
-        // Down, then still for the whole hold: past a long press's 0.5 s.
         XCTAssertEqual(moves[1].offset, 0, accuracy: 1e-9)
         XCTAssertEqual(moves[1].duration, 0.8, accuracy: 1e-9)
         XCTAssertGreaterThan(moves[1].duration, 0.5)
-        // The move: one step after another, each starting as the one before ends, at an even pace.
         for k in 2...6 {
             XCTAssertEqual(moves[k].offset, 0.8 + Double(k - 2) * 0.2, accuracy: 1e-9, "step \(k - 1)")
             XCTAssertEqual(moves[k].duration, 0.2, accuracy: 1e-9, "step \(k - 1)")
             XCTAssertLessThanOrEqual(abs(Double(moves[k].p.y - moves[k - 1].p.y)), Gestures.holdDragStepPt + 1e-9)
         }
-        // Still where it drops, then lifted there.
         XCTAssertEqual(moves[7].offset, 1.8, accuracy: 1e-9)
         XCTAssertEqual(moves[7].duration, Gestures.holdDragDropS, accuracy: 1e-9)
         XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, 1.8 + Gestures.holdDragDropS, accuracy: 1e-9)
@@ -263,8 +228,6 @@ final class GesturesTests: XCTestCase {
         XCTAssertTrue(g.waitsForSystem, "a drag waits for SpringBoard in CI mode, as a swipe does (#137)")
     }
 
-    /// Issue #330: the steps never exceed holdDragStepPt, whatever the distance, and a diagonal
-    /// drag ends exactly at its end.
     func testAPressAndHoldDragsStepsStayShortAndEndOnTheTarget() throws {
         let a = CGPoint(x: 10, y: 10), z = CGPoint(x: 133, y: 517)
         let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.6, ms: 700)
@@ -281,7 +244,6 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(glide.map { $0.duration }.reduce(0, +), 0.7, accuracy: 1e-9, "the move takes the flow's duration")
     }
 
-    /// Issue #330: a move given no time still takes holdDragMinMoveS; no hold is no rest.
     func testAPressAndHoldDragsMoveIsNeverInstant() throws {
         let g = try Gestures.holdDrag(rec, from: .zero, to: CGPoint(x: 0, y: 10), holdS: 0, ms: 0)
         let moves = g.paths[0].drag
@@ -289,10 +251,9 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(moves[2].duration, Gestures.holdDragMinMoveS, accuracy: 1e-9)
     }
 
-    /// Issue #330, in an Xcode without explicit move events: the same timeline, by moveToPoints.
     func testWithoutExplicitMovesAPressAndHoldDragStillHolds() throws {
         rec.explicit = false
-        let a = CGPoint(x: 100, y: 100), z = CGPoint(x: 100, y: 140) // 2 steps
+        let a = CGPoint(x: 100, y: 100), z = CGPoint(x: 100, y: 140)
         let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.8, ms: 400)
         let d = Gestures.holdDragDropS
         let want: [Recorder.Step] = [.down(a, 0), .move(a, 0.8), .move(CGPoint(x: 100, y: 120), 1.0), .move(z, 1.2),

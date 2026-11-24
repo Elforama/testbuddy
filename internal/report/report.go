@@ -1,4 +1,3 @@
-// Package report writes test results: JUnit XML and HTML.
 package report
 
 import (
@@ -13,12 +12,11 @@ import (
 	"time"
 )
 
-// Flow is one flow's result.
 type Flow struct {
 	Name       string            `json:"name"`
 	File       string            `json:"file"`
 	Device     string            `json:"device"`
-	Status     string            `json:"status"` // SUCCESS, ERROR, WARNING, SKIPPED
+	Status     string            `json:"status"`
 	Error      string            `json:"error,omitempty"`
 	Duration   time.Duration     `json:"durationMs"`
 	Start      time.Time         `json:"start"`
@@ -26,8 +24,8 @@ type Flow struct {
 	Properties map[string]string `json:"properties,omitempty"`
 	Steps      []Step            `json:"steps,omitempty"`
 	DebugDir   string            `json:"debugDir,omitempty"`
-	Timeline   string            `json:"timeline,omitempty"` // the flow's timeline.html (tb test --timeline)
-	Videos     []string          `json:"videos,omitempty"`   // screen recordings of the run (tb test --record)
+	Timeline   string            `json:"timeline,omitempty"`
+	Videos     []string          `json:"videos,omitempty"`
 }
 
 type Step struct {
@@ -37,7 +35,6 @@ type Step struct {
 	Duration time.Duration `json:"durationMs"`
 }
 
-// MarshalJSON writes durationMs in milliseconds, not time.Duration nanoseconds.
 func (f Flow) MarshalJSON() ([]byte, error) {
 	type flow Flow
 	return json.Marshal(struct {
@@ -46,7 +43,6 @@ func (f Flow) MarshalJSON() ([]byte, error) {
 	}{flow(f), f.Duration.Milliseconds()})
 }
 
-// MarshalJSON writes durationMs in milliseconds, not time.Duration nanoseconds.
 func (s Step) MarshalJSON() ([]byte, error) {
 	type step Step
 	return json.Marshal(struct {
@@ -55,7 +51,6 @@ func (s Step) MarshalJSON() ([]byte, error) {
 	}{step(s), s.Duration.Milliseconds()})
 }
 
-// Suite is a whole run (one per device or shard in JUnit).
 type Suite struct {
 	Name   string
 	Device string
@@ -80,17 +75,13 @@ type xmlCase struct {
 	Properties *[]xmlProperty `xml:"properties>property,omitempty"`
 	Failure    *string        `xml:"failure,omitempty"`
 	Skipped    *xmlSkipped    `xml:"skipped,omitempty"`
-	// SystemOut names the run's recordings as [[ATTACHMENT|path]] lines, which CI systems
-	// (Jenkins' JUnit attachments, GitLab) show with the test case.
-	SystemOut *cdata `xml:"system-out,omitempty"`
+	SystemOut  *cdata         `xml:"system-out,omitempty"`
 }
 
-// xmlSkipped marks a flow that did not run, with the reason.
 type xmlSkipped struct {
 	Message string `xml:"message,attr,omitempty"`
 }
 
-// cdata is element text written as a CDATA block, newlines as they are.
 type cdata struct {
 	Text string `xml:",cdata"`
 }
@@ -114,7 +105,6 @@ type xmlSuites struct {
 
 func secs(d time.Duration) string { return fmt.Sprintf("%.3f", d.Seconds()) }
 
-// JUnit renders suites in the usual flow-runner JUnit shape.
 func JUnit(suites []Suite) ([]byte, error) {
 	var doc xmlSuites
 	for _, s := range suites {
@@ -194,7 +184,6 @@ func rel(p string) string {
 	return p
 }
 
-// abs is p as an absolute path (CI attachments need one).
 func abs(p string) string {
 	if a, err := filepath.Abs(p); err == nil {
 		return a
@@ -202,11 +191,8 @@ func abs(p string) string {
 	return p
 }
 
-// HTML renders a self-contained report. detailed adds every step.
 func HTML(suites []Suite, detailed bool) []byte { return HTMLIn(suites, detailed, "") }
 
-// HTMLIn renders the report for a file in dir: recordings and timelines under dir are
-// linked relative to it, so the folder can be moved or shared as a whole.
 func HTMLIn(suites []Suite, detailed bool, dir string) []byte {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test Buddy report</title>
@@ -272,8 +258,6 @@ table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;bord
 	return []byte(b.String())
 }
 
-// linkFrom links a file from a report in dir: relative when the file is under dir, else
-// a file URL for an absolute path.
 func linkFrom(dir, p string) string {
 	if dir != "" {
 		if rel, err := filepath.Rel(abs(dir), abs(p)); err == nil && !strings.HasPrefix(rel, "..") {

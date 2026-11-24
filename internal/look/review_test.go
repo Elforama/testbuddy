@@ -8,9 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A control with an id of its own, centred on a control of its kind, is listed: an Android
-// ImageButton "Play" #play on a clickable video card (Android ids are not "useful" ids, but
-// they are its own). So is a second control with a name of its own and no id.
 func TestBuildKeepsInnerControlWithItsOwnIDOrName(t *testing.T) {
 	s := android(
 		nd(1, "android.view.ViewGroup", rect(0, 200, 1080, 800), desc("Cats video"), click),
@@ -26,9 +23,6 @@ func TestBuildKeepsInnerControlWithItsOwnIDOrName(t *testing.T) {
 	})
 }
 
-// On iOS only SF Symbol glyphs (an id with a dot, or the label again) in a labelled button
-// are dropped: an image with no id (a photo), a repeated #avatar, and a picker's checkmark on
-// a row iOS does not mark selected are kept.
 func TestBuildKeepsContentImagesInRows(t *testing.T) {
 	s := ios(
 		nd(2, "Button", rect(0, 100, 390, 160), desc("Ann"), id("row_ann")),
@@ -58,8 +52,6 @@ func TestBuildKeepsContentImagesInRows(t *testing.T) {
 	})
 }
 
-// A carousel's cards in a cell below the fold count once, as the cell: the count looked past
-// the carousel's own scroll view for off-screen ancestors no more.
 func TestOutlineCarouselInOffscreenCellCountsOnce(t *testing.T) {
 	carousel := nd(4, "ScrollView", rect(0, 1000, 390, 1200), scrollable)
 	s := ios(
@@ -76,8 +68,6 @@ func TestOutlineCarouselInOffscreenCellCountsOnce(t *testing.T) {
 `)
 }
 
-// A cover is named by the listed element at the point it covers: a toolbar holding two
-// buttons over a row's right end names the one over it, not the first.
 func TestBuildNamesCoverAtThePoint(t *testing.T) {
 	s := android(
 		nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 0, 1080, 2400), scrollable),
@@ -93,9 +83,6 @@ func TestBuildNamesCoverAtThePoint(t *testing.T) {
 	}
 }
 
-// Android 15 edge-to-edge: the list runs under a BottomNavigationView whose container has no
-// label and takes no clicks itself; the row behind it is covered by it (named by the tab at
-// the covered point).
 func TestBuildRowUnderUnlabelledBottomBar(t *testing.T) {
 	s := android(
 		nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 0, 1080, 2400), scrollable),
@@ -114,8 +101,6 @@ func TestBuildRowUnderUnlabelledBottomBar(t *testing.T) {
 	}
 }
 
-// Unnamed scroll areas are matched by place: a list that appears above another does not
-// take the other's counts.
 func TestDiffMatchesUnnamedScrollAreasByPlace(t *testing.T) {
 	list := func(top, n int) []*ui.Node {
 		ns := []*ui.Node{nd(2, "ScrollView", rect(0, top, 390, top+300), scrollable)}

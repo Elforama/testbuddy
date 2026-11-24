@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-const draws = 200 // random generators are checked over many draws
+const draws = 200
 
 func inList(list []string, s string) bool { return slices.Contains(list, s) }
 
-// RandomText is exactly `length` lowercase ASCII letters.
 func TestRandomText(t *testing.T) {
 	for _, n := range []int{0, 1, 5, 64} {
 		for i := 0; i < draws; i++ {
@@ -24,7 +23,6 @@ func TestRandomText(t *testing.T) {
 	}
 }
 
-// RandomNumber has `length` digits and no leading zero unless it is a single digit.
 func TestRandomNumber(t *testing.T) {
 	if s := RandomNumber(0); s != "" {
 		t.Errorf("RandomNumber(0) = %q", s)
@@ -52,7 +50,6 @@ func TestRandomNumber(t *testing.T) {
 
 var emailRE = regexp.MustCompile(`^[a-z]+\.[a-z]+[0-9]{1,2}@(example\.(com|org|net)|mail\.test|inbox\.test)$`)
 
-// RandomEmail is first.last<0-99>@<a test domain>, all lowercase.
 func TestRandomEmail(t *testing.T) {
 	for i := 0; i < draws; i++ {
 		if s := RandomEmail(); !emailRE.MatchString(s) {
@@ -61,7 +58,6 @@ func TestRandomEmail(t *testing.T) {
 	}
 }
 
-// RandomPersonName is "First Last" from the name lists.
 func TestRandomPersonName(t *testing.T) {
 	for i := 0; i < draws; i++ {
 		first, last, ok := strings.Cut(RandomPersonName(), " ")
@@ -71,7 +67,6 @@ func TestRandomPersonName(t *testing.T) {
 	}
 }
 
-// RandomCity, RandomCountry and RandomColor draw from their lists.
 func TestRandomPicks(t *testing.T) {
 	for i := 0; i < draws; i++ {
 		if c := RandomCity(); !inList(cities, c) {
@@ -84,7 +79,6 @@ func TestRandomPicks(t *testing.T) {
 			t.Fatalf("RandomColor() = %q", c)
 		}
 	}
-	// Generators are actually random: many draws give more than one value.
 	seen := map[string]bool{}
 	for i := 0; i < draws; i++ {
 		seen[RandomColor()] = true
@@ -94,14 +88,12 @@ func TestRandomPicks(t *testing.T) {
 	}
 }
 
-// Multi-word place names stay whole: "Mount Vernon" is one city, not two.
 func TestCityListKeepsMultiWordNames(t *testing.T) {
 	if inList(cities, "Mount") || inList(cities, "Vernon") || !inList(cities, "Mount Vernon") {
 		t.Error("cities splits or lacks Mount Vernon")
 	}
 }
 
-// pick returns an element of the list.
 func TestPick(t *testing.T) {
 	if got := pick([]string{"only"}); got != "only" {
 		t.Errorf("pick = %q", got)
@@ -114,7 +106,6 @@ func TestPick(t *testing.T) {
 	}
 }
 
-// evalString runs src and returns its display string.
 func evalString(t *testing.T, e *Engine, src string) string {
 	t.Helper()
 	v, err := e.Eval(src, nil)
@@ -124,7 +115,6 @@ func evalString(t *testing.T, e *Engine, src string) string {
 	return Display(v)
 }
 
-// The faker object's generators produce values of the right shape.
 func TestFakerObject(t *testing.T) {
 	e := New("android")
 	digits := regexp.MustCompile(`^[0-9]+$`)
@@ -183,7 +173,6 @@ func TestFakerObject(t *testing.T) {
 	}
 }
 
-// numberBetween returns a in [a, b), or a when the range is empty or reversed.
 func TestFakerNumberBetween(t *testing.T) {
 	e := New("android")
 	for i := 0; i < draws; i++ {
@@ -208,7 +197,6 @@ func TestFakerNumberBetween(t *testing.T) {
 	}
 }
 
-// lorem().sentence() is three or more listed words, capitalized, ending in a period.
 func TestFakerSentence(t *testing.T) {
 	e := New("android")
 	bad := ""
@@ -238,7 +226,6 @@ func TestFakerSentence(t *testing.T) {
 	}
 }
 
-// Each group call returns a fresh object with the expected method set.
 func TestFakerGroups(t *testing.T) {
 	e := New("android")
 	cases := map[string]string{
@@ -258,7 +245,6 @@ func TestFakerGroups(t *testing.T) {
 	}
 }
 
-// faker output interpolates into flow values like any other expression.
 func TestFakerInInterpolate(t *testing.T) {
 	e := New("android")
 	got, err := e.Interpolate("user-${faker.number().randomNumber(4)}@${faker.internet().domainName()}", nil)
@@ -270,7 +256,6 @@ func TestFakerInInterpolate(t *testing.T) {
 	}
 }
 
-// Unknown faker methods return a random word (as the package documents) instead of throwing.
 func TestFakerUnknownMethod(t *testing.T) {
 	e := New("android")
 	v, err := e.Eval("faker.unknownGenerator()", nil)

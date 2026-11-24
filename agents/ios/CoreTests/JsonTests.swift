@@ -2,8 +2,6 @@ import Foundation
 import XCTest
 @testable import TBAgentCore
 
-/// The agent's replies are written by JW: tb reads every screen through it, so a bad escape or
-/// a misplaced comma breaks every read.
 final class JsonWriterTests: XCTestCase {
     private func text(_ w: JW) -> String { String(decoding: w.bytes, as: UTF8.self) }
 
@@ -41,7 +39,6 @@ final class JsonWriterTests: XCTestCase {
     }
 }
 
-/// Requests from tb: typed reads with defaults, and errors for missing required fields.
 final class RequestTests: XCTestCase {
     private func request(_ json: String) throws -> Request {
         Request(raw: try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])
@@ -70,7 +67,6 @@ final class RequestTests: XCTestCase {
     }
 }
 
-/// More of JW's edge cases: empty containers, keys that need escaping, every integer width.
 final class JsonWriterEdgeTests: XCTestCase {
     private func text(_ w: JW) -> String { String(decoding: w.bytes, as: UTF8.self) }
 

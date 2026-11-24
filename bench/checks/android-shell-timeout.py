@@ -43,7 +43,7 @@ try:
             while True:
                 m = json.loads(f.readline())
                 if m.get("id") == want_id:
-                    return m  # events ("hello", "changed", ...) are skipped
+                    return m
 
         hello = json.loads(f.readline())
         print(f"agent {hello.get('version')} on API {hello.get('sdk')}")

@@ -9,10 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Review of #315: a frame element is its document's viewport. What of the frame lies outside it
-// (a Submit far down a small payment frame) does not show: it is clipped as a row out of its
-// list (the frame element is listed as scrolling), so the page is not asked about it, and the
-// page's footer below the frame is no cover of it.
 func TestScreenClipsAFramesElementsToTheFrame(t *testing.T) {
 	snap := map[string]any{"w": 1000, "h": 1000, "url": "https://shop.example.com/", "nodes": []map[string]any{
 		{"d": 0, "b": []int{0, 0, 1000, 1000}, "c": "body", "f": 4098},
@@ -77,15 +73,11 @@ func TestScreenClipsAFramesElementsToTheFrame(t *testing.T) {
 	if _, ok := occlusion.SamplePoints(s, pay); !ok {
 		t.Errorf("Pay, in its frame, has no sample points")
 	}
-	// The page is asked about the frame's body and Pay, which show; not about Submit.
 	if len(req) != 2 {
 		t.Errorf("the page was asked about %d of the frame's elements, want 2 (not Submit, outside the frame)", len(req))
 	}
 }
 
-// Review of #315: a frame whose content fits in it is not listed as scrolling (clipping would
-// change nothing, and the frame would become the list a drag around it picks): only one whose
-// content lies outside it, below, above or beside it, is.
 func TestScreenListsAFrameAsScrollingOnlyWhenItsContentOverflows(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -95,7 +87,7 @@ func TestScreenListsAFrameAsScrollingOnlyWhenItsContentOverflows(t *testing.T) {
 		{"fits", []map[string]any{
 			{"d": 0, "b": []int{0, 0, 400, 240}, "c": "body", "f": 4098},
 			{"d": 1, "b": []int{10, 20, 210, 60}, "c": "button", "t": "Pay", "f": 4099},
-			{"d": 1, "b": []int{0, 0, 0, 0}, "c": "span", "f": 4098}, // no size: not content
+			{"d": 1, "b": []int{0, 0, 0, 0}, "c": "span", "f": 4098},
 		}, false},
 		{"below", []map[string]any{
 			{"d": 0, "b": []int{0, 0, 400, 240}, "c": "body", "f": 4098},

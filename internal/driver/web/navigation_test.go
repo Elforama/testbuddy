@@ -12,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// navPage answers Page.navigate with a loader id and fires the load event a little later.
 func navPage(t *testing.T) (*fakeCDP, *Driver) {
 	page, d := inputPage(t)
 	page.on("Page.navigate", func(m cdpMsg) any {
@@ -25,7 +24,6 @@ func navPage(t *testing.T) (*fakeCDP, *Driver) {
 	return page, d
 }
 
-// LaunchApp opens the URL and returns once it has loaded; ClearState clears the origin's storage first.
 func TestLaunchApp(t *testing.T) {
 	page, d := navPage(t)
 	t0 := time.Now()
@@ -54,7 +52,6 @@ func TestLaunchApp(t *testing.T) {
 	}
 }
 
-// Navigation errors are reported; a same-document navigation (no loader) returns at once.
 func TestNavigate(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Page.navigate", func(cdpMsg) any { return map[string]any{"errorText": "net::ERR_NAME_NOT_RESOLVED"} })
@@ -72,10 +69,6 @@ func TestNavigate(t *testing.T) {
 		t.Error("protocol error not reported")
 	}
 
-	// Issue #283: every navigation (LaunchApp, OpenLink) classifies Chrome's errors the same
-	// way. A refused connection to a loopback host is a dev server that may still be starting:
-	// it is retried for navRetryFor, then fails with a hint. Remote hosts and other errors
-	// fail at once, as before.
 	defer func(v time.Duration) { navRetryFor = v }(navRetryFor)
 	navRetryFor = 100 * time.Millisecond
 	const hint = "nothing is listening on"
@@ -83,8 +76,6 @@ func TestNavigate(t *testing.T) {
 		"launchApp": func(link string) error { return d.LaunchApp(ctxT(t), link, driver.LaunchOpts{}) },
 		"openLink":  func(link string) error { return d.OpenLink(ctxT(t), link, "", false, false) },
 	}
-	// refusing answers Page.navigate with a refused connection n times (n < 0: always), then
-	// with a same-document navigation; it counts the calls.
 	refusing := func(n int32) *atomic.Int32 {
 		var calls atomic.Int32
 		page.on("Page.navigate", func(cdpMsg) any {
@@ -97,15 +88,15 @@ func TestNavigate(t *testing.T) {
 	}
 	for name, open := range callers {
 		t.Run(name, func(t *testing.T) {
-			navRetryFor = 3 * time.Second // the real bound: two backoffs (300 ms) fit well inside
-			calls := refusing(2)          // a server that starts listening after two refusals
+			navRetryFor = 3 * time.Second
+			calls := refusing(2)
 			if err := open("http://127.0.0.1:7357/x"); err != nil || calls.Load() != 3 {
 				t.Errorf("starting server: %v after %d calls, want success after 3", err, calls.Load())
 			}
 			navRetryFor = 100 * time.Millisecond
 			for link, at := range map[string]string{"http://127.0.0.1:7357/x": "127.0.0.1:7357", "http://localhost:7357/": "localhost:7357",
 				"http://[::1]:7357/": "[::1]:7357", "http://app.localhost/": "app.localhost:80"} {
-				calls = refusing(-1) // nothing ever listens
+				calls = refusing(-1)
 				t0 := time.Now()
 				err := open(link)
 				took := time.Since(t0)
@@ -117,14 +108,14 @@ func TestNavigate(t *testing.T) {
 				}
 			}
 			for _, link := range []string{"https://shop.example.com/", "http://10.0.0.5:7357/", "http://localhost.example.com/"} {
-				calls = refusing(-1) // a remote host: one call, no hint, at once
+				calls = refusing(-1)
 				t0 := time.Now()
 				err := open(link)
 				if err == nil || err.Error() != "could not open "+link+": net::ERR_CONNECTION_REFUSED" || calls.Load() != 1 || time.Since(t0) > 200*time.Millisecond {
 					t.Errorf("%s refused: %v after %d calls in %s, want one immediate bare failure", link, err, calls.Load(), time.Since(t0))
 				}
 			}
-			calls.Store(0) // another error on loopback fails at once too
+			calls.Store(0)
 			page.on("Page.navigate", func(cdpMsg) any {
 				calls.Add(1)
 				return map[string]any{"frameId": "F", "errorText": "net::ERR_EMPTY_RESPONSE"}
@@ -134,8 +125,6 @@ func TestNavigate(t *testing.T) {
 			}
 		})
 	}
-	// A cancelled step stops the retry and stays a cancellation (Ctrl-C, a sibling role that
-	// failed): it wraps context.Canceled and gives no dev-server hint (issue #283 review).
 	navRetryFor = 2 * time.Second
 	refusing(-1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -148,7 +137,6 @@ func TestNavigate(t *testing.T) {
 	}
 }
 
-// Stopping or killing the "app" opens about:blank; ClearState of a non-origin does nothing.
 func TestStopKillClear(t *testing.T) {
 	page, d := navPage(t)
 	for _, run := range []func() error{
@@ -169,7 +157,6 @@ func TestStopKillClear(t *testing.T) {
 	}
 }
 
-// SetPermissions resets the origin's permissions and grants the allowed ones in one call.
 func TestSetPermissions(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -226,7 +213,6 @@ func sortStrings(s []string) {
 	}
 }
 
-// A grant Chrome rejects as a whole is retried one permission at a time; a failed reset is an error.
 func TestSetPermissionsFallbacks(t *testing.T) {
 	page, browser := newFakeCDP(t), newFakeCDP(t)
 	browser.on("Browser.grantPermissions", func(m cdpMsg) any {

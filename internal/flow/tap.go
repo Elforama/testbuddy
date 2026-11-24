@@ -37,9 +37,6 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 		if c.WaitToSettleTimeoutMs, err = sm.integer("waitToSettleTimeoutMs", 0); err != nil {
 			return err
 		}
-		// Test Buddy extension (issue #278): how long to look for the element, in ms, in place
-		// of the lookup budget (17 s, or 7 s for an optional tap). Maestro's tapOn has no such
-		// field. A number is checked here; a ${...} value when the step runs.
 		if v := sm.get("timeout"); v != nil && !isNull(v) {
 			if c.Timeout, err = tapTimeout(p, v); err != nil {
 				return err
@@ -49,10 +46,9 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 			return err
 		}
 		if !s.HasCriteria() && c.Point == "" {
-			// {optional: true} alone: matches every node (the first clickable is picked)
 		}
 		if !s.HasCriteria() && c.Point != "" {
-			c.Selector = nil // a screen point tap
+			c.Selector = nil
 			if c.Timeout != "" {
 				return p.errf(sm.get("timeout"), "%s: timeout is how long to look for the element; a point tap looks for none", c.Name)
 			}
@@ -77,8 +73,6 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 	return nil
 }
 
-// tapTimeout reads a tap's timeout: milliseconds, 0 or more (0: look once), or a ${...}
-// expression, checked when the step runs.
 func tapTimeout(p *parser, v *yaml.Node) (string, error) {
 	t := strings.TrimSpace(v.Value)
 	if v.Kind != yaml.ScalarNode || t == "" {

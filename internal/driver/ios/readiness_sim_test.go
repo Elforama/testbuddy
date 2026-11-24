@@ -13,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Inject the two observed races at the driver boundary, after the runner selected
-// a field/button. Only the timing is controlled. XCTest still performs every input.
 type readinessSim struct {
 	*Driver
 	t                  *testing.T
@@ -99,7 +97,6 @@ func (d *readinessSim) TypeText(ctx context.Context, text string, o driver.Actio
 	return d.Driver.TypeText(ctx, text, o)
 }
 
-// Uses the installed Buddy Bench app. Run only on a nominated benchmark simulator.
 func TestSimulatorBuddyBenchReadiness(t *testing.T) {
 	if os.Getenv("TB_IOS_UDID") == "" {
 		t.Skip("set TB_IOS_UDID to a simulator with Buddy Bench installed")
@@ -143,8 +140,6 @@ func TestSimulatorBuddyBenchReadiness(t *testing.T) {
 	if !instrument.wrongField {
 		t.Fatal("secure input reached the driver without the intended field ID")
 	}
-	// Exercise the delivery-time guard separately: on this still screen the
-	// generation is current, but the supplied touch is over a *different* star.
 	run(`- scrollUntilVisible: {element: {id: star_4}, centerElement: true}`)
 	other, err := instrument.node(ctx, "star_2")
 	if err != nil {
@@ -165,8 +160,6 @@ func TestSimulatorBuddyBenchReadiness(t *testing.T) {
 	run(`- assertVisible: "Rating: 0"
 - tapOn: {id: star_4}
 - assertVisible: "Rating: 4"`)
-	// UIKit's action callback confirms the recipient even if its handler does
-	// not change the screen. The benchmark's counter detects duplicate input.
 	run(`- launchApp: {clearState: true}
 - scrollUntilVisible: {element: {id: scenario_native}}
 - tapOn: {id: scenario_native}
@@ -185,7 +178,6 @@ func TestSimulatorBuddyBenchReadiness(t *testing.T) {
 		t.Fatalf("UIKit activation receipt: %+v, %v", res, err)
 	}
 	run(`- assertVisible: "Taps: 1"`)
-	// A dead launch PID must fail even though this bundle currently has a readable window.
 	err = d.awaitApp(ctx, "dev.testbuddy.bench", time.Second, 2147483647, true)
 	if err == nil || !strings.Contains(err.Error(), "exited") {
 		t.Fatalf("dead PID returned %v", err)

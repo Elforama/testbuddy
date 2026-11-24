@@ -1,4 +1,3 @@
-// Package device finds the Android devices and iOS simulators this machine can drive.
 package device
 
 import (
@@ -25,19 +24,16 @@ const (
 	Web     Platform = "web"
 )
 
-// WebAvailable reports whether a browser for web flows exists (set by the web driver).
 var WebAvailable = func() bool { return false }
 
-// Info describes one device that is connected and ready (an Android device in the
-// "device" state, or a booted iOS simulator).
 type Info struct {
 	Platform Platform `json:"platform"`
-	Serial   string   `json:"serial"` // adb serial or simulator UDID
+	Serial   string   `json:"serial"`
 	Name     string   `json:"name"`
 	Model    string   `json:"model,omitempty"`
 	Emulator bool     `json:"emulator"`
 	State    string   `json:"state"`
-	Headless bool     `json:"-"` // start this browser session without a window
+	Headless bool     `json:"-"`
 }
 
 func (i Info) String() string {
@@ -54,7 +50,6 @@ func (i Info) String() string {
 	return fmt.Sprintf("%s %s %q (%s)", i.Platform, i.Serial, i.Name, kind)
 }
 
-// ADB returns the path to adb, preferring ANDROID_HOME and the default SDK location.
 func ADB() string {
 	exe := "adb"
 	if runtime.GOOS == "windows" {
@@ -76,7 +71,7 @@ func ADB() string {
 	switch runtime.GOOS {
 	case "darwin":
 		guess = filepath.Join(home, "Library", "Android", "sdk", "platform-tools", exe)
-	case "windows": // Android Studio's default SDK folder
+	case "windows":
 		local := os.Getenv("LOCALAPPDATA")
 		if local == "" {
 			local = filepath.Join(home, "AppData", "Local")
@@ -88,8 +83,6 @@ func ADB() string {
 	return guess
 }
 
-// List returns every ready device, Android first, then iOS. Errors from one
-// platform's tooling (adb missing, not on macOS) are ignored so the other still works.
 func List(ctx context.Context) []Info {
 	var out []Info
 	out = append(out, listAndroid(ctx)...)
@@ -100,8 +93,6 @@ func List(ctx context.Context) []Info {
 	return out
 }
 
-// WebDevice is the n-th browser device. Browsers are made on demand, so a flow with two
-// web roles gets two.
 func WebDevice(n int) Info {
 	if n <= 1 {
 		return Info{Platform: Web, Serial: "web", Name: "Chrome", State: "available"}
@@ -109,7 +100,6 @@ func WebDevice(n int) Info {
 	return Info{Platform: Web, Serial: fmt.Sprintf("web-%d", n), Name: fmt.Sprintf("Chrome %d", n), State: "available"}
 }
 
-// IsURL reports whether an app id is a web address (a web flow's url:).
 func IsURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "file://") ||
 		strings.HasPrefix(s, "about:") || strings.HasPrefix(s, "data:")
@@ -156,8 +146,6 @@ func listAndroid(ctx context.Context) []Info {
 	return out
 }
 
-// listTimeout is how long simctl may take to list the booted simulators; ciListTimeout is
-// that in CI (package ci), where a busy runner took over 10 s right after a run.
 var listTimeout, ciListTimeout = 10 * time.Second, 60 * time.Second
 
 func listIOS(ctx context.Context) []Info {
@@ -203,8 +191,6 @@ func listIOS(ctx context.Context) []Info {
 	return out
 }
 
-// Pick chooses a device. want may be empty, a serial/UDID, or a device name
-// (case-insensitive). platform may be empty to allow either.
 func Pick(devs []Info, platform Platform, want string) (Info, error) {
 	var cands []Info
 	for _, d := range devs {
@@ -230,8 +216,6 @@ func Pick(devs []Info, platform Platform, want string) (Info, error) {
 	return cands[0], nil
 }
 
-// AppInstalled reports whether the app (package or bundle id) is installed on the device.
-// It answers true when it cannot tell, so a failed check never hides a device.
 func AppInstalled(ctx context.Context, d Info, appID string) bool {
 	if d.Platform == Web {
 		return IsURL(appID)

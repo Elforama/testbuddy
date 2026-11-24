@@ -26,10 +26,7 @@ import sys
 
 PLATFORMS = ["android", "ios", "web"]
 MARKER = "<!-- tb-annotated-recordings -->"
-# GitHub shows images in comments up to 10 MB; previews are kept under this.
 GIF_LIMIT = 9 * 1024 * 1024
-# (frames per second, width of a portrait video, of a landscape one), tried in order until the
-# preview fits.
 GIF_TRIES = [(8, 320, 640), (6, 270, 540), (4, 220, 440)]
 
 

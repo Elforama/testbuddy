@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// A run whose ordered flow failed: the flows after it are skipped, with the reason.
 func skippedRun() Suite {
 	return Suite{Name: "Nightly", Device: "Pixel 9", Start: t0, Flows: []Flow{
 		{Name: "login", Status: "SUCCESS", Duration: time.Second, Start: t0},
@@ -17,8 +16,6 @@ func skippedRun() Suite {
 	}}
 }
 
-// issue #59: JUnit marks a skipped flow with <skipped message="..."> and counts it in the
-// suite's skipped attribute (tests still counts it), so CI shows it skipped, not passed.
 func TestJUnitSkippedFlows(t *testing.T) {
 	b, err := JUnit([]Suite{skippedRun()})
 	if err != nil {
@@ -56,8 +53,6 @@ func TestJUnitSkippedFlows(t *testing.T) {
 	}
 }
 
-// issue #59: the HTML report counts skipped flows on their own, not as passed, and shows
-// each one as skipped with its reason.
 func TestHTMLSkippedFlows(t *testing.T) {
 	out := string(HTML([]Suite{skippedRun()}, false))
 	if want := "Pixel 9 · 1 passed, 1 failed, 2 skipped · "; !strings.Contains(out, want) {

@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// parseIn writes files into a temp dir and parses main.yaml from it.
 func parseIn(t *testing.T, files map[string]string) (string, *Flow, error) {
 	t.Helper()
 	dir := writeFiles(t, files)
@@ -15,9 +14,6 @@ func parseIn(t *testing.T, files map[string]string) (string, *Flow, error) {
 	return dir, f, err
 }
 
-// ---- conditions ----
-
-// TestConditionAllFields pins every key of a `when` condition.
 func TestConditionAllFields(t *testing.T) {
 	c := step(t, `- runFlow:
     when:
@@ -40,7 +36,6 @@ func TestConditionAllFields(t *testing.T) {
 	}
 }
 
-// TestConditionPlatforms pins platform names (case-insensitive) and their rejection.
 func TestConditionPlatforms(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"Android", "android"}, {"ANDROID", "android"}, {"iOS", "ios"}, {"ios", "ios"}, {"Web", "web"}, {"~", ""},
@@ -56,7 +51,6 @@ func TestConditionPlatforms(t *testing.T) {
 	}
 }
 
-// TestConditionUnsetFields pins that absent condition parts stay nil.
 func TestConditionUnsetFields(t *testing.T) {
 	c := step(t, "- runFlow:\n    when: {visible: X, notVisible: ~}\n    commands: [back]\n")
 	if c.When.NotVisible != nil || c.When.True != nil || c.When.Platform != "" {
@@ -67,7 +61,6 @@ func TestConditionUnsetFields(t *testing.T) {
 	}
 }
 
-// TestConditionErrors pins rejected conditions.
 func TestConditionErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"scalar", "- runFlow:\n    when: visible\n    commands: [back]\n", "a condition is a map (visible, notVisible, true, platform)", 4},
@@ -79,9 +72,6 @@ func TestConditionErrors(t *testing.T) {
 	})
 }
 
-// ---- runFlow ----
-
-// TestRunFlowFile pins file sub-flows: scalar and map forms, env, when, nested relative paths.
 func TestRunFlowFile(t *testing.T) {
 	dir, f, err := parseIn(t, map[string]string{
 		"main.yaml": hdr + `- runFlow: sub.yaml
@@ -130,7 +120,6 @@ func TestRunFlowFile(t *testing.T) {
 	}
 }
 
-// TestRunFlowAbsolutePath pins that an absolute runFlow path is used as is.
 func TestRunFlowAbsolutePath(t *testing.T) {
 	other := writeFiles(t, map[string]string{"shared.yaml": hdr + "- back\n"})
 	abs := filepath.Join(other, "shared.yaml")
@@ -143,7 +132,6 @@ func TestRunFlowAbsolutePath(t *testing.T) {
 	}
 }
 
-// TestRunFlowSameFileTwice pins that one sub-flow may be run many times (not a cycle).
 func TestRunFlowSameFileTwice(t *testing.T) {
 	_, f, err := parseIn(t, map[string]string{
 		"main.yaml":   hdr + "- runFlow: a.yaml\n- runFlow: b.yaml\n",
@@ -159,7 +147,6 @@ func TestRunFlowSameFileTwice(t *testing.T) {
 	}
 }
 
-// TestRunFlowInlineCommands pins inline `commands`, nesting and their env.
 func TestRunFlowInlineCommands(t *testing.T) {
 	c := step(t, `- runFlow:
     env: {A: "1"}
@@ -184,10 +171,9 @@ func TestRunFlowInlineCommands(t *testing.T) {
 	}
 }
 
-// TestRunFlowErrors pins runFlow's rejections and where they are reported.
 func TestRunFlowErrors(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
-		"main.yaml":     hdr + "- back\n", // exists, so running itself is detected
+		"main.yaml":     hdr + "- back\n",
 		"sub.yaml":      hdr + "- back\n",
 		"bad.yaml":      hdr + "- back\n- tapOnn: X\n",
 		"noconfig.yaml": "- back\n",
@@ -239,14 +225,10 @@ func TestRunFlowErrors(t *testing.T) {
 	})
 }
 
-// TestRunFlowListValue pins that a list is not a valid runFlow value.
 func TestRunFlowListValue(t *testing.T) {
 	parseErr(t, hdr+"- runFlow: [a.yaml]\n")
 }
 
-// ---- runScript and evalScript ----
-
-// TestRunScript pins runScript's scalar and map forms; the script source is read at parse time.
 func TestRunScript(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"scripts/s.js": "output.ok = true\n"})
 	main := filepath.Join(dir, "main.yaml")
@@ -292,14 +274,10 @@ func TestRunScript(t *testing.T) {
 	}
 }
 
-// TestRunScriptListValue pins that a list runScript value is an error, not a crash.
 func TestRunScriptListValue(t *testing.T) {
 	parseErr(t, hdr+"- runScript: [s.js]\n")
 }
 
-// ---- repeat and retry ----
-
-// TestRepeat pins repeat's times/while/commands.
 func TestRepeat(t *testing.T) {
 	c := step(t, "- repeat:\n    times: 3\n    commands:\n      - tapOn: Next\n      - back\n")
 	if c.Times != "3" || c.While != nil || !reflect.DeepEqual(names(c.Commands), []string{"tapOn", "back"}) {
@@ -320,7 +298,6 @@ func TestRepeat(t *testing.T) {
 		{"unknown key", "- repeat: {times: 3, count: 2, commands: [back]}\n", `"count" is not an option of repeat`, 3},
 		{"bad while", "- repeat: {while: {platform: tv}, commands: [back]}\n", "platform must be", 3},
 		{"bad inner command", "- repeat:\n    times: 2\n    commands:\n      - tapOn: {txt: X}\n", `"txt" is not an option of tapOn`, 6},
-		// issue #41: a literal times that is not a whole number of 0 or more is caught by tb check.
 		{"times not a number", "- repeat:\n    times: abc\n    commands: [back]\n", `invalid times "abc"`, 4},
 		{"times empty", "- repeat:\n    times: ''\n    commands: [back]\n", `invalid times ""`, 4},
 		{"times negative", "- repeat: {times: -2, commands: [back]}\n", `invalid times "-2"`, 3},
@@ -329,7 +306,6 @@ func TestRepeat(t *testing.T) {
 	})
 }
 
-// TestRetry pins retry's commands and file forms.
 func TestRetry(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"flaky.yaml": hdr + "- tapOn: Flaky\n"})
 	main := filepath.Join(dir, "main.yaml")
@@ -368,7 +344,6 @@ func TestRetry(t *testing.T) {
 		{"bad env", "- retry: {commands: [back], env: [x]}\n", "env must be a map"},
 		{"unknown key", "- retry: {commands: [back], retries: 2}\n", `"retries" is not an option of retry`},
 		{"bad inner command", "- retry: {commands: [frob]}\n", "Invalid Command"},
-		// issue #42: a literal maxRetries that is not a whole number of 0 or more is caught by tb check.
 		{"maxRetries negative", "- retry: {maxRetries: -1, commands: [back]}\n", `invalid maxRetries "-1"`},
 		{"maxRetries not a number", "- retry: {maxRetries: lots, commands: [back]}\n", `invalid maxRetries "lots"`},
 		{"maxRetries empty", "- retry: {maxRetries: '', commands: [back]}\n", `invalid maxRetries ""`},
@@ -384,13 +359,11 @@ func TestRetry(t *testing.T) {
 	}
 }
 
-// TestRetryCommandsMustBeAList pins that retry's commands must be a list, as in runFlow and repeat.
 func TestRetryCommandsMustBeAList(t *testing.T) {
 	parseErr(t, hdr+"- retry: {commands: back}\n")
 	parseErr(t, hdr+"- retry:\n    commands:\n")
 }
 
-// TestHooksAndNesting pins that onFlowStart/onFlowComplete accept the structured commands too.
 func TestHooksAndNesting(t *testing.T) {
 	_, f, err := parseIn(t, map[string]string{
 		"main.yaml": `appId: com.example

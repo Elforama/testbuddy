@@ -8,8 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A selector with no filters picks the first clickable element in pre-order, else the
-// first element.
 func TestFindAnyElement(t *testing.T) {
 	a := leaf(1, "A", rect(0, 0, 100, 100))
 	b := leaf(1, "B", rect(0, 100, 100, 200))
@@ -31,7 +29,6 @@ func TestFindAnyElement(t *testing.T) {
 	}
 }
 
-// Matches are the deepest: a node is dropped when one of its descendants also matches.
 func TestFindDeepestMatch(t *testing.T) {
 	card := &ui.Node{Depth: 1, ID: "card_row", Desc: "Settings", Bounds: rect(0, 0, 1000, 300), Clickable: true, Enabled: true}
 	inner := &ui.Node{Depth: 2, Bounds: rect(0, 0, 1000, 300), Enabled: true}
@@ -53,7 +50,6 @@ func TestFindDeepestMatch(t *testing.T) {
 	}
 }
 
-// Without an index, clickable matches come first; ties keep hierarchy order.
 func TestFindClickableFirstIsStable(t *testing.T) {
 	plain1 := leaf(1, "Save", rect(0, 0, 100, 100))
 	click1 := leaf(1, "Save", rect(0, 100, 100, 200))
@@ -71,10 +67,7 @@ func TestFindClickableFirstIsStable(t *testing.T) {
 	}
 }
 
-// index picks the Nth match in screen order (top, then left), ignoring clickability; a
-// negative index counts from the end.
 func TestFindIndexPositionOrder(t *testing.T) {
-	// pre-order differs from screen order on purpose
 	bottom := leaf(1, "Item", rect(0, 900, 100, 1000))
 	topRight := leaf(1, "Item", rect(500, 100, 600, 200))
 	topLeft := leaf(1, "Item", rect(0, 100, 100, 200))
@@ -95,8 +88,8 @@ func TestFindIndexPositionOrder(t *testing.T) {
 		{"-2", middle},
 		{"-4", topLeft},
 		{"-5", nil},
-		{"1.9", topRight}, // fractional indices truncate
-		{" 2 ", middle},   // surrounding space is ignored
+		{"1.9", topRight},
+		{" 2 ", middle},
 		{"2.0", middle},
 		{"-0", topLeft},
 		{"1e0", topRight},
@@ -114,7 +107,6 @@ func TestFindIndexPositionOrder(t *testing.T) {
 	}
 }
 
-// A bad index is an InvalidIndex error, wherever the selector uses it.
 func TestFindInvalidIndex(t *testing.T) {
 	s := mkScreen(root(), leaf(1, "A", rect(0, 0, 100, 100)), leaf(1, "B", rect(0, 200, 100, 300)))
 	for _, bad := range []string{"abc", "one", "NaN", "Inf", "-Inf", "+Inf", "1,5", "#1"} {
@@ -143,9 +135,7 @@ func TestFindInvalidIndex(t *testing.T) {
 	}
 }
 
-// In index order nodes without bounds sort last, and a zero-size pick is never returned.
 func TestFindIndexZeroBoundsLast(t *testing.T) {
-	// A bounds-less container survives visibility because its child is on screen.
 	ghost := &ui.Node{Depth: 1, Text: "Item", Enabled: true}
 	child := leaf(2, "child", rect(0, 0, 100, 100))
 	real := leaf(1, "Item", rect(0, 500, 100, 600))
@@ -158,14 +148,12 @@ func TestFindIndexZeroBoundsLast(t *testing.T) {
 	if err != nil || got != nil || len(all) != 1 || all[0] != ghost {
 		t.Errorf("index 1 = %s, %v, %v; want nil with the ghost as the candidate", nodeName(got), names(all), err)
 	}
-	// Without an index the ghost comes first in hierarchy order and is not returned.
 	got, all, _ = Find(s, &Selector{Text: "Item"})
 	if got != nil || len(all) != 2 {
 		t.Errorf("no index = %s, %v; want nil (zero-size first pick)", nodeName(got), names(all))
 	}
 }
 
-// A first pick with zero width and height (but non-zero position) is not returned.
 func TestFindZeroSizeFirstPick(t *testing.T) {
 	dot := &ui.Node{Depth: 1, Text: "Dot", Bounds: rect(50, 50, 50, 50), Enabled: true}
 	s := mkScreen(root(), dot, leaf(2, "kid", rect(0, 0, 100, 100)))
@@ -173,7 +161,6 @@ func TestFindZeroSizeFirstPick(t *testing.T) {
 	if got != nil || err != nil || len(all) != 1 {
 		t.Errorf("got %s, %v, %v", nodeName(got), names(all), err)
 	}
-	// A line (one zero dimension) is a real element.
 	line := &ui.Node{Depth: 1, Text: "Divider", Bounds: rect(0, 500, 1000, 500), Enabled: true}
 	s = mkScreen(root(), line)
 	if got := mustFind(t, s, &Selector{Text: "Divider"}); got != line {
@@ -181,7 +168,6 @@ func TestFindZeroSizeFirstPick(t *testing.T) {
 	}
 }
 
-// State filters compare enabled/selected/checked/focused exactly.
 func TestFindStateFilters(t *testing.T) {
 	on := &ui.Node{Depth: 1, Text: "Opt", Bounds: rect(0, 0, 100, 100), Enabled: true, Selected: true, Checked: true, Focused: true}
 	off := &ui.Node{Depth: 1, Text: "Opt", Bounds: rect(0, 200, 100, 300)}
@@ -211,7 +197,6 @@ func TestFindStateFilters(t *testing.T) {
 	}
 }
 
-// width/height match the element's size within tolerance (default 0).
 func TestFindSizeFilters(t *testing.T) {
 	small := &ui.Node{Depth: 1, ID: "small", Bounds: rect(0, 0, 100, 50), Enabled: true}
 	big := &ui.Node{Depth: 1, ID: "big", Bounds: rect(0, 100, 400, 300), Enabled: true}
@@ -240,8 +225,6 @@ func TestFindSizeFilters(t *testing.T) {
 	}
 }
 
-// Traits: "text" needs text or a description, "long-text" over 200 characters, "square"
-// an aspect ratio within 3%; unknown traits are ignored.
 func TestTraitsMatch(t *testing.T) {
 	long := strings.Repeat("é", 201)
 	cases := []struct {
@@ -276,7 +259,6 @@ func TestTraitsMatch(t *testing.T) {
 	}
 }
 
-// Traits narrow a Find like any other attribute.
 func TestFindByTraits(t *testing.T) {
 	icon := &ui.Node{Depth: 1, ID: "icon", Bounds: rect(0, 0, 100, 100), Enabled: true}
 	banner := &ui.Node{Depth: 1, ID: "banner", Text: "Hi", Bounds: rect(0, 200, 1000, 300), Enabled: true}
@@ -289,7 +271,6 @@ func TestFindByTraits(t *testing.T) {
 	}
 }
 
-// css matches the nodes the engine found for it (by screen index); with no results, nothing.
 func TestFindCSS(t *testing.T) {
 	a := &ui.Node{Depth: 1, Class: "button", Text: "Buy", Bounds: rect(0, 0, 100, 100), Enabled: true}
 	b := &ui.Node{Depth: 1, Class: "button", Text: "Sell", Bounds: rect(0, 200, 100, 300), Enabled: true}
@@ -313,10 +294,6 @@ func TestFindCSS(t *testing.T) {
 	}
 }
 
-// grid lays out four labelled cells:
-//
-//	TL (100,100)   TR (600,100)
-//	BL (100,600)   BR (600,600)
 func grid() (*ui.Screen, map[string]*ui.Node) {
 	m := map[string]*ui.Node{
 		"TL": leaf(1, "TL", rect(100, 100, 300, 300)),
@@ -327,7 +304,6 @@ func grid() (*ui.Screen, map[string]*ui.Node) {
 	return mkScreen(root(), m["TL"], m["TR"], m["BL"], m["BR"]), m
 }
 
-// below/above/leftOf/rightOf compare top or left edges strictly against the anchor.
 func TestFindRelativePosition(t *testing.T) {
 	s, m := grid()
 	cell := &Selector{Text: "[TB][LR]"}
@@ -362,8 +338,6 @@ func TestFindRelativePosition(t *testing.T) {
 	}
 }
 
-// A relative anchor that matches several elements accepts a node related to any of them,
-// but never the node itself.
 func TestFindRelativeAnyAnchorButSelf(t *testing.T) {
 	a1 := leaf(1, "A1", rect(0, 100, 100, 200))
 	a2 := leaf(1, "A2", rect(0, 200, 100, 300))
@@ -379,7 +353,6 @@ func TestFindRelativeAnyAnchorButSelf(t *testing.T) {
 	}
 }
 
-// An anchor with an index uses only that one match.
 func TestFindRelativeIndexedAnchor(t *testing.T) {
 	rows := []*ui.Node{
 		leaf(1, "Row", rect(0, 100, 100, 150)),
@@ -394,12 +367,12 @@ func TestFindRelativeIndexedAnchor(t *testing.T) {
 		index string
 		want  *ui.Node
 	}{
-		{"", rows[1]},   // any Row: the first X is below the first Row
-		{"0", rows[1]},  //
-		{"1", rows[3]},  // below the second Row
-		{"2", rows[5]},  // below the third Row
-		{"-1", rows[5]}, // below the last Row
-		{"3", nil},      // no such anchor: nothing qualifies
+		{"", rows[1]},
+		{"0", rows[1]},
+		{"1", rows[3]},
+		{"2", rows[5]},
+		{"-1", rows[5]},
+		{"3", nil},
 	}
 	for _, c := range cases {
 		t.Run("index="+c.index, func(t *testing.T) {
@@ -411,10 +384,8 @@ func TestFindRelativeIndexedAnchor(t *testing.T) {
 	}
 }
 
-// Relative selectors nest: the anchor is itself resolved with its own relative filters.
 func TestFindRelativeNested(t *testing.T) {
 	s, m := grid()
-	// below (the cell right of TL) = below TR = BL, BR; plus leftOf BR = BL
 	got := mustFind(t, s, &Selector{
 		Text:   "[TB][LR]",
 		Below:  &Selector{Text: "[TB][LR]", RightOf: &Selector{Text: "TL"}, Above: &Selector{Text: "BR"}},
@@ -425,7 +396,6 @@ func TestFindRelativeNested(t *testing.T) {
 	}
 }
 
-// A relative filter alone (no attributes) accepts any element in that direction.
 func TestFindRelativeOnly(t *testing.T) {
 	s, m := grid()
 	m["BR"].Clickable = true
@@ -455,7 +425,6 @@ func cards() (*ui.Screen, map[string]*ui.Node) {
 	return s, m
 }
 
-// childOf restricts the search to the subtree of the parent selector's single pick.
 func TestFindChildOf(t *testing.T) {
 	s, m := cards()
 	cases := []struct {
@@ -482,7 +451,6 @@ func TestFindChildOf(t *testing.T) {
 	}
 }
 
-// childOf is inclusive: the parent itself is a candidate when it matches.
 func TestFindChildOfIncludesParent(t *testing.T) {
 	s, m := cards()
 	if got := mustFind(t, s, &Selector{ID: "card2", ChildOf: &Selector{ID: "card2"}}); got != m["card2"] {
@@ -490,7 +458,6 @@ func TestFindChildOfIncludesParent(t *testing.T) {
 	}
 }
 
-// containsChild keeps elements with a direct child matching the selector.
 func TestFindContainsChild(t *testing.T) {
 	s, m := cards()
 	cases := []struct {
@@ -517,7 +484,6 @@ func TestFindContainsChild(t *testing.T) {
 	}
 }
 
-// containsDescendants keeps elements that contain every listed selector somewhere below them.
 func TestFindContainsDescendants(t *testing.T) {
 	s, m := cards()
 	cases := []struct {
@@ -531,8 +497,6 @@ func TestFindContainsDescendants(t *testing.T) {
 		{"one missing", Selector{ID: "card.", ContainsDescendants: []*Selector{{Text: "Title"}, {Text: "Sell"}}}, nil},
 		{"self does not count", Selector{Text: "Title", ContainsDescendants: []*Selector{{Text: "Title"}}}, nil},
 		{"nested relation", Selector{ID: "card.", ContainsDescendants: []*Selector{{Text: "Buy", Below: &Selector{Text: "Title", Index: "1"}}}}, m["card2"]},
-		// With nothing else in the selector, every ancestor up to the root contains the
-		// descendant: the innermost is meant, not the root (a tap on the screen's middle).
 		{"bare: the innermost container", Selector{ContainsDescendants: []*Selector{{Text: "Title"}, {Text: "Buy"}}}, m["card1"]},
 		{"bare, deeper descendant", Selector{ContainsDescendants: []*Selector{{Text: "Buy", Below: &Selector{Text: "Title", Index: "1"}}}}, m["wrap2"]},
 	}
@@ -545,7 +509,6 @@ func TestFindContainsDescendants(t *testing.T) {
 	}
 }
 
-// Errors inside containsChild and containsDescendants anchors propagate.
 func TestFindContainsPropagatesErrors(t *testing.T) {
 	s, _ := cards()
 	for name, sel := range map[string]*Selector{
@@ -558,11 +521,10 @@ func TestFindContainsPropagatesErrors(t *testing.T) {
 	}
 }
 
-// Off-screen elements are not candidates.
 func TestFindSkipsOffScreen(t *testing.T) {
 	on := leaf(1, "Row", rect(0, 1900, 1000, 2000))
 	off := leaf(1, "Row", rect(0, 2100, 1000, 2200))
-	sliver := leaf(1, "Edge", rect(0, 1995, 1000, 2095)) // 5% on screen
+	sliver := leaf(1, "Edge", rect(0, 1995, 1000, 2095))
 	s := mkScreen(root(), on, off, sliver)
 	_, all, _ := Find(s, &Selector{Text: "Row"})
 	if len(all) != 1 || all[0] != on {
@@ -573,20 +535,16 @@ func TestFindSkipsOffScreen(t *testing.T) {
 	}
 }
 
-// BUG checks: a childOf nested in a relative selector must constrain that anchor.
 func TestFindChildOfInsideRelativeAnchor(t *testing.T) {
 	s, m := cards()
-	// The Buy below the Title of card2: buy2 (card1's Title must not count as the anchor).
 	got := mustFind(t, s, &Selector{Text: "Buy", Below: &Selector{Text: "Title", ChildOf: &Selector{ID: "card2"}}})
 	if got != m["buy2"] {
 		t.Errorf("got %s, want buy2 %s", at(got), at(m["buy2"]))
 	}
 }
 
-// BUG checks: an index inside containsChild/containsDescendants must pick one match.
 func TestFindIndexInsideContainsChild(t *testing.T) {
 	s, m := cards()
-	// The card whose direct child is the second Title (in screen order): card2.
 	got := mustFind(t, s, &Selector{ID: "card.", ContainsChild: &Selector{Text: "Title", Index: "1"}})
 	if got != m["card2"] {
 		t.Errorf("got %s, want card2", nodeName(got))
@@ -596,15 +554,13 @@ func TestFindIndexInsideContainsChild(t *testing.T) {
 	}
 }
 
-// A row scrolled out of its list (above the list's top, under a header) is not visible, though
-// it is inside the screen; rows inside the list are (iOS frames are not cut to the list).
 func TestVisibleClipsToScrollingAncestors(t *testing.T) {
 	header := leaf(1, "Header", rect(0, 0, 1000, 300))
 	list := &ui.Node{Depth: 1, Bounds: rect(0, 300, 1000, 1500), Scrollable: true, Enabled: true}
-	gone := leaf(2, "Row 1", rect(0, 150, 1000, 280)) // scrolled up, behind the header
-	half := leaf(2, "Row 2", rect(0, 280, 1000, 420)) // most of it in the list
+	gone := leaf(2, "Row 1", rect(0, 150, 1000, 280))
+	half := leaf(2, "Row 2", rect(0, 280, 1000, 420))
 	shown := leaf(2, "Row 3", rect(0, 420, 1000, 560))
-	below := leaf(2, "Row 9", rect(0, 1520, 1000, 1660)) // past the list's bottom, still on screen
+	below := leaf(2, "Row 9", rect(0, 1520, 1000, 1660))
 	s := mkScreen(root(), header, list, gone, half, shown, below)
 	vis := map[*ui.Node]bool{}
 	for _, n := range Visible(s) {
@@ -616,7 +572,6 @@ func TestVisibleClipsToScrollingAncestors(t *testing.T) {
 	if n, _, _ := Find(s, &Selector{Text: "Row 1"}); n != nil {
 		t.Error("a row scrolled out of its list was found")
 	}
-	// A scrolling ancestor with empty bounds clips nothing.
 	empty := &ui.Node{Depth: 1, Scrollable: true, Enabled: true}
 	row := leaf(2, "Row", rect(0, 100, 1000, 200))
 	mkScreen(root(), empty, row)
@@ -628,8 +583,6 @@ func TestVisibleClipsToScrollingAncestors(t *testing.T) {
 	}
 }
 
-// A web page scrolled down: its body (the page's own scroller, the window's root) reports a box
-// moved up off the screen. It does not hide what shows in the window.
 func TestVisibleScrolledPage(t *testing.T) {
 	body := &ui.Node{Depth: 0, Bounds: rect(0, -2050, 1000, -1337), Scrollable: true, Enabled: true}
 	section := &ui.Node{Depth: 1, Bounds: rect(0, -2050, 1000, 713), Enabled: true}
@@ -640,8 +593,6 @@ func TestVisibleScrolledPage(t *testing.T) {
 	}
 }
 
-// FindListed finds what the screen lists even when it is off screen (a row below a list's
-// end); Find only finds what shows.
 func TestFindListedOffScreen(t *testing.T) {
 	w := &ui.Window{Type: "app", Active: true, Bounds: ui.Rect{R: 400, B: 800}, Nodes: []*ui.Node{
 		{Text: "Row 1", Bounds: ui.Rect{T: 100, R: 400, B: 150}},

@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// Clicks is the agent's view-click counter (driver.ClickCounter).
 func TestClicks(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("clicks", func(map[string]any) map[string]any { return map[string]any{"clicks": 7} })
@@ -24,8 +23,6 @@ func TestClicks(t *testing.T) {
 	}
 }
 
-// AwaitCoverGone sends the cover's identity and the tap point, waits on the agent for at most
-// the timeout (the call itself gets a second more), and returns what the agent saw.
 func TestAwaitCoverGone(t *testing.T) {
 	for _, c := range []struct {
 		observed, gone bool
@@ -64,7 +61,6 @@ func TestAwaitCoverGone(t *testing.T) {
 	}
 }
 
-// ScreenFresh asks the agent to skip its node cache; Screen does not.
 func TestScreenFreshSkipsTheCache(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tree", func(map[string]any) map[string]any { return map[string]any{"seq": 3, "windows": []any{}} })
@@ -87,8 +83,6 @@ func TestScreenFreshSkipsTheCache(t *testing.T) {
 	}
 }
 
-// Keep asks a connected agent to stay after the connection closes; with no connection there
-// is nothing to ask.
 func TestKeep(t *testing.T) {
 	if err := bareDriver(nil).Keep(ctxT(t)); err != nil {
 		t.Errorf("Keep with no connection: %v", err)
@@ -108,9 +102,6 @@ func TestKeep(t *testing.T) {
 	}
 }
 
-// ReleaseDevice stops a left-over agent through adb alone (no connection to it): it kills
-// the agent process and takes tb's service, and only tb's, off the enabled accessibility
-// services.
 func TestReleaseDevice(t *testing.T) {
 	s := stubADB(t, nil)
 	if err := ReleaseDevice(ctxT(t), testSerial); err != nil {
@@ -123,8 +114,6 @@ func TestReleaseDevice(t *testing.T) {
 	script := strings.Join(calls[0][3:], " ")
 	for _, want := range []string{"pidof tb-agent", "kill $pids", "enabled_accessibility_services",
 		"grep -v 'dev.testbuddy.agent/'", "settings delete secure enabled_accessibility_services",
-		// The mock location providers an agent killed this way leaves (issue #72): the
-		// ones it listed, and the list.
 		"for p in $(cat /data/local/tmp/tb-location-providers); do cmd location providers remove-test-provider $p; done",
 		"rm -f /data/local/tmp/tb-location-providers"} {
 		if !strings.Contains(script, want) {
@@ -137,9 +126,6 @@ func TestReleaseDevice(t *testing.T) {
 	}
 }
 
-// Revoking an app-op (all-files access) can kill the app's process. When the app was in the
-// foreground, setPermissions notices (its pid changed) and starts it again from its launcher;
-// otherwise it leaves the app alone. launchApp's own permission step never does this.
 func TestSetPermissionsRestartsAKilledForegroundApp(t *testing.T) {
 	const app = "com.example.example"
 	dumpsys := dumpsysPerms + "      android.permission.MANAGE_EXTERNAL_STORAGE\n"
@@ -149,7 +135,7 @@ func TestSetPermissionsRestartsAKilledForegroundApp(t *testing.T) {
 		perms      map[string]string
 		foreground string
 		killed     bool
-		wantGuard  bool // ran the change inside the pid check
+		wantGuard  bool
 		wantStart  bool
 	}{
 		{"revoked, app killed", map[string]string{"all": "deny"}, app, true, true, true},
@@ -197,7 +183,6 @@ func TestSetPermissionsRestartsAKilledForegroundApp(t *testing.T) {
 	}
 }
 
-// A killed foreground app that cannot be restarted (no launcher activity) is an error.
 func TestSetPermissionsRestartFails(t *testing.T) {
 	const app = "com.example.example"
 	dumpsys := dumpsysPerms + "      android.permission.MANAGE_EXTERNAL_STORAGE\n"

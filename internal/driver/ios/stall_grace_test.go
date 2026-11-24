@@ -12,10 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// stallThenFoundRunner is stallRunner with a list that does hold the element: it comes into
-// view with the second swipe. The app stops answering accessibility for stall after the first
-// swipe (the read is given up on, the read asked once more answers), by which time the scroll's
-// own time is up.
 func stallThenFoundRunner(t *testing.T, stall time.Duration) *fakeRunner {
 	r := stallRunner(t, stall)
 	var mu sync.Mutex
@@ -51,7 +47,6 @@ func stallThenFoundRunner(t *testing.T, stall time.Duration) *fakeRunner {
 	return r
 }
 
-// runScrollTraced is runScroll with the run's trace kept.
 func runScrollTraced(t *testing.T, d *Driver) (string, error) {
 	t.Helper()
 	cmds, err := flow.ParseCommands(".", []byte("- scrollUntilVisible: {element: {id: good_save}, direction: DOWN, timeout: 1500}"))
@@ -61,8 +56,6 @@ func runScrollTraced(t *testing.T, d *Driver) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var buf bytes.Buffer
-	// The stalls here are seconds, not tens of seconds: so is the shortest stall a step names
-	// or waits out.
 	err = engine.New(d, engine.Options{StallFloor: time.Second, Trace: engine.NewTrace(&buf)}).
 		RunCommands(ctx, cmds, "dev.testbuddy.bench", nil)
 	return buf.String(), err
@@ -70,13 +63,9 @@ func runScrollTraced(t *testing.T, d *Driver) (string, error) {
 
 const graceLine = "more, once (CI mode)"
 
-// Issue #243: on a CI runner the whole simulator was starved for ~45 s in the middle of a
-// scrollUntilVisible (issue #237): the step's time ran out while nothing could answer, and the
-// step failed, naming the stall. In CI mode the step gets the stalled time back, once, up to its
-// own timeout: here a 2 s stall eats a 1.5 s scroll, and the element comes with the next swipe.
 func TestScrollWaitsOutASimulatorStallInCI(t *testing.T) {
 	t.Setenv("TB_CI", "1")
-	shortReads(t, 2*time.Second, time.Second) // the agent has 2 s for a read, as it has 30 s
+	shortReads(t, 2*time.Second, time.Second)
 	trace, err := runScrollTraced(t, newIOSDriver(t, stallThenFoundRunner(t, 2*time.Second)))
 	if err != nil {
 		t.Fatalf("the scroll failed after a stall it could have waited out: %v\n%s", err, trace)
@@ -86,7 +75,6 @@ func TestScrollWaitsOutASimulatorStallInCI(t *testing.T) {
 	}
 }
 
-// Issue #243: outside CI nothing changes: the same stall fails the step, as since #237.
 func TestScrollDoesNotWaitOutAStallOutsideCI(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	shortReads(t, 2*time.Second, time.Second)
@@ -99,9 +87,6 @@ func TestScrollDoesNotWaitOutAStallOutsideCI(t *testing.T) {
 	}
 }
 
-// Issue #243: the extra time is one stall's, once: an element that is really missing still
-// fails, within the step's timeout twice over plus the stall, and the failure says it was given
-// more time.
 func TestScrollStillFailsForAMissingElementAfterAStall(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	shortReads(t, 2*time.Second, time.Second)
@@ -124,8 +109,6 @@ func TestScrollStillFailsForAMissingElementAfterAStall(t *testing.T) {
 	}
 }
 
-// Issue #243: a healthy CI run never gets the extra time, even when the element is missing and
-// its wait runs out: the allowance cannot hide slowness that is not a stall.
 func TestScrollWithoutAStallGetsNoExtraTime(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	trace, err := runScrollTraced(t, newIOSDriver(t, stallRunner(t, 0)))

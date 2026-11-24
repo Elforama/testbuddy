@@ -13,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// blockTyping makes the fake's next inputText stop mid-step: started is closed once the step
-// runs, and the step ends when unblock is closed.
 func blockTyping(f *fakeDriver) (started, unblock chan struct{}) {
 	started, unblock = make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -36,8 +34,6 @@ func waitFor(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// issue #153: `tb close` (one device, or all) takes the device lock, so it waits for a `tb do`
-// that is mid-step instead of stopping the agent and closing the driver under it.
 func TestCloseWaitsForRunningCommand(t *testing.T) {
 	for _, dev := range []string{"alice", "all"} {
 		t.Run(dev, func(t *testing.T) {
@@ -66,7 +62,7 @@ func TestCloseWaitsForRunningCommand(t *testing.T) {
 				close(unblock)
 				<-doDone
 				t.Fatalf("issue #153: close %s returned (%q) while a do was mid-step; the driver was closed %d times under it", dev, r.Text, closed)
-			case <-time.After(300 * time.Millisecond): // close must still be waiting
+			case <-time.After(300 * time.Millisecond):
 			}
 			f.get(func() {
 				if f.closed != 0 {
@@ -91,8 +87,6 @@ func TestCloseWaitsForRunningCommand(t *testing.T) {
 					t.Errorf("closed %d, released %d: want the agent released once", f.closed, f.released)
 				}
 			})
-			// A command that found the session before the close and waited for the device
-			// fails instead of driving the closed connection.
 			if err := s.lockOpen(d); err == nil || !strings.Contains(err.Error(), "was closed") {
 				t.Errorf("a command after the close: %v", err)
 				if err == nil {
@@ -108,10 +102,6 @@ func TestCloseWaitsForRunningCommand(t *testing.T) {
 	}
 }
 
-// issue #153: when a device's agent connection drops, the session forgets it but keeps the
-// device's lock until the command running on it ends, so no other tb process takes the device
-// under that command. Then it frees the lock and closes the dropped session's driver (issue
-// #124: before, the driver was never closed and CloseAll no longer saw it).
 func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -163,7 +153,6 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 			break
 		}
 	}
-	// Opening it again meanwhile is refused: this daemon still holds the device, and says so.
 	if _, err := s.connect(context.Background(), f.info, "alice"); err == nil || !strings.Contains(err.Error(), "is still closing") {
 		t.Errorf("reopening a device whose dropped session still closes: %v", err)
 	}
@@ -187,15 +176,12 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 	}
 }
 
-// issue #153: connect names an open device (tb open --name) while other commands read the
-// name (a screenshot's file name, labels): no data race (go test -race).
 func TestSessionNameNoRace(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	f.show(loginScreen()...)
 	addDev(s, f, "")
-	// The renames go on for as long as the screenshots are taken.
 	shotsDone := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -224,9 +210,6 @@ func TestSessionNameNoRace(t *testing.T) {
 	wg.Wait()
 }
 
-// issue #153: a `tb close` cancelled while it waits for a running command (Ctrl-C, or the
-// daemon stopping) leaves the session open when it gets the device, instead of closing it
-// later for a client that went away.
 func TestCloseCancelledWhileWaiting(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -275,8 +258,6 @@ func TestCloseCancelledWhileWaiting(t *testing.T) {
 	}
 }
 
-// issue #153: `tb close all` closes the devices side by side: a device busy with a long
-// command does not keep the others open until it ends.
 func TestCloseAllSideBySide(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -338,9 +319,6 @@ func TestCloseAllSideBySide(t *testing.T) {
 	})
 }
 
-// issue #153: a `tb close` that gets the device after its dropped connection closed the
-// session (that close keeps tb's agent) still stops the agent, as tb close promises; unless
-// another tb process took the device meanwhile: then the agent is left, and the reply says so.
 func TestCloseStopsTheAgentAfterADrop(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -350,7 +328,7 @@ func TestCloseStopsTheAgentAfterADrop(t *testing.T) {
 		f := newFake("emulator-5554", "Pixel 7", device.Android)
 		d := addDev(s, f, "alice")
 		d.mu.Lock()
-		d.shut(false) // the dropped connection's close, first
+		d.shut(false)
 		d.mu.Unlock()
 		var other *devlock.Lock
 		if taken {

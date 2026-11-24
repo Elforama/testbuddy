@@ -21,7 +21,7 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		opts.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
 	var x1, y1, x2, y2 int
-	var from *ui.Node // the element a swipe from an element starts on
+	var from *ui.Node
 	var fromScreen *ui.Screen
 	switch {
 	case c.From != nil:
@@ -44,9 +44,6 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 				return err
 			}
 		}
-		// To near the screen's edge, and at least 70% of the element's size: a pager turns
-		// a page only for a swipe past its middle (or a fast one), and one from its centre to
-		// 10% of the screen falls short when the pager has margins.
 		x2, y2 = x1, y1
 		bw, bh := n.Bounds.W()*7/10, n.Bounds.H()*7/10
 		switch c.Direction {
@@ -59,11 +56,6 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		case "RIGHT":
 			x2 = min(w-1, max(w*9/10, x1+bw))
 		}
-		// A CI allowance (package ci): it places what it starts on (a slider's thumb, a page, a
-		// row), and on a slow CI runner an app that is behind can get the last moves in one
-		// batch with the lift and settle short (issues #127 and #182: a slider at 71 and 74
-		// instead of 80+). In CI the finger rests before it moves and creeps slowly before it
-		// lifts (+1.7 s on iOS); elsewhere the swipe is as before.
 		opts.Rest = ci.On()
 	case c.Direction != "":
 		fx1, fy1, fx2, fy2 := directionSwipe(c.Direction, d.Platform())
@@ -88,11 +80,6 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		clamp := func(v, hi int) int { return max(0, min(hi-1, v)) }
 		x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
 	}
-	// A CI allowance (package ci), like the rest above: a swipe that starts on a slider's thumb
-	// rests and creeps, also between two points, and a slider it leaves short of where the drag
-	// ended is dragged again (issue #139, swipe_slider.go). Elsewhere the swipe is as before.
-	// Only a swipe along the slider (mostly sideways): one up or down that starts on a thumb
-	// scrolls the page, and resting would hand the touch to the slider (review of #139).
 	var slider *ui.Node
 	var before *ui.Screen
 	if ci.On() && d.Platform() == "ios" && alongSlider(x1, y1, x2, y2) {
@@ -124,14 +111,8 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	return nil
 }
 
-// dragHoldPlatforms: where a press-and-hold drag is played (iOS: issue #330; Android: issue
-// #358). The web agent's swipes have no hold yet: they would move at once, a scroll, and the
-// step would pass having dragged nothing.
 var dragHoldPlatforms = map[string]bool{"ios": true, "android": true}
 
-// drag runs the Test Buddy extension `drag` (issue #330): the finger goes down on From (or at
-// Start), stays still for Hold so a long press lifts what it is on (drag and drop, a list
-// reorder), moves to To's centre (or End) over Duration, and lifts there.
 func (r *Runner) drag(ctx context.Context, c *flow.Command) error {
 	d := r.Drv
 	if !dragHoldPlatforms[d.Platform()] {
@@ -169,7 +150,7 @@ func (r *Runner) drag(ctx context.Context, c *flow.Command) error {
 	x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
 	hold := time.Duration(c.Hold) * time.Millisecond
 	dur := time.Duration(c.Duration) * time.Millisecond
-	opts := driver.ActionOpts{Hold: max(hold, time.Millisecond)} // a hold of 0 is still a drag, not a swipe
+	opts := driver.ActionOpts{Hold: max(hold, time.Millisecond)}
 	if c.WaitToSettleTimeoutMs > 0 {
 		opts.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
@@ -195,7 +176,7 @@ func directionSwipe(dir, platform string) (x1, y1, x2, y2 float64) {
 		return 0.5, 0.2, 0.5, 0.9
 	case "RIGHT":
 		return 0.1, 0.5, 0.9, 0.5
-	default: // LEFT
+	default:
 		return 0.9, 0.5, 0.1, 0.5
 	}
 }

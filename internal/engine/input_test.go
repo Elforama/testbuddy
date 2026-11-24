@@ -15,7 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// inputText types the evaluated text, waiting 300 ms for the field to react.
 func TestInputText(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- inputText: hello\n- inputText: \"${1+1}-x\"\n- inputText: {text: map form}"))
@@ -27,14 +26,12 @@ func TestInputText(t *testing.T) {
 	}
 }
 
-// Typing that the device fails fails the command.
 func TestInputTextError(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("TypeText", errors.New("no focused field"))
 	mustFail(t, runWith(t, f, quick, "- inputText: hello"), "no focused field")
 }
 
-// The inputRandom* commands type generated values of the asked kind and length.
 func TestInputRandom(t *testing.T) {
 	digits := func(s string) bool { return strings.IndexFunc(s, func(r rune) bool { return !unicode.IsDigit(r) }) < 0 }
 	letters := func(s string) bool { return strings.IndexFunc(s, func(r rune) bool { return r < 'a' || r > 'z' }) < 0 }
@@ -44,7 +41,7 @@ func TestInputRandom(t *testing.T) {
 	}{
 		{"inputRandomText", func(s string) bool { return len(s) == 8 && letters(s) }},
 		{"inputRandomText: {length: 5}", func(s string) bool { return len(s) == 5 && letters(s) }},
-		{"inputRandomText: {length: 0}", func(s string) bool { return len(s) == 8 }}, // non-positive: the default
+		{"inputRandomText: {length: 0}", func(s string) bool { return len(s) == 8 }},
 		{"inputRandomNumber: {length: 4}", func(s string) bool { return len(s) == 4 && digits(s) && s[0] != '0' }},
 		{"inputRandomNumber", func(s string) bool { return len(s) == 8 && digits(s) }},
 		{"inputRandomEmail", func(s string) bool { return strings.Count(s, "@") == 1 && strings.Contains(s, ".") }},
@@ -63,7 +60,6 @@ func TestInputRandom(t *testing.T) {
 	}
 }
 
-// eraseText erases 50 characters unless told how many.
 func TestEraseText(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- eraseText\n- eraseText: 5\n- eraseText: {charactersToErase: 3}"))
@@ -75,7 +71,6 @@ func TestEraseText(t *testing.T) {
 	mustFail(t, runWith(t, f2, quick, "- eraseText: 2"), "no field")
 }
 
-// copyTextFrom copies an element's text (else hint, description, error); pasteText types it.
 func TestCopyAndPaste(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -99,14 +94,12 @@ func TestCopyAndPaste(t *testing.T) {
 	}
 }
 
-// An element with nothing to copy fails copyTextFrom.
 func TestCopyTextFromEmpty(t *testing.T) {
 	n := &ui.Node{ID: "src", Bounds: ui.Rect{R: 400, B: 50}}
 	f := &fakeDriver{screen: static(n)}
 	mustFail(t, runWith(t, f, quick, "- copyTextFrom: {id: src}"), "it has no text")
 }
 
-// copyTextFrom an element that is not there: an optional one warns.
 func TestCopyTextFromMissing(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -120,7 +113,6 @@ func TestCopyTextFromMissing(t *testing.T) {
 	}
 }
 
-// setClipboard sets what pasteText types; pasteText with nothing copied types nothing.
 func TestSetClipboard(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- pasteText\n- setClipboard: \"${'a' + 'b'}\"\n- pasteText\n- setClipboard: {text: c}\n- pasteText"))
@@ -129,8 +121,6 @@ func TestSetClipboard(t *testing.T) {
 	}
 }
 
-// pressKey sends the key and returns once the UI starts reacting; if it changed, the next
-// command waits for it to settle.
 func TestPressKey(t *testing.T) {
 	for _, tc := range []struct {
 		res      driver.SettleResult
@@ -152,8 +142,6 @@ func TestPressKey(t *testing.T) {
 	}
 }
 
-// A key the device rejects fails on Android; on iOS keys it lacks do nothing, and a key it has
-// whose press failed fails (issue #286).
 func TestPressKeyError(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("PressKey", errors.New("unknown key"))
@@ -166,7 +154,6 @@ func TestPressKeyError(t *testing.T) {
 	mustFail(t, runWith(t, f3, quick, "- pressKey: Volume Up"), "Failed to press")
 }
 
-// back presses Android's back key; on iOS it does nothing.
 func TestBack(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- back\n- action: back"))
@@ -184,7 +171,6 @@ func TestBack(t *testing.T) {
 	mustFail(t, runWith(t, f3, quick, "- back"), "agent gone")
 }
 
-// hideKeyboard asks the device to hide it and checks it went; a keyboard that stays fails.
 func TestHideKeyboard(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- hideKeyboard\n- hide keyboard"))
@@ -213,9 +199,6 @@ func (d *checkedTypingDriver) TypeTextChecked(_ context.Context, text string, _ 
 	return d.res, d.verifyErr
 }
 
-// Issue #279: the Android agent checks the text the field holds after typing. A field that
-// still misses keys after they were typed again fails the step with the agent's words, and
-// nothing is typed again by the runner; how the keys went in is in the trace.
 func TestDeviceCheckedTypingReportsLostKeysAndHowKeysWentIn(t *testing.T) {
 	f := &fakeDriver{}
 	lost := errors.New(`typing lost keys: the field holds "QUIK", expected "quick"`)
@@ -273,7 +256,6 @@ func TestDeviceCheckedTypingAvoidsHierarchyReads(t *testing.T) {
 	}
 }
 
-// Drivers without device-side verification retain the runner's first-key retry.
 func TestTypeFirstKeyChecked(t *testing.T) {
 	t.Parallel()
 	for _, drop := range []bool{true, false} {
@@ -289,7 +271,7 @@ func TestTypeFirstKeyChecked(t *testing.T) {
 		f.onType = func(s string) {
 			mu.Lock()
 			if drop && !dropped {
-				dropped = true // the first key is lost
+				dropped = true
 			} else {
 				text += s
 			}
@@ -310,8 +292,6 @@ func TestTypeFirstKeyChecked(t *testing.T) {
 	}
 }
 
-// A one-digit code box moves focus to the next box as a key lands: the first key counts as
-// landed (focus moved), and is not typed again.
 func TestTypeFirstKeyFocusMoves(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -347,8 +327,6 @@ func TestTypeFirstKeyFocusMoves(t *testing.T) {
 	}
 }
 
-// A WebView/custom provider may send no event for the rest of the text. The
-// first-key verification snapshot must not remain current after typing it.
 func TestTypingRemainderInvalidatesFirstKeySnapshotWithoutEvents(t *testing.T) {
 	f := &fakeDriver{}
 	var mu sync.Mutex
@@ -363,8 +341,6 @@ func TestTypingRemainderInvalidatesFirstKeySnapshotWithoutEvents(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- inputText: hi\n- assertVisible: {id: field, text: hi}"))
 }
 
-// AND-004: a transparent one-touch catcher can swallow the reference-field
-// tap while the amount field retains focus. Never send reference text there.
 func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {
 	for _, canFocus := range []bool{true, false} {
 		t.Run(fmt.Sprintf("canFocus=%v", canFocus), func(t *testing.T) {
@@ -413,10 +389,6 @@ func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {
 	}
 }
 
-// A keyboard that opens for the first time can report one of its own controls as focused
-// (Gboard's header) before the tapped field reports focus. That control is not another
-// field: typing goes on to the device's own check that the requested field gets the keys,
-// rather than re-tapping a field the keyboard now covers and failing (PR #33's Android run).
 func TestInputIgnoresFocusInsideTheKeyboard(t *testing.T) {
 	touches := 0
 	f := &fakeDriver{}
@@ -432,8 +404,6 @@ func TestInputIgnoresFocusInsideTheKeyboard(t *testing.T) {
 		f.change(true)
 	}
 	d := &checkedTypingDriver{fakeDriver: f}
-	// The assertion reads the screen with the keyboard up, as the tap's own recovery read did on
-	// the device.
 	mustPass(t, runWith(t, d, quick, "- tapOn: {id: bottom}\n- assertVisible: {id: bottom}\n- inputText: buddy50"))
 	if touches != 1 || strings.Join(d.checked, "|") != "buddy50" {
 		t.Fatalf("touches=%d, checked typing %q", touches, d.checked)

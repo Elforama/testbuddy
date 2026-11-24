@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// TestEveryCommandHasAnExample parses one valid form of every command key, so a new
-// command without parser coverage fails here.
 func TestEveryCommandHasAnExample(t *testing.T) {
 	examples := map[string]struct{ src, name string }{
 		"tapOn":                  {"tapOn: Login", ""},
@@ -77,7 +75,7 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 		"answerDialogs":          {"answerDialogs: CANCEL", ""},
 		"assertDialog":           {"assertDialog: Delete it?", ""},
 		"drag":                   {"drag: {from: A, to: C}", ""},
-		"parallel":               {"", ""}, // multi-device only: see multidevice_test.go
+		"parallel":               {"", ""},
 	}
 	var missing []string
 	for k := range commandKeys {
@@ -110,14 +108,13 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 	}
 }
 
-// TestBareCommands pins every command usable as a plain string list item.
 func TestBareCommands(t *testing.T) {
 	for name := range bareCommands {
 		t.Run(name, func(t *testing.T) {
 			c := step(t, "- "+name+"\n")
 			want := name
 			if name == "hide keyboard" {
-				want = "hideKeyboard" // Maestro's spelled-out alias
+				want = "hideKeyboard"
 			}
 			if c.Name != want || c.Line != 3 {
 				t.Errorf("Name %q Line %d", c.Name, c.Line)
@@ -126,7 +123,6 @@ func TestBareCommands(t *testing.T) {
 	}
 }
 
-// TestCommandsNeedingAValue pins that a command needing options, written bare, says so.
 func TestCommandsNeedingAValue(t *testing.T) {
 	for name := range commandKeys {
 		if bareCommands[name] {
@@ -142,7 +138,6 @@ func TestCommandsNeedingAValue(t *testing.T) {
 	}
 }
 
-// TestCommandsWithNullValue pins that `- cmd:` with nothing after it is rejected.
 func TestCommandsWithNullValue(t *testing.T) {
 	for _, name := range []string{"tapOn", "back", "launchApp", "inputText", "runFlow", "swipe"} {
 		e := parseErr(t, hdr+"- "+name+":\n")
@@ -152,7 +147,6 @@ func TestCommandsWithNullValue(t *testing.T) {
 	}
 }
 
-// TestItemErrors pins rejections of malformed list items.
 func TestItemErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"unknown bare command", "- back\n- frobnicate\n", `Invalid Command: "frobnicate"`, 4},
@@ -171,9 +165,6 @@ func TestItemErrors(t *testing.T) {
 	}
 }
 
-// ---- taps ----
-
-// TestTapOnScalar pins the defaults of the short tapOn form.
 func TestTapOnScalar(t *testing.T) {
 	c := step(t, "- tapOn: Login\n")
 	if c.Selector == nil || c.Selector.Text != "Login" {
@@ -187,7 +178,6 @@ func TestTapOnScalar(t *testing.T) {
 	}
 }
 
-// TestTapOnMapOptions pins every tap option of the map form.
 func TestTapOnMapOptions(t *testing.T) {
 	c := step(t, `- tapOn:
     text: Login
@@ -207,8 +197,6 @@ func TestTapOnMapOptions(t *testing.T) {
 	}
 }
 
-// TestRetryTapIfNoChangeIsTriState: unset, true and false are three settings (issue #280): an
-// explicit false turns off the runner's own replay of a tap that provably did nothing.
 func TestRetryTapIfNoChangeIsTriState(t *testing.T) {
 	for _, tc := range []struct {
 		body          string
@@ -226,7 +214,6 @@ func TestRetryTapIfNoChangeIsTriState(t *testing.T) {
 	}
 }
 
-// TestTapOnMapDefaults pins defaults and clamps of the map form.
 func TestTapOnMapDefaults(t *testing.T) {
 	for _, tc := range []struct {
 		name, body    string
@@ -248,7 +235,6 @@ func TestTapOnMapDefaults(t *testing.T) {
 	}
 }
 
-// TestTapVariants pins how doubleTapOn and longPressOn set Repeat/LongPress.
 func TestTapVariants(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
@@ -270,7 +256,6 @@ func TestTapVariants(t *testing.T) {
 	}
 }
 
-// TestTapOnPoint pins point taps: alone they drop the selector, with one they stay relative.
 func TestTapOnPoint(t *testing.T) {
 	c := step(t, "- tapOn: {point: \"50%,90%\"}\n")
 	if c.Selector != nil || c.Point != "50%,90%" {
@@ -290,7 +275,6 @@ func TestTapOnPoint(t *testing.T) {
 	}
 }
 
-// TestTapOnOptionalOnly pins that {optional: true} keeps an empty (match-anything) selector.
 func TestTapOnOptionalOnly(t *testing.T) {
 	c := step(t, "- tapOn: {optional: true}\n")
 	if c.Selector == nil || c.Selector.HasCriteria() || !c.Optional {
@@ -298,7 +282,6 @@ func TestTapOnOptionalOnly(t *testing.T) {
 	}
 }
 
-// TestTapErrors pins rejected tap options.
 func TestTapErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"unknown key", "- tapOn:\n    text: X\n    foo: 1\n", `Unknown Property: "foo" is not an option of tapOn`, 5},
@@ -314,9 +297,6 @@ func TestTapErrors(t *testing.T) {
 	})
 }
 
-// ---- assertions ----
-
-// TestElementAssertions pins assertVisible/assertNotVisible/copyTextFrom forms.
 func TestElementAssertions(t *testing.T) {
 	for _, name := range []string{"assertVisible", "assertNotVisible", "copyTextFrom"} {
 		t.Run(name, func(t *testing.T) {
@@ -328,7 +308,6 @@ func TestElementAssertions(t *testing.T) {
 			if c.Selector.ID != "msg" || c.Label != "Check it" || !c.Optional {
 				t.Errorf("map: %+v", c)
 			}
-			// Tap options are tolerated on these commands (they share the selector map).
 			c = step(t, "- "+name+": {id: msg, point: \"1,1\", repeat: 2, delay: 1, retryTapIfNoChange: true}\n")
 			if c.Selector.ID != "msg" {
 				t.Errorf("tap options: %+v", c)
@@ -345,7 +324,6 @@ func TestElementAssertions(t *testing.T) {
 	}
 }
 
-// TestAssertTrue pins the scalar and map forms of assertTrue.
 func TestAssertTrue(t *testing.T) {
 	c := step(t, "- assertTrue: ${output.count > 2}\n")
 	if c.Cond == nil || c.Cond.True == nil || *c.Cond.True != "${output.count > 2}" {
@@ -364,7 +342,6 @@ func TestAssertTrue(t *testing.T) {
 	})
 }
 
-// TestExtendedWaitUntil pins visible/notVisible/timeout and its errors.
 func TestExtendedWaitUntil(t *testing.T) {
 	c := step(t, "- extendedWaitUntil:\n    visible: Done\n    timeout: 10000\n    label: wait\n    optional: true\n")
 	if c.Cond.Visible.Text != "Done" || c.Cond.NotVisible != nil || c.Timeout != "10000" || c.Label != "wait" || !c.Optional {
@@ -389,9 +366,6 @@ func TestExtendedWaitUntil(t *testing.T) {
 	})
 }
 
-// ---- text ----
-
-// TestInputText pins inputText's forms; the map form ignores unknown keys by design.
 func TestInputText(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{"- inputText: hello\n", "hello"},
@@ -412,7 +386,6 @@ func TestInputText(t *testing.T) {
 	runErrCases(t, hdr, []errCase{{"list", "- inputText: [a]\n", "inputText takes a text", 3}})
 }
 
-// TestInputRandom pins every inputRandom* kind, its default length and options.
 func TestInputRandom(t *testing.T) {
 	for _, kind := range []string{"Text", "Number", "Email", "PersonName", "CityName", "CountryName", "ColorName"} {
 		name := "inputRandom" + kind
@@ -452,7 +425,6 @@ func TestInputRandom(t *testing.T) {
 	})
 }
 
-// TestEraseText pins eraseText's default count and its scalar/map forms.
 func TestEraseText(t *testing.T) {
 	for _, tc := range []struct {
 		body  string
@@ -475,7 +447,6 @@ func TestEraseText(t *testing.T) {
 	})
 }
 
-// TestSetClipboard pins setClipboard's scalar and map forms.
 func TestSetClipboard(t *testing.T) {
 	if c := step(t, "- setClipboard: secret\n"); c.Text != "secret" || c.Mutating() {
 		t.Errorf("scalar: %+v", c)
@@ -486,9 +457,6 @@ func TestSetClipboard(t *testing.T) {
 	runErrCases(t, hdr, []errCase{{"unknown key", "- setClipboard: {value: x}\n", `"value" is not an option of setClipboard`, 3}})
 }
 
-// ---- keys ----
-
-// TestPressKeyNames pins that key names are matched case-insensitively (and trimmed).
 func TestPressKeyNames(t *testing.T) {
 	for _, k := range []string{"Enter", "enter", "ENTER", "Backspace", "back", "HOME", "lock", "Tab", "escape",
 		"Power", "volume up", "Volume Down", "remote dpad center", "Remote Media Play Pause", "TV Input HDMI 3",
@@ -513,7 +481,6 @@ func TestPressKeyNames(t *testing.T) {
 	})
 }
 
-// TestNoValueCommands pins commands that take nothing or {label, optional}.
 func TestNoValueCommands(t *testing.T) {
 	for _, name := range []string{"back", "hideKeyboard", "pasteText", "scroll", "clearKeychain", "stopRecording",
 		"toggleAirplaneMode", "toggleDarkMode", "assertDarkMode", "assertLightMode"} {
@@ -534,7 +501,6 @@ func TestNoValueCommands(t *testing.T) {
 	}
 }
 
-// TestAction pins the legacy `action:` command, which renames itself to its target.
 func TestAction(t *testing.T) {
 	for _, target := range []string{"back", "hideKeyboard", "scroll", "clearKeychain", "pasteText"} {
 		if c := step(t, "- action: "+target+"\n"); c.Name != target {
@@ -547,9 +513,6 @@ func TestAction(t *testing.T) {
 	})
 }
 
-// ---- swipe and scroll ----
-
-// TestSwipeDirection pins the direction form and its defaults.
 func TestSwipeDirection(t *testing.T) {
 	for _, tc := range []struct{ dir, want string }{{"UP", "UP"}, {"down", "DOWN"}, {"LEFT", "LEFT"}, {"right", "RIGHT"}} {
 		c := step(t, "- swipe: {direction: "+tc.dir+"}\n")
@@ -572,7 +535,6 @@ func TestSwipeDirection(t *testing.T) {
 	}
 }
 
-// TestSwipeStartEnd pins the start/end form with percentages or pixels.
 func TestSwipeStartEnd(t *testing.T) {
 	c := step(t, "- swipe: {start: \"90%,50%\", end: \"10%,50%\"}\n")
 	if c.Start != "90%,50%" || c.End != "10%,50%" || c.Direction != "" {
@@ -584,7 +546,6 @@ func TestSwipeStartEnd(t *testing.T) {
 	}
 }
 
-// TestSwipeFrom pins the from-element form.
 func TestSwipeFrom(t *testing.T) {
 	c := step(t, "- swipe: {from: {id: card}, direction: LEFT}\n")
 	if c.From == nil || c.From.ID != "card" || c.Direction != "LEFT" || c.Optional {
@@ -600,7 +561,6 @@ func TestSwipeFrom(t *testing.T) {
 	}
 }
 
-// TestSwipeErrors pins swipe's rejections.
 func TestSwipeErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"scalar", "- swipe: UP\n", "swipe takes a map", 3},
@@ -620,8 +580,6 @@ func TestSwipeErrors(t *testing.T) {
 	})
 }
 
-// TestDrag pins the press-and-hold drag (issue #330, a tb extension): from an element or a
-// point, to an element or a point, held 800 ms and moved over 1 s unless the flow says.
 func TestDrag(t *testing.T) {
 	c := step(t, "- drag: {from: A, to: C}\n")
 	if c.Name != "drag" || c.From == nil || c.From.Text != "A" || c.To == nil || c.To.Text != "C" ||
@@ -654,7 +612,6 @@ func TestDrag(t *testing.T) {
 	}
 }
 
-// TestDragErrors pins drag's rejections (issue #330).
 func TestDragErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"scalar", "- drag: A\n", "drag takes a map", 3},
@@ -671,7 +628,6 @@ func TestDragErrors(t *testing.T) {
 	})
 }
 
-// TestScrollUntilVisible pins scrollUntilVisible's fields, defaults and clamps.
 func TestScrollUntilVisible(t *testing.T) {
 	c := step(t, "- scrollUntilVisible: {element: Footer}\n")
 	if c.Selector.Text != "Footer" || c.Direction != "DOWN" || c.VisibilityPct != 100 || c.CenterElement ||
@@ -719,8 +675,6 @@ func TestScrollUntilVisible(t *testing.T) {
 	})
 }
 
-// TestScrollUntilVisibleIn pins the extension's two steps: the page brings the list item in
-// whole, then the list holding it scrolls to the element.
 func TestScrollUntilVisibleIn(t *testing.T) {
 	c := step(t, "- scrollUntilVisibleIn: {list: Card 6-1, element: {id: card_6_12}, direction: right}\n")
 	if len(c.Commands) != 2 {
@@ -765,7 +719,6 @@ func TestScrollUntilVisibleIn(t *testing.T) {
 	})
 }
 
-// TestCommandLinesAndFiles pins that each command records its own line and file.
 func TestCommandLinesAndFiles(t *testing.T) {
 	f := mustParse(t, hdr+"- launchApp\n\n- tapOn:\n    text: X\n# comment\n- back\n")
 	var got []int

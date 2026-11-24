@@ -6,9 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #300, the web half of #282: a fixed drawer repeats "Images" from the list under its
-// backdrop. The list's row comes first in the page, but the browser's hit test reports the
-// backdrop over it (ui.Node.Covers): the drawer's item is the one a person can reach.
 func TestFindOnTheWebPrefersTheMatchTheHitTestFindsClear(t *testing.T) {
 	body := &ui.Node{Depth: 0, Class: "body", Bounds: rect(0, 0, 1000, 2000), Enabled: true}
 	row := &ui.Node{Depth: 1, Class: "div", Text: "Images", Clickable: true, Bounds: rect(0, 300, 1000, 360), Enabled: true}
@@ -26,7 +23,6 @@ func TestFindOnTheWebPrefersTheMatchTheHitTestFindsClear(t *testing.T) {
 	if got != item || len(all) != 2 || all[1] != row {
 		t.Errorf("picked %s, order %v: want the drawer's item, then the row under the backdrop", at(got), names(all))
 	}
-	// A selector on the row alone still finds it (the runner decides what to do about the cover).
 	if got := mustFind(t, s, &Selector{Text: "Images", Index: "0"}); got == nil {
 		t.Error("index 0 found nothing")
 	}

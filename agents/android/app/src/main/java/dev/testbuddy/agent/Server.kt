@@ -9,14 +9,6 @@ import java.io.BufferedOutputStream
 import java.io.OutputStream
 import kotlin.system.exitProcess
 
-/**
- * Serves one host at a time on the abstract socket [SOCKET_NAME]. A new connection replaces
- * the old one. Only the shell (adbd) and root may connect: the socket checks the peer's uid,
- * so other apps on the device cannot drive it.
- *
- * Protocol: one JSON object per line each way (see the host's internal/wire package). The
- * requests themselves are [Ops]'.
- */
 class Server(private val ops: Ops, private val events: Events) {
     private val writeLock = Object()
     @Volatile private var out: OutputStream? = null
@@ -43,16 +35,10 @@ class Server(private val ops: Ops, private val events: Events) {
         }
     }
 
-    /**
-     * Exits when no client has been connected for [Ops.idleLimitMs]: tb releases the device itself
-     * when a run ends ("exit"), but a run that was killed (or crashed) cannot, and its agent
-     * would keep the device's UiAutomation slot from other tools. ORPHAN_EXIT_MS outlasts tb's
-     * reconnect window; a run with --keep-agents asks for IDLE_EXIT_MS ("keep").
-     */
     private fun startIdleWatch() {
         Thread({
             while (true) {
-                Thread.sleep(5_000) // housekeeping only; never on a test's path
+                Thread.sleep(5_000)
                 if (clients.get() == 0 && SystemClock.uptimeMillis() - lastClientAt > ops.idleLimitMs) {
                     Log.i(TAG, "idle, exiting")
                     ops.shutdown()
@@ -67,7 +53,6 @@ class Server(private val ops: Ops, private val events: Events) {
         clients.incrementAndGet()
         val os = BufferedOutputStream(sock.outputStream, 64 * 1024)
         synchronized(writeLock) { out = os }
-        // Pushed events go out on the outbox's own thread, after the hello (Outbox.kt).
         val outbox = Outbox { msg -> send(os, msg) }
         try {
             greet(events, outbox, ops::hello) { send(os, it) }

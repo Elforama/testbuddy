@@ -79,7 +79,6 @@ func (p *parser) parseRepeat(c *Command, m *mapView, v *yaml.Node) error {
 	}
 	if t := m.get("times"); t != nil && !isNull(t) {
 		c.Times = t.Value
-		// A value with ${...} is only known at run time: the engine checks it then.
 		if t.Kind != yaml.ScalarNode || !strings.Contains(t.Value, "${") {
 			if _, err := RepeatTimes(t.Value); err != nil {
 				return p.errf(t, "%v", err)
@@ -101,9 +100,6 @@ func (p *parser) parseRepeat(c *Command, m *mapView, v *yaml.Node) error {
 	return m.strict(c.Name)
 }
 
-// RepeatTimes reads a repeat's times: a finite number of 0 or more. A fraction is cut to
-// its whole part (2.5 runs twice), as before. Anything else (text, empty, negative, NaN,
-// Inf) is an error: taking it as "no limit" looped forever (issue #41).
 func RepeatTimes(s string) (int, error) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
@@ -115,10 +111,6 @@ func RepeatTimes(s string) (int, error) {
 	return int(v), nil
 }
 
-// MaxRetries reads a retry's maxRetries: a finite number of 0 or more. A fraction is cut to
-// its whole part, as in repeat's times. Anything else (text, empty, negative, NaN, Inf) is an
-// error: a negative value ran the commands no times and passed (issue #42). The engine caps
-// the result at 3.
 func MaxRetries(s string) (int, error) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
@@ -139,7 +131,6 @@ func (p *parser) parseRetry(c *Command, m *mapView, v *yaml.Node) error {
 	}
 	if t := m.get("maxRetries"); t != nil && !isNull(t) {
 		c.MaxRetries = t.Value
-		// A value with ${...} is only known at run time: the engine checks it then.
 		if t.Kind != yaml.ScalarNode || !strings.Contains(t.Value, "${") {
 			if _, err := MaxRetries(t.Value); err != nil {
 				return p.errf(t, "%v", err)

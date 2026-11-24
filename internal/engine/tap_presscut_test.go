@@ -9,12 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #337: on iOS CI a double tap's first press reached the app while its main thread was
-// stalled: delivering the down took 124 ms, the lift came 5 ms later, and a press-duration
-// handler (a 75 ms long press) saw a 5 ms press. The probe says so (ActionResult.PressCut). Every
-// press gesture only notes it (review of f4599db): whether it mattered depends on the app's own
-// minimum (a long press recognizes at 0.5 s of tb's 3 s), which tb cannot know. Nothing fails on
-// it, and nothing is sent again.
 func TestPressCutShort(t *testing.T) {
 	cut := &driver.PressCut{SeenMs: 5, PressMs: 129, StallMs: 133}
 	note := `the app saw only 5 ms of the 129 ms press, after a 133 ms stall in its down; a control that needs a longer press may have missed it`
@@ -31,7 +25,6 @@ func TestPressCutShort(t *testing.T) {
 			lines: []string{`double tap at \(\d+, \d+\): ` + note}},
 		{name: "a tap notes it", flow: "- tapOn: {id: box}", kind: "tap", cut: cut,
 			lines: []string{`tap at \(\d+, \d+\): ` + note}},
-		// No probe, or a press seen whole: nothing changes.
 		{name: "a long press seen whole", flow: "- longPressOn: {id: box}", kind: "long"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

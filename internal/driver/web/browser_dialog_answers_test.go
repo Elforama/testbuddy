@@ -14,12 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Choosing the answer to a JavaScript dialog (issue #91): since #76, tb answers every dialog
-// with OK (a prompt with its own default text), so a flow could not take the Cancel branch of
-// a confirm() or type its own text into a prompt(). With answerDialogs (AnswerDialogs here)
-// the page sees the answer the flow chose, in the driven tab and in a background tab alike,
-// until the flow chooses again; the zero answer is the old default. Needs Chrome: runs with
-// TB_BROWSER_TESTS=1.
 func TestDialogAnswersInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -31,7 +25,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 	pages := map[string]string{
 		"/": btn("confirm", "Confirm", "this.textContent = confirm('Delete it?') ? 'Confirmed' : 'Cancelled'") +
 			btn("prompt", "Prompt", "const v = prompt('Your name?', 'Ada'); this.textContent = v === null ? 'No name' : 'Name: [' + v + ']'") +
-			// A confirm that opens in this tab once a popup has taken the flow's attention.
 			btn("later", "Ask later", "setTimeout(() => { document.getElementById('bg').textContent = confirm('From behind?') ? 'bg OK' : 'bg Cancel' }, 300); window.open('/popup')") +
 			`<div id="bg">bg waiting</div>
 <script>window.addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; });</script>`,
@@ -53,7 +46,7 @@ func TestDialogAnswersInChrome(t *testing.T) {
 	if err := d.LaunchApp(ctx, srv.URL+"/", driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	var da driver.DialogAnswerer = d // the engine's answerDialogs step finds it so
+	var da driver.DialogAnswerer = d
 	answer := func(a driver.DialogAnswer) {
 		t.Helper()
 		if err := da.AnswerDialogs(ctx, a); err != nil {
@@ -65,7 +58,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 		said = append(said, d.Notes()...)
 		return strings.Contains(strings.Join(said, "\n"), s)
 	}
-	// text reads the screen until #id shows want (a flow's assertion retries the same way).
 	text := func(id, want string) {
 		t.Helper()
 		var n *ui.Node
@@ -103,7 +95,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 		}
 	}
 
-	// Cancel: confirm() returns false, prompt() null.
 	answer(driver.DialogAnswer{Cancel: true})
 	tap("confirm")
 	text("confirm", "Cancelled")
@@ -113,7 +104,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 		t.Errorf("the trace does not say the dialogs were cancelled: %q", said)
 	}
 
-	// The choice holds for a dialog in a tab the flow is not driving (issue #78).
 	tap("later")
 	screenWith(t, d, ctx, "popup")
 	for deadline := time.Now().Add(5 * time.Second); !saw(`background tab opened a JavaScript confirm`); time.Sleep(100 * time.Millisecond) {
@@ -127,7 +117,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 		t.Errorf("the background confirm was not cancelled: %q", said)
 	}
 
-	// Text for a prompt: OK with that text (confirm() gets OK).
 	reset()
 	answer(driver.DialogAnswer{Text: "Grace", HasText: true})
 	tap("prompt")
@@ -137,12 +126,10 @@ func TestDialogAnswersInChrome(t *testing.T) {
 	if !saw(`prompt "Your name?": tb answered OK with "Grace"`) {
 		t.Errorf("the trace does not name the prompt's text: %q", said)
 	}
-	// An empty text is a text too.
 	answer(driver.DialogAnswer{HasText: true})
 	tap("prompt")
 	text("prompt", "Name: []")
 
-	// The zero answer is the default again: OK, with the prompt's own text.
 	reset()
 	answer(driver.DialogAnswer{})
 	tap("prompt")
@@ -150,8 +137,6 @@ func TestDialogAnswersInChrome(t *testing.T) {
 	tap("confirm")
 	text("confirm", "Confirmed")
 
-	// Whatever the choice, a beforeunload "Leave site?" is left (tb navigates only when the
-	// flow asks it to).
 	answer(driver.DialogAnswer{Cancel: true})
 	if err := d.LaunchApp(ctx, srv.URL+"/next", driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)

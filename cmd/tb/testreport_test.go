@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/report"
 )
 
-// issue #59: a flow skipped because an earlier ordered flow failed keeps its status and the
-// reason in the reports (the scheduler gives it as the result's error).
 func TestFlowReportSkippedKeepsReason(t *testing.T) {
 	r := result("profile", engine.Skipped, errors.New("skipped: an ordered flow failed"), 0)
 	fr := flowReport(r, "/debug/profile", "", nil)
@@ -22,8 +20,6 @@ func TestFlowReportSkippedKeepsReason(t *testing.T) {
 	}
 }
 
-// issue #59: tb test --json counts skipped flows as skipped, not passed, and each one
-// carries its status and reason. passed and failed keep their names.
 func TestTestJSONCountsSkipped(t *testing.T) {
 	flows := []report.Flow{
 		{Name: "login", Status: "SUCCESS"},
@@ -56,7 +52,6 @@ func TestTestJSONCountsSkipped(t *testing.T) {
 	}
 }
 
-// A run with nothing skipped still says "skipped": 0, so scripts can read it every time.
 func TestTestJSONSkippedZero(t *testing.T) {
 	var out map[string]any
 	json.Unmarshal(testJSON([]report.Flow{{Name: "a", Status: "SUCCESS"}}, false), &out)

@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// NewADB targets one serial with the adb ADB() finds.
 func TestNewADB(t *testing.T) {
 	fakeADB(t, "")
 	a := NewADB("emulator-5554")
@@ -16,7 +15,6 @@ func TestNewADB(t *testing.T) {
 	}
 }
 
-// Run passes `-s serial` before the arguments and returns stdout.
 func TestADBRun(t *testing.T) {
 	log := fakeADB(t, `echo "out: $*"`)
 	out, err := NewADB("S1").Run(context.Background(), "get-state", "--x")
@@ -31,8 +29,6 @@ func TestADBRun(t *testing.T) {
 	}
 }
 
-// A failing adb reports the command, the exit and stderr (or stdout when stderr is
-// empty), and still returns stdout.
 func TestADBRunErrors(t *testing.T) {
 	t.Run("stderr", func(t *testing.T) {
 		fakeADB(t, "echo partial; echo '  error: device offline  ' 1>&2; exit 1")
@@ -61,7 +57,6 @@ func TestADBRunErrors(t *testing.T) {
 	})
 }
 
-// Shell runs one script through `adb shell`.
 func TestADBShell(t *testing.T) {
 	log := fakeADB(t, "echo ok")
 	out, err := NewADB("S1").Shell(context.Background(), "pm list packages")
@@ -73,7 +68,6 @@ func TestADBShell(t *testing.T) {
 	}
 }
 
-// Forward asks adb for a free port (tcp:0) and parses the port it prints.
 func TestADBForward(t *testing.T) {
 	cases := []struct {
 		name, body string
@@ -105,7 +99,6 @@ func TestADBForward(t *testing.T) {
 	}
 }
 
-// ExistingForward finds this serial's local port for the remote socket in `forward --list`.
 func TestADBExistingForward(t *testing.T) {
 	list := heredoc(`OTHER tcp:1111 localabstract:tb
 S1 tcp:2222 localabstract:other
@@ -123,7 +116,6 @@ S1 tcp:4444 localabstract:tb extra`)
 	if p := NewADB("NOPE").ExistingForward(context.Background(), "localabstract:tb"); p != 0 {
 		t.Errorf("other serial: port = %d", p)
 	}
-	// the list is global: no -s
 	if c := calls(t, log); len(c) != 3 || c[0] != "forward --list" {
 		t.Errorf("calls %q", c)
 	}

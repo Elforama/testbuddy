@@ -1,5 +1,3 @@
-// Scenario 2, Slow and janky: a staged load, a late button, a slow push with a 1500 ms
-// transition, a main-thread block, and a list that loads late.
 import SwiftUI
 
 struct SlowScenario: View {
@@ -18,8 +16,6 @@ struct SlowScenario: View {
 
     var body: some View {
         ZStack {
-            // Like a real push: once the slide has finished, the screen under it is gone
-            // (from the screen and the accessibility tree).
             if !covered {
             ScenarioScreen(scenario: .slow, scrolls: true) {
                 stagedLoad
@@ -42,7 +38,6 @@ struct SlowScenario: View {
                 .accessibilityIdentifier("slow_open")
                 Button("Block UI") {
                     jankTaps += 1
-                    // A busy loop on the main thread: nothing draws or takes touches.
                     let end = Date().addingTimeInterval(0.7)
                     while Date() < end {}
                     jankText = "Unblocked \(jankTaps)"
@@ -105,7 +100,6 @@ struct SlowScenario: View {
     }
 }
 
-/// The screen "pushed" with a custom 1500 ms slide (NavigationStack's own push can't be slowed).
 private struct SlowDetail: View {
     let back: () -> Void
 

@@ -12,12 +12,6 @@ import (
 	"time"
 )
 
-// issue #189: Ctrl-C during a run with more flows than devices. The flow running at the
-// cancel stops as before (failed, cancelled, with its failure files); the flows still queued
-// are not started ("▶" lines), get no failure files and no log, and are reported skipped in
-// the console, JUnit, HTML and the JSON summary. tb stops in about one failure-file wait
-// (the running flow's), not one per queued flow: each queued flow used to be started, fail at
-// once, and wait failureArtifactTimeout on the device's screen in saveFailure.
 func TestCancelSkipsQueuedFlows(t *testing.T) {
 	catchSignals(t)
 	old := failureArtifactTimeout
@@ -26,7 +20,7 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 	const queued = 4
 	for _, format := range []string{"junit", "html", "json"} {
 		t.Run(format, func(t *testing.T) {
-			h := withHangingPhone(t) // one device: the flows run one at a time
+			h := withHangingPhone(t)
 			dir := t.TempDir()
 			files := []string{writeFlow(t, dir, "f0.yaml", passingFlow)}
 			for i := 1; i <= queued; i++ {
@@ -37,7 +31,7 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 			debug := filepath.Join(dir, "debug")
 			args := append(files, "--debug-output", debug)
 			if format == "json" {
-				args = append(args, "--json") // the console shows only failures then
+				args = append(args, "--json")
 			} else {
 				args = append(args, "--format", format, "--output", out)
 			}
@@ -50,7 +44,7 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 					code = cmdTest(args)
 				})
 			}()
-			select { // the first flow is waiting on the screen
+			select {
 			case <-h.entered:
 			case <-time.After(10 * time.Second):
 				t.Fatal("the flow never read the screen")
@@ -68,14 +62,10 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 			if code != 130 {
 				t.Errorf("exit %d, want 130 (cancelled)", code)
 			}
-			// the running flow's saveFailure waits up to 2×failureArtifactTimeout (screenshot,
-			// screen); each queued flow it used to start added as much again. The bound leaves
-			// room for a slow CI machine: the "▶" count and the file checks below catch the bug
-			// without timing.
 			if limit := 2*failureArtifactTimeout + 2500*time.Millisecond; took > limit {
 				t.Errorf("issue #189: tb test took %s to stop after SIGINT; want under %s (no failure-file wait for flows that never ran)", took, limit)
 			}
-			console := stdout // the console's stream: stderr with --json, which keeps stdout for JSON
+			console := stdout
 			if format == "json" {
 				console = stderr
 			}
@@ -97,7 +87,6 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 					t.Errorf("issue #189: the summary does not count %d skipped:\n%s", queued, console)
 				}
 			}
-			// no log, timeline or failure files for a flow that never ran
 			filepath.Walk(debug, func(p string, info os.FileInfo, err error) error {
 				if rel, _ := filepath.Rel(debug, p); err == nil && !info.IsDir() && strings.Contains(rel, "Queued") {
 					t.Errorf("issue #189: %s written for a flow that never ran", rel)
@@ -125,8 +114,6 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 	}
 }
 
-// checkReport checks the JUnit or HTML report of TestCancelSkipsQueuedFlows: the running flow
-// failed, the queued ones skipped, saying why.
 func checkReport(t *testing.T, format, out string, queued int) {
 	t.Helper()
 	b, err := os.ReadFile(out)

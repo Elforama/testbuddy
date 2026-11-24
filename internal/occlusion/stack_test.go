@@ -6,11 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// stackScreen is a navigation stack that keeps its previous screen mounted (issue #320): a
-// container holding two full-height screens, the one on top listed first (drawing order 2),
-// the previous one listed after it (drawing order 1), shifted left and drawn under it. Each
-// screen has a header and a body; "Back to home" is on the top screen, "Navigate to Details"
-// on the previous one, under it. known: whether the agent reported the drawing orders.
 func stackScreen(known bool) (s *ui.Screen, back, nav *ui.Node) {
 	order := func(n *ui.Node, o int) *ui.Node {
 		n.DrawOrder, n.DrawOrderKnown = o, known
@@ -32,9 +27,6 @@ func stackScreen(known bool) (s *ui.Screen, back, nav *ui.Node) {
 	return s, back, nav
 }
 
-// Issue #320: a node listed after the element but drawn under it (the previous screen of a
-// stack) is no cover. Before, tree order stood for drawing order, and the previous screen's
-// button was taken for a modal layer over "Back to home".
 func TestCoverDrawnUnderIsNoCover(t *testing.T) {
 	s, back, _ := stackScreen(true)
 	if c, modal := Covered(s, back); c != nil {
@@ -42,7 +34,6 @@ func TestCoverDrawnUnderIsNoCover(t *testing.T) {
 	}
 }
 
-// Without drawing orders (older agents), tree order still decides: the later screen covers.
 func TestCoverWithoutDrawingOrderKeepsTreeOrder(t *testing.T) {
 	s, back, nav := stackScreen(false)
 	if c, _ := Covered(s, back); c != nav {

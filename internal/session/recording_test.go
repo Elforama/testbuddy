@@ -15,7 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// log prints the recorded commands; clear forgets them.
 func TestLogAndClear(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -40,7 +39,6 @@ func TestLogAndClear(t *testing.T) {
 	}
 }
 
-// Recordings are per device.
 func TestRecordingPerDevice(t *testing.T) {
 	s := New()
 	addDev(s, newFake("a", "A", device.Android), "alice")
@@ -55,7 +53,6 @@ func TestRecordingPerDevice(t *testing.T) {
 	}
 }
 
-// save writes the passing commands as a flow that parses back to the same commands.
 func TestSaveWritesFlow(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -125,8 +122,6 @@ func TestSavePreviewDoesNotWriteAndReportsWarnings(t *testing.T) {
 	}
 }
 
-// The preview gets tb check --lint's other rules too: text read as an unintended regex,
-// and an assertion made optional.
 func TestSavePreviewLintRules(t *testing.T) {
 	s := New()
 	d := addDev(s, newFake("e", "E", device.Android), "")
@@ -146,7 +141,6 @@ func TestSavePreviewLintRules(t *testing.T) {
 	}
 }
 
-// save's app id: --app, else the device's app, else the foreground app.
 func TestSaveAppID(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -168,7 +162,6 @@ func TestSaveAppID(t *testing.T) {
 	}
 }
 
-// save fails with exit 1 when the file cannot be written, exit 2 without a device.
 func TestSaveErrors(t *testing.T) {
 	s := New()
 	if resp, _ := call(t, s.save, map[string]any{"path": "x.yaml"}, t.TempDir()); resp.Exit != 2 {
@@ -187,9 +180,6 @@ func TestSaveErrors(t *testing.T) {
 	}
 }
 
-// log and clear share the recorded steps with a running do (issue #63): log answers at
-// once with what is recorded so far, without waiting for the do to end, and neither
-// reads or writes the steps while do appends to them (the race detector reports it).
 func TestLogAndClearDuringDo(t *testing.T) {
 	s := New()
 	f := newFake("e", "E", device.Android)
@@ -207,7 +197,6 @@ func TestLogAndClearDuringDo(t *testing.T) {
 		call(t, s.do, map[string]any{"commands": "- inputText: first\n- inputText: second\n- inputText: third"}, "")
 	}()
 	<-inSecond
-	// do holds the device and is in its second step: log does not wait for it.
 	logged := make(chan string, 1)
 	go func() { resp, _ := call(t, s.log, nil, ""); logged <- resp.Text }()
 	select {
@@ -218,7 +207,6 @@ func TestLogAndClearDuringDo(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("log waited for the running do")
 	}
-	// A log and a clear that run while do records its next steps.
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); call(t, s.log, nil, "") }()
@@ -226,7 +214,6 @@ func TestLogAndClearDuringDo(t *testing.T) {
 	close(release)
 	wg.Wait()
 	<-done
-	// clear is a device command: it waits for the do and forgets all of it.
 	if resp, _ := call(t, s.log, nil, ""); resp.Text != "no commands recorded yet\n" {
 		t.Errorf("log after clear %q", resp.Text)
 	}

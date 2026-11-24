@@ -17,11 +17,7 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// TestMain keeps the CLI away from the real state dir, and makes a stray "<exe> daemon"
-// spawn of this test binary exit at once.
 func TestMain(m *testing.M) {
-	// Device locks off: these tests make many pools and sessions for the same fake devices
-	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
 	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		os.Exit(0)
@@ -31,9 +27,6 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("TB_HOME", dir)
-	// No real device is reachable from these tests: no adb, xcrun or Chrome to find (PATH
-	// holds git only, which the a11y --changed tests use; the SDK and home folders are empty).
-	// A command that lists or opens devices without the tests' fakes then finds none.
 	bin := filepath.Join(dir, "bin")
 	os.MkdirAll(bin, 0o755)
 	if git, err := exec.LookPath("git"); err == nil {
@@ -48,7 +41,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// dur prints milliseconds under a second, tenths under a minute, else a rounded duration.
 func TestDur(t *testing.T) {
 	cases := map[time.Duration]string{
 		0:                        "0ms",
@@ -70,14 +62,12 @@ func TestDur(t *testing.T) {
 	}
 }
 
-// orDefault falls back only for the empty string.
 func TestOrDefault(t *testing.T) {
 	if orDefault("", "report.xml") != "report.xml" || orDefault("x.xml", "report.xml") != "x.xml" || orDefault(" ", "d") != " " {
 		t.Error("orDefault")
 	}
 }
 
-// toCommandList turns `tb do` arguments into one YAML command list.
 func TestToCommandList(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -105,7 +95,6 @@ func TestToCommandList(t *testing.T) {
 	}
 }
 
-// The command lists toCommandList builds parse as flows.
 func TestToCommandListParses(t *testing.T) {
 	yaml := toCommandList([]string{"launchApp", "tapOn:\n  id: go", "- back\n- inputText: hi"})
 	dir := t.TempDir()
@@ -124,7 +113,6 @@ func job(name, path string, shard, attempt int) *orchestrate.Job {
 	return &orchestrate.Job{Flow: &flow.Flow{Path: path, Config: flow.Config{Name: name}}, ShardID: shard, Attempt: attempt}
 }
 
-// Debug dirs are named after the flow (unsafe characters replaced), plus shard and retry.
 func TestFlowDebugDir(t *testing.T) {
 	root := filepath.Join("/tmp", "tb-debug")
 	cases := []struct {
@@ -151,11 +139,6 @@ func TestFlowDebugDir(t *testing.T) {
 	}
 }
 
-// Every job of a run gets its own debug folder, named before the run (issue #56). A flow
-// whose name is unique in the run keeps its name; flows that share one (the same file name
-// in two directories, the same name: in two files, names that differ only in case or in
-// characters a folder cannot hold) are told apart by their directory, then their path
-// relative to each other, then their file name, then a number.
 func TestNameDebugDirs(t *testing.T) {
 	cases := []struct {
 		name string
@@ -207,8 +190,6 @@ func TestNameDebugDirs(t *testing.T) {
 	}
 }
 
-// Whatever the flows are called, no two jobs of a run share a debug folder, even on a file
-// system that ignores case; a retry keeps its job's name (issue #56).
 func TestNameDebugDirsUnique(t *testing.T) {
 	root := filepath.Join("/tmp", "tb-debug")
 	jobs := []*orchestrate.Job{
@@ -236,7 +217,6 @@ func TestNameDebugDirsUnique(t *testing.T) {
 	}
 }
 
-// A flow's debug dir always lies inside the debug root, whatever the flow is called.
 func TestFlowDebugDirStaysInRoot(t *testing.T) {
 	root := filepath.Join("/tmp", "tb-debug")
 	for _, name := range []string{"..", "."} {
@@ -247,8 +227,6 @@ func TestFlowDebugDirStaysInRoot(t *testing.T) {
 	}
 }
 
-// hierarchyJSON nests windows and nodes with the usual attribute names; empty attributes are
-// left out and flags are present on element nodes only.
 func TestHierarchyJSON(t *testing.T) {
 	root := &ui.Node{Class: "android.widget.FrameLayout", Bounds: ui.Rect{R: 400, B: 800}, Enabled: true, Depth: 0}
 	btn := &ui.Node{Text: "Sign in", Desc: "sign in button", ID: "com.app:id/go", Hint: "h", Class: "android.widget.Button",
@@ -295,7 +273,6 @@ func TestHierarchyJSON(t *testing.T) {
 			t.Errorf("button %s = %v", name, p)
 		}
 	}
-	// JSON keeps false flags (they are pointers) and drops empty children.
 	js, _ := json.Marshal(r.Children[1])
 	if string(js) != `{"attributes":{"bounds":"[1,2][3,4]","class":"android.widget.EditText"},"clickable":false,"enabled":false,"focused":false,"checked":false,"selected":false}` {
 		t.Errorf("field JSON = %s", js)
@@ -314,7 +291,6 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
-// An empty screen is just the root with its size.
 func TestHierarchyJSONEmpty(t *testing.T) {
 	h := hierarchyJSON(&ui.Screen{Width: 10, Height: 20})
 	js, _ := json.Marshal(h)
@@ -323,7 +299,6 @@ func TestHierarchyJSONEmpty(t *testing.T) {
 	}
 }
 
-// bp returns a pointer to its own copy.
 func TestBp(t *testing.T) {
 	a, b := bp(true), bp(true)
 	if !*a || a == b {
@@ -331,7 +306,6 @@ func TestBp(t *testing.T) {
 	}
 }
 
-// schema builds an object schema, listing required properties only when given.
 func TestSchema(t *testing.T) {
 	s := schema(map[string]any{"x": 1})
 	if s["type"] != "object" || s["properties"].(map[string]any)["x"] != 1 {
@@ -346,7 +320,6 @@ func TestSchema(t *testing.T) {
 	}
 }
 
-// The MCP tool list has unique names and object schemas whose required fields exist.
 func TestMCPTools(t *testing.T) {
 	seen := map[string]bool{}
 	for _, tool := range mcpTools {
@@ -375,8 +348,6 @@ func TestMCPTools(t *testing.T) {
 	}
 }
 
-// saveFailure writes the error and every step's result into the flow's debug dir (screens are
-// added per device; with none attached only the run's own record is written).
 func TestSaveFailureRecord(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "debug", "Login")
 	r := orchestrate.Result{Err: errors.New("Element not found: \"Go\""), Steps: []engine.StepResult{
@@ -400,7 +371,6 @@ func TestSaveFailureRecord(t *testing.T) {
 		steps[1]["status"] != "failed" || steps[1]["error"] != "not found" || steps[1]["durationMs"] != float64(17000) {
 		t.Errorf("commands.json = %s", b)
 	}
-	// Without an error there is no error.txt; without steps commands.json is null.
 	dir2 := filepath.Join(t.TempDir(), "d2")
 	saveFailure(dir2, orchestrate.Result{}, nil)
 	if _, err := os.Stat(filepath.Join(dir2, "error.txt")); !os.IsNotExist(err) {
@@ -411,8 +381,6 @@ func TestSaveFailureRecord(t *testing.T) {
 	}
 }
 
-// Every flow run gets a log.txt: a header saying what ran where, the engine's lines, and the
-// result. A flow that never started (no device) still gets one, with the reason.
 func TestFlowLogs(t *testing.T) {
 	t.Setenv("TB_DEBUG", "")
 	root := t.TempDir()
@@ -425,7 +393,7 @@ func TestFlowLogs(t *testing.T) {
 		t.Fatal("no trace")
 	}
 	tr.Printf("", 1, "found something")
-	os.WriteFile(filepath.Join(dir, "screen.txt"), []byte("Home\n"), 0o644) // saveFailure's, from the device
+	os.WriteFile(filepath.Join(dir, "screen.txt"), []byte("Home\n"), 0o644)
 	logs.close(dir, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("Element not found: \"Go\""), Duration: 1500 * time.Millisecond})
 	b, err := os.ReadFile(filepath.Join(dir, "log.txt"))
 	if err != nil {
@@ -437,15 +405,12 @@ func TestFlowLogs(t *testing.T) {
 			t.Errorf("log.txt lacks %q:\n%s", want, b)
 		}
 	}
-	// issue #101: a failure whose device could not be read (lost, not opened again) points at
-	// no screen files, since there are none
 	dirLost := filepath.Join(root, "Lost")
 	logs.open(dirLost, j, map[string]device.Info{"": {Platform: "android", Name: "Pixel", Serial: "emulator-5554"}})
 	logs.close(dirLost, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("the connection was lost"), Duration: time.Second})
 	if b, _ := os.ReadFile(filepath.Join(dirLost, "log.txt")); !strings.Contains(string(b), "FAILED") || strings.Contains(string(b), "screen*.txt") {
 		t.Errorf("log.txt points at screen files that were not saved:\n%s", b)
 	}
-	// A passing run, with roles.
 	dir2 := filepath.Join(root, "Chat")
 	j2 := &orchestrate.Job{Flow: &flow.Flow{Path: "chat.yaml", Config: flow.Config{Name: "Chat"}}, Attempt: 1}
 	logs.open(dir2, j2, map[string]device.Info{"bob": {Platform: "ios", Name: "iPhone", Serial: "UDID"}, "alice": {Platform: "web", Name: "Chrome", Serial: "web"}})
@@ -455,7 +420,6 @@ func TestFlowLogs(t *testing.T) {
 		!strings.Contains(s, "retry 1") || !strings.Contains(s, "PASSED in 1s") {
 		t.Errorf("log.txt:\n%s", s)
 	}
-	// Never started: the reason is logged.
 	dir3 := filepath.Join(root, "NoDevice")
 	logs.close(dir3, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("no free android device")})
 	if b, _ := os.ReadFile(filepath.Join(dir3, "log.txt")); !strings.Contains(string(b), "FAILED in 0s: no free android device") {
@@ -463,7 +427,6 @@ func TestFlowLogs(t *testing.T) {
 	}
 }
 
-// Runs started in the same second get their own debug folders.
 func TestClaimDir(t *testing.T) {
 	parent := t.TempDir()
 	a, b, c := claimDir(parent, "2026-11-03_171702"), claimDir(parent, "2026-11-03_171702"), claimDir(parent, "2026-11-03_171702")

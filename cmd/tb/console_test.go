@@ -21,7 +21,6 @@ func plainConsole(quiet, prefix bool) (*console, *bytes.Buffer) {
 	return newConsole(&b, quiet, prefix), &b
 }
 
-// Output that is not a terminal gets no color; a terminal does unless NO_COLOR is set.
 func TestConsoleColorDetection(t *testing.T) {
 	c, _ := plainConsole(false, false)
 	if c.color {
@@ -50,7 +49,6 @@ func TestConsoleColorDetection(t *testing.T) {
 	}
 }
 
-// paint wraps text in an ANSI code only when color is on.
 func TestPaint(t *testing.T) {
 	c, _ := plainConsole(false, false)
 	if c.paint("31", "x") != "x" {
@@ -62,7 +60,6 @@ func TestPaint(t *testing.T) {
 	}
 }
 
-// The reporter prints one line per finished command: mark, description, time, indented by depth.
 func TestReporterLines(t *testing.T) {
 	cases := []struct {
 		name string
@@ -79,8 +76,6 @@ func TestReporterLines(t *testing.T) {
 		{"passed hides its error", engine.Event{Desc: "x", Status: engine.Passed, Err: errors.New("ignored")}, "  ✓ x  0ms\n"},
 		{"start events print nothing", engine.Event{Desc: "x", Start: true}, ""},
 		{"log lines", engine.Event{Log: "hello from js"}, "    log: hello from js\n"},
-		// issue #213: a hint goes under its step (Depth is the step's plus one), where its
-		// error would.
 		{"hint under a top-level step", engine.Event{Hint: "back does nothing", Depth: 1}, "      hint: back does nothing\n"},
 		{"hint under a nested step", engine.Event{Hint: "back does nothing", Depth: 2}, "        hint: back does nothing\n"},
 	}
@@ -95,7 +90,6 @@ func TestReporterLines(t *testing.T) {
 	}
 }
 
-// With several devices, lines carry the device (or the event's own role) in brackets.
 func TestReporterDeviceTags(t *testing.T) {
 	con, out := plainConsole(false, true)
 	r := con.reporter("flow", "Pixel 9")
@@ -106,7 +100,6 @@ func TestReporterDeviceTags(t *testing.T) {
 	if out.String() != want {
 		t.Errorf("got %q, want %q", out.String(), want)
 	}
-	// Without prefix mode, an event's device still tags it (multi-device flows).
 	con2, out2 := plainConsole(false, false)
 	con2.reporter("flow", "Pixel").Event(engine.Event{Desc: "c", Status: engine.Failed, Device: "alice", Err: errors.New("e")})
 	if out2.String() != "[alice]   ✗ c  0ms\n[alice]       e\n" {
@@ -114,7 +107,6 @@ func TestReporterDeviceTags(t *testing.T) {
 	}
 }
 
-// Quiet consoles print nothing from the reporter, not even logs.
 func TestReporterQuiet(t *testing.T) {
 	con, out := plainConsole(true, true)
 	r := con.reporter("flow", "Pixel")
@@ -126,7 +118,6 @@ func TestReporterQuiet(t *testing.T) {
 	}
 }
 
-// Colored reporter lines paint the mark, the time and the tag.
 func TestReporterColor(t *testing.T) {
 	con, out := plainConsole(false, true)
 	con.color = true
@@ -139,7 +130,6 @@ func TestReporterColor(t *testing.T) {
 
 func named(name string, attempt int) *orchestrate.Job { j := job(name, "", 0, attempt); return j }
 
-// flowStart announces a flow and its device, noting retries.
 func TestFlowStart(t *testing.T) {
 	con, out := plainConsole(false, false)
 	con.flowStart(named("Login", 0), "Pixel")
@@ -160,7 +150,6 @@ func result(name string, st engine.Status, err error, d time.Duration) orchestra
 		Devices: map[string]device.Info{"": {Name: "Pixel"}}}
 }
 
-// flowEnd prints a failure with its error lines and debug dir, a skip, or a pass.
 func TestFlowEnd(t *testing.T) {
 	cases := []struct {
 		name string
@@ -183,7 +172,6 @@ func TestFlowEnd(t *testing.T) {
 			}
 		})
 	}
-	// Multi-device results name every role.
 	con, out := plainConsole(false, false)
 	r := result("Chat", engine.Failed, errors.New("x"), time.Second)
 	r.Devices = map[string]device.Info{"bob": {Name: "Pixel"}, "alice": {Name: "iPhone"}}
@@ -193,7 +181,6 @@ func TestFlowEnd(t *testing.T) {
 	}
 }
 
-// Quiet mode (the --quiet and --json runs) still prints failures, but not passes.
 func TestFlowEndQuiet(t *testing.T) {
 	con, out := plainConsole(true, false)
 	con.flowEnd(result("A", engine.Passed, nil, 0), "/d")
@@ -206,7 +193,6 @@ func TestFlowEndQuiet(t *testing.T) {
 	}
 }
 
-// --quiet prints "only failures and the summary", so skipped flows stay silent too.
 func TestFlowEndQuietSkipped(t *testing.T) {
 	con, out := plainConsole(true, false)
 	con.flowEnd(result("S", engine.Skipped, nil, 0), "/d")
@@ -215,7 +201,6 @@ func TestFlowEndQuietSkipped(t *testing.T) {
 	}
 }
 
-// With --json, stdout is only the JSON: the console writes to stderr instead.
 func TestConsoleWriterJSON(t *testing.T) {
 	if consoleWriter(true) != os.Stderr || consoleWriter(false) != os.Stdout {
 		t.Error("--json console must go to stderr, otherwise stdout")
@@ -235,7 +220,6 @@ func notFoundScreen() *ui.Screen {
 	return s
 }
 
-// A not-found failure also prints similar elements and the screen it looked at.
 func TestFlowEndNotFoundScreen(t *testing.T) {
 	con, out := plainConsole(false, false)
 	nf := &engine.NotFound{FlowError: engine.FlowError{Msg: `Element not found: "Login"`}, Screen: notFoundScreen(), Query: "Login"}
@@ -269,7 +253,6 @@ func TestFlowEndNotFoundScreen(t *testing.T) {
 	}
 }
 
-// Without a query (or with no similar labels) the similar line is left out.
 func TestPrintScreenNoSimilar(t *testing.T) {
 	for _, q := range []string{"", "zzzzzz"} {
 		con, out := plainConsole(false, false)
@@ -283,7 +266,6 @@ func TestPrintScreenNoSimilar(t *testing.T) {
 	}
 }
 
-// summary counts passes (including warnings), failures and skips, with the run's time.
 func TestSummary(t *testing.T) {
 	cases := []struct {
 		statuses []engine.Status
@@ -296,7 +278,7 @@ func TestSummary(t *testing.T) {
 		{[]engine.Status{engine.Failed, engine.Skipped, engine.Passed, engine.Warned}, `^\n2 passed, 1 failed, 1 skipped in \d+ms\n$`},
 	}
 	for _, c := range cases {
-		con, out := plainConsole(true, false) // the summary prints even when quiet
+		con, out := plainConsole(true, false)
 		var rs []orchestrate.Result
 		for _, st := range c.statuses {
 			rs = append(rs, orchestrate.Result{Status: st})
@@ -306,14 +288,12 @@ func TestSummary(t *testing.T) {
 			t.Errorf("summary(%v) = %q", c.statuses, out.String())
 		}
 	}
-	// Failures are painted red when color is on.
 	con, out := plainConsole(false, false)
 	con.color = true
 	con.summary([]orchestrate.Result{{Status: engine.Failed}})
 	if !strings.Contains(out.String(), "0 passed, \x1b[31m1 failed\x1b[0m in ") {
 		t.Errorf("colored summary = %q", out.String())
 	}
-	// The time is measured from the console's creation.
 	con, out = plainConsole(false, false)
 	con.start = time.Now().Add(-90 * time.Second)
 	con.summary(nil)
@@ -322,7 +302,6 @@ func TestSummary(t *testing.T) {
 	}
 }
 
-// printf is safe to use from many goroutines (flows on several devices report at once).
 func TestConsoleConcurrent(t *testing.T) {
 	con, out := plainConsole(false, true)
 	done := make(chan bool)

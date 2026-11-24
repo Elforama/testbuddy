@@ -13,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// AND-005: the app's soft-key callback belongs to its editor connection. Keep
-// actual deletion and that callback together, with no hardware replay afterwards.
 func TestBackspaceUsesEditorConnectionWithoutDuplicateKey(t *testing.T) {
 	for _, mode := range []string{"sent", "unavailable", "rejected", "lost reply"} {
 		t.Run(mode, func(t *testing.T) {
@@ -124,8 +122,6 @@ func TestBackspaceKeepsLegacyPathWhenEditorCapabilityIsUnavailable(t *testing.T)
 	}
 }
 
-// editorServer is the device's editor helper behind an adb forward: it reads one target per
-// connection, counts it, and answers "sent" (or nothing, once reply is false).
 type editorServer struct {
 	ln       net.Listener
 	received atomic.Int32
@@ -165,7 +161,6 @@ func newEditorServer(t *testing.T, reply bool) *editorServer {
 
 func (s *editorServer) port() int { return s.ln.Addr().(*net.TCPAddr).Port }
 
-// editorDriver is a driver on SDK 34 whose editor forward the stub adb answers with port.
 func editorDriver(t *testing.T, port int) (*Driver, *fakeAgent, *adbStub) {
 	t.Helper()
 	a := newFakeAgent(t)
@@ -184,7 +179,6 @@ func editorDriver(t *testing.T, port int) (*Driver, *fakeAgent, *adbStub) {
 	return d, a, stub
 }
 
-// adoptAgent connects d to a again, as a reconnect does, without the NoopService step.
 func adoptAgent(t *testing.T, d *Driver, a *fakeAgent) {
 	t.Helper()
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
@@ -208,9 +202,6 @@ func editorForwards(stub *adbStub) int {
 	return n
 }
 
-// issue #69: an adb server restart drops every forward, the editor's too. Its cached port was
-// never checked again, so every later Backspace failed to dial it, for the rest of the run.
-// A dial failure writes nothing, so forwarding again and dialing once more is safe.
 func TestBackspaceForwardsAgainWhenTheEditorForwardIsLost(t *testing.T) {
 	first := newEditorServer(t, true)
 	d, a, stub := editorDriver(t, first.port())
@@ -220,7 +211,6 @@ func TestBackspaceForwardsAgainWhenTheEditorForwardIsLost(t *testing.T) {
 	if first.received.Load() != 1 {
 		t.Fatalf("first Backspace reached the editor %d times, want 1", first.received.Load())
 	}
-	// The forward is lost: nothing listens on its port any more. A new one gets a new port.
 	first.ln.Close()
 	second := newEditorServer(t, true)
 	stub.rules([]stubRule{{match: "forward tcp:0 localabstract:testbuddy-editor", out: fmt.Sprint(second.port())}})
@@ -233,14 +223,11 @@ func TestBackspaceForwardsAgainWhenTheEditorForwardIsLost(t *testing.T) {
 	if n := editorForwards(stub); n != 2 {
 		t.Fatalf("editor forwarded %d times, want 2 (once, then again after the loss)", n)
 	}
-	// The next one uses the new forward as it is.
 	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil || second.received.Load() != 2 || editorForwards(stub) != 2 {
 		t.Fatalf("third Backspace: editor=%d forwards=%d error=%v", second.received.Load(), editorForwards(stub), err)
 	}
 }
 
-// issue #69: the retry is for a failed dial only, and only once. When the second dial fails
-// too, Backspace fails without looping, and the following one forwards afresh.
 func TestBackspaceRetriesALostEditorForwardOnlyOnce(t *testing.T) {
 	gone := newEditorServer(t, true)
 	port := gone.port()
@@ -259,8 +246,6 @@ func TestBackspaceRetriesALostEditorForwardOnlyOnce(t *testing.T) {
 	}
 }
 
-// issue #69: once the target is written, the helper may have deleted already. A lost reply is
-// not a dial failure: no second write, no new forward, no hardware key.
 func TestBackspaceDoesNotReplayAfterWritingToTheEditor(t *testing.T) {
 	mute := newEditorServer(t, false)
 	d, a, stub := editorDriver(t, mute.port())
@@ -272,17 +257,13 @@ func TestBackspaceDoesNotReplayAfterWritingToTheEditor(t *testing.T) {
 	}
 }
 
-// issue #69: a new agent connection is a sign that adb may have lost its forwards (an adb
-// server restart drops them all), and the old port may now be something else that accepts the
-// connection but is not the editor. When adb no longer lists the editor's forward on that
-// port, the driver forwards again instead of writing the key into whatever answers there.
 func TestAdoptingAConnectionForgetsAnEditorForwardAdbNoLongerHas(t *testing.T) {
 	old := newEditorServer(t, true)
 	d, a, stub := editorDriver(t, old.port())
 	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	old.reply.Store(false) // the old port now answers, but never as the editor
+	old.reply.Store(false)
 	fresh := newEditorServer(t, true)
 	stub.rules([]stubRule{
 		{match: "forward --list", out: fmt.Sprintf("%s tcp:%d localabstract:testbuddy-agent\n", testSerial, a.port())},
@@ -297,9 +278,6 @@ func TestAdoptingAConnectionForgetsAnEditorForwardAdbNoLongerHas(t *testing.T) {
 	}
 }
 
-// issue #69: after a reconnect the port is kept when adb still lists it for this device and
-// the editor, wherever it is in the list: a stale editor forward listed first (left by an
-// earlier run) does not make each reconnect add a forward of its own.
 func TestAdoptingAConnectionKeepsAnEditorForwardAdbStillHas(t *testing.T) {
 	ed := newEditorServer(t, true)
 	d, a, stub := editorDriver(t, ed.port())
@@ -321,8 +299,6 @@ func TestAdoptingAConnectionKeepsAnEditorForwardAdbStillHas(t *testing.T) {
 	}
 }
 
-// issue #69: when adb cannot list its forwards, the port's state is unknown: keep it. The
-// dial retry still replaces it if it is really gone.
 func TestAdoptingAConnectionKeepsTheEditorForwardWhenAdbCannotList(t *testing.T) {
 	ed := newEditorServer(t, true)
 	d, a, stub := editorDriver(t, ed.port())
@@ -342,8 +318,6 @@ func TestAdoptingAConnectionKeepsTheEditorForwardWhenAdbCannotList(t *testing.T)
 	}
 }
 
-// issue #69: only a refused dial means the forward is gone. A dial cut short by the step's
-// own context says nothing about the forward: keep its port, and do not forward again.
 func TestACancelledEditorDialKeepsTheForward(t *testing.T) {
 	ed := newEditorServer(t, true)
 	d, _, stub := editorDriver(t, ed.port())
@@ -365,9 +339,6 @@ func TestACancelledEditorDialKeepsTheForward(t *testing.T) {
 	}
 }
 
-// issue #69: `adb forward --remove tcp:N` matches the local port only, whatever -s says. After
-// an adb restart, N may be another device's forward: remove it only when adb lists it as this
-// device's editor forward.
 func TestClosingRemovesOnlyTheEditorForwardAdbListsForThisDevice(t *testing.T) {
 	for _, tc := range []struct {
 		name, list string

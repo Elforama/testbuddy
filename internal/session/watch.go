@@ -14,18 +14,10 @@ import (
 
 type watchArgs struct {
 	devArgs
-	Timeout int    `json:"timeout"` // ms; 0 = 30 s
-	Until   string `json:"until"`   // stop when an element with this text appears
+	Timeout int    `json:"timeout"`
+	Until   string `json:"until"`
 }
 
-// watch streams what changes on screen, as it happens: each time the screen may differ from
-// the last read, it is read again, diffed against the last listing, and the diff is sent.
-// It waits the way the runner's lookups do (changes.Watch): news from the device (a change
-// after the last read) wakes it once the change settles, or within changes.RestlessAfter on a
-// screen that never stops changing; events without news are ignored; and with no news for
-// changes.SilentAfter (then twice that), it reads the screen anyway, for content the device
-// does not report (iOS's embedded Safari view, an OAuth sheet: another process draws them;
-// issue #288). A diff that such a re-read found says so in its header.
 func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[watchArgs](req)
 	if err != nil {
@@ -40,14 +32,9 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 		timeout = 30 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
-	// Subscribe before the first read, so no change after it is missed.
 	w := changes.Subscribe(d.Drv, changes.SilentAfter(), true)
 	defer w.Stop()
 
-	// read lists the screen and leaves it as the one @refs resolve against. The session's lock
-	// is held only for the read, so other commands can run while watch waits.
-	// A re-read after silence is fresh where the device keeps a node cache (Android): a view
-	// that changes its text with no event stays as it was in that cache (issue #322).
 	read := func(lockFailed string, fresh bool) (*look.Listing, *daemon.Response) {
 		if err := s.lockOpen(d); err != nil {
 			r := fail(1, lockFailed, err)
@@ -102,7 +89,6 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 		}
 		header := "+" + fmtDur(time.Since(start))
 		if silence > 0 {
-			// The device reported none of this: a re-read after silence found it.
 			header += " (re-read after " + fmtDur(silence) + " of silence)"
 		}
 		send(daemon.Response{OK: true, Text: header + "\n" + diff})
@@ -112,8 +98,6 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	}
 }
 
-// freshReader: a driver whose reads may come from a node cache (Android) reads past it on
-// request (as engine's).
 type freshReader interface {
 	ScreenFresh(ctx context.Context) (*ui.Screen, error)
 }
@@ -127,7 +111,6 @@ func hasText(l *look.Listing, text string) bool {
 	return false
 }
 
-// dumpNodes lists every node, indented by depth (look --all).
 func dumpNodes(s *ui.Screen) string {
 	var b strings.Builder
 	for _, w := range s.Windows {

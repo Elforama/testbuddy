@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// Signals lets devices in a multi-device flow wait for each other: one device runs
-// `signal: sent`, another `waitForSignal: sent`. Waiting is a channel close, not a poll.
 type Signals struct {
 	mu sync.Mutex
 	ch map[string]chan struct{}
@@ -26,7 +24,6 @@ func (s *Signals) get(name string) chan struct{} {
 	return c
 }
 
-// Send raises the signal. Raising it twice is harmless.
 func (s *Signals) Send(name string) {
 	c := s.get(name)
 	s.mu.Lock()
@@ -38,7 +35,6 @@ func (s *Signals) Send(name string) {
 	}
 }
 
-// Wait blocks until the signal is raised, the timeout passes, or ctx ends.
 func (s *Signals) Wait(ctx context.Context, name string, timeout time.Duration) error {
 	select {
 	case <-s.get(name):

@@ -7,7 +7,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-/** Scenario 2, "Slow and janky": everything is late, slow or blocks the UI thread. */
 class SlowActivity : ScenarioActivity() {
     private var jankTaps = 0
     private var lateTaps = 0
@@ -16,7 +15,6 @@ class SlowActivity : ScenarioActivity() {
         super.onCreate(savedInstanceState)
         screen(Scenario.SLOW.title, scroll = true)
 
-        // Staged load: 3 skeleton bars for 2 s, then "Loaded" and three rows 400 ms apart.
         content.heading("Staged load")
         val stage = content.column { }
         val skeletons = (1..3).map { n ->
@@ -37,7 +35,6 @@ class SlowActivity : ScenarioActivity() {
             }
         }
 
-        // The late button: nothing reserves its space, so what is below it moves down.
         content.heading("Late")
         val lateSlot = content.column(top = 0) { }
         val lateCount = content.text(R.id.late_count, "Late taps: 0")
@@ -83,10 +80,6 @@ class SlowActivity : ScenarioActivity() {
     }
 }
 
-/**
- * Pushed and popped with a custom 1500 ms slide. The window is translucent and the slide is
- * drawn by the screen itself (a TimeAnimator), so it takes 1.5 s even with animations off.
- */
 class SlowDetailActivity : ScenarioActivity() {
     private var leaving = false
     private var slideIn: android.animation.TimeAnimator? = null
@@ -106,7 +99,7 @@ class SlowDetailActivity : ScenarioActivity() {
     private fun slideOut() {
         if (leaving) return
         leaving = true
-        slideIn?.cancel() // leaving mid-slide: slide back out from where it is
+        slideIn?.cancel()
         val w = root.width.toFloat()
         val from = root.translationX / w.coerceAtLeast(1f)
         track(animateFor(SlowActivity.SLIDE_MS, { root.translationX = w * (from + (1f - from) * ease(it)) }) {
@@ -119,7 +112,6 @@ class SlowDetailActivity : ScenarioActivity() {
     private fun ease(t: Float) = t * t * (3f - 2f * t)
 }
 
-/** A list that loads 2.5 s after opening, and 20 more rows 2.5 s after reaching its end. */
 class SlowListActivity : ScenarioActivity() {
     private lateinit var rows: LinearLayout
     private var count = 0

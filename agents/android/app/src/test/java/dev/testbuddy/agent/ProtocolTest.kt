@@ -7,8 +7,6 @@ import org.junit.Test
 import java.lang.reflect.InvocationTargetException
 
 class ProtocolTest {
-    /** The node flags tb decodes (internal/driver/android: fClickable = 1 << iota, ...):
-     *  the same bits, in the same order, or every flag tb reads is another one. */
     @Test
     fun nodeFlagsMatchTheHost() {
         val inHostOrder = listOf(
@@ -20,8 +18,6 @@ class ProtocolTest {
         inHostOrder.forEachIndexed { i, f -> assertEquals("flag $i", 1 shl i, f) }
     }
 
-    /** Errors from reflective calls (the agent reaches hidden APIs that way) are reported by
-     *  their cause, not as an InvocationTargetException with no message. */
     @Test
     fun causeUnwrapsReflection() {
         val inner = IllegalStateException("no focused field")
@@ -32,7 +28,6 @@ class ProtocolTest {
 }
 
 class ToastsTest {
-    /** A Toast counts as shown until its time is up (the clock reads 0 in unit tests). */
     @Test
     fun showingUntilItsTimeIsUp() {
         Toasts.texts = listOf("Saved")

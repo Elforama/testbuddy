@@ -1,13 +1,5 @@
 package web
 
-// Screen recording (startRecording / stopRecording, tb test --record): Chrome's screencast
-// sends a JPEG frame each time the page repaints, so a still page sends none. Each frame is
-// written to a temporary folder as it arrives, timed on arrival, and acknowledged (Chrome
-// sends the next only then). Stopping encodes them at a constant frame rate, each frame
-// shown until the next one arrived and the last until the stop: the video lasts as long as
-// the recording did, still screens included. A screenshot taken at the start makes the video
-// begin at once even on an idle page.
-
 import (
 	"context"
 	"encoding/base64"
@@ -22,7 +14,6 @@ import (
 	"time"
 )
 
-// ffmpegPath finds ffmpeg: TB_FFMPEG, else the PATH. A variable so tests need no ffmpeg.
 var ffmpegPath = func() (string, error) {
 	if p := os.Getenv("TB_FFMPEG"); p != "" {
 		return p, nil
@@ -30,32 +21,26 @@ var ffmpegPath = func() (string, error) {
 	return exec.LookPath("ffmpeg")
 }
 
-// runFFmpeg runs ffmpeg with args and returns what it printed. A variable so tests can check
-// the encoding without ffmpeg.
 var runFFmpeg = func(ctx context.Context, ffmpeg string, args []string) ([]byte, error) {
 	return exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput()
 }
 
-// recording is one screen recording in progress.
 type recording struct {
-	path   string // the video to write
-	dir    string // the frames, until encoded
+	path   string
+	dir    string
 	ffmpeg string
 
 	mu      sync.Mutex
 	frames  []recFrame
-	writes  sync.WaitGroup // frames still being written
-	stopped bool           // frames arriving now are dropped
+	writes  sync.WaitGroup
+	stopped bool
 }
 
-// recFrame is one frame file and when it arrived.
 type recFrame struct {
 	file string
 	at   time.Time
 }
 
-// add files a frame under the next name, timed now, and writes it in the background (the
-// read loop must not wait on the disk). It returns false once the recording has stopped.
 func (rec *recording) add(data []byte) bool {
 	rec.mu.Lock()
 	if rec.stopped {
@@ -73,7 +58,6 @@ func (rec *recording) add(data []byte) bool {
 	return true
 }
 
-// stop ends taking frames and waits for those being written.
 func (rec *recording) stop() {
 	rec.mu.Lock()
 	rec.stopped = true
@@ -81,8 +65,6 @@ func (rec *recording) stop() {
 	rec.writes.Wait()
 }
 
-// StartRecording starts recording the page into path (an .mp4 written by StopRecording). It
-// returns once the screencast runs, so what follows is recorded.
 func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	ffmpeg, err := ffmpegPath()
 	if err != nil || ffmpeg == "" {
@@ -112,9 +94,6 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		return err
 	}
 
-	// The first frame: the page as it is now, so the video starts here even if nothing repaints.
-	// Bounded like any screenshot: one the browser never answers fails the start (issue #163).
-	// A frame that does not decode is only skipped.
 	img, err := d.capture(ctx, map[string]any{"format": "jpeg", "quality": 70})
 	var bad base64.CorruptInputError
 	if err != nil && !errors.As(err, &bad) {
@@ -129,17 +108,14 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	return nil
 }
 
-// screencastParams starts a recording's screencast, in the driven tab or one switched to.
 func (d *Driver) screencastParams() map[string]any {
 	w, h := d.Size()
 	return map[string]any{"format": "jpeg", "quality": 70, "maxWidth": w, "maxHeight": h, "everyNthFrame": 1}
 }
 
-// onScreencastFrame keeps a frame of the page's screencast and acknowledges it. It runs on
-// the connection's read loop, so the acknowledgement is sent from another goroutine.
 func (d *Driver) onScreencastFrame(params json.RawMessage, session string) {
 	if session != "" {
-		return // a frame target's own screencast: the page's shows the frames already
+		return
 	}
 	var e struct {
 		Data      string `json:"data"`
@@ -159,8 +135,6 @@ func (d *Driver) onScreencastFrame(params json.RawMessage, session string) {
 	go d.answer("", "Page.screencastFrameAck", map[string]any{"sessionId": e.SessionID})
 }
 
-// RecordingStarted is when the last recording's first frame arrived: the video's start
-// (encode times every frame from it). Zero before any frame.
 func (d *Driver) RecordingStarted() time.Time {
 	d.recMu.Lock()
 	rec := d.lastRec
@@ -176,12 +150,8 @@ func (d *Driver) RecordingStarted() time.Time {
 	return rec.frames[0].at
 }
 
-// RecordingClockExact: tb times every frame of its recordings itself (encode), so the video's
-// clock is tb's.
 func (d *Driver) RecordingClockExact() bool { return true }
 
-// StopRecording stops the screencast and encodes the frames to the recording's path. With no
-// recording it does nothing.
 func (d *Driver) StopRecording(ctx context.Context) error {
 	d.recMu.Lock()
 	rec := d.rec
@@ -197,18 +167,12 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 	if len(rec.frames) == 0 {
 		return errors.New("recording: no frames")
 	}
-	// A screencast that would not stop (a page gone) still leaves its frames to encode.
 	_ = stopErr
 	return rec.encode(ctx, end)
 }
 
-// videoFPS is the recording's frame rate: each 1/videoFPS s shows the frame on screen then.
 const videoFPS = 25
 
-// encode writes the video at a constant videoFPS: tick k shows the last frame that arrived
-// by k/videoFPS s after the first, up to end. The ticks are links to the frame files, named
-// in order, so ffmpeg reads a plain image sequence and the video lasts exactly as long as
-// the recording (ticks / videoFPS), whatever its ffmpeg version.
 func (rec *recording) encode(ctx context.Context, end time.Time) error {
 	first := rec.frames[0].at
 	ticks := max(1, int(end.Sub(first).Seconds()*videoFPS+0.5))
@@ -241,7 +205,6 @@ func (rec *recording) encode(ctx context.Context, end time.Time) error {
 	}
 	out, err := runFFmpeg(ctx, rec.ffmpeg, args("-c:v", "libx264", "-preset", "veryfast"))
 	if err != nil {
-		// No libx264 in this ffmpeg build: MPEG-4, which most players still play.
 		out2, err2 := runFFmpeg(ctx, rec.ffmpeg, args("-c:v", "mpeg4", "-q:v", "4"))
 		if err2 != nil {
 			return fmt.Errorf("recording: ffmpeg could not encode the video: %v: %s / %v: %s",
@@ -251,8 +214,6 @@ func (rec *recording) encode(ctx context.Context, end time.Time) error {
 	return nil
 }
 
-// discardRecording drops a recording in progress (the browser is closing): its frames are
-// deleted and nothing is encoded.
 func (d *Driver) discardRecording() {
 	d.recMu.Lock()
 	rec := d.rec

@@ -2,18 +2,7 @@ package dev.testbuddy.agent
 
 import android.view.KeyEvent
 
-/*
- * Fakes of Platform.kt's interfaces: the agent's logic runs on them in unit tests, with no
- * device. Time is the fake clock's: nothing waits for real, so tests are quick and exact.
- */
-
-/**
- * A clock that moves only when the code under test waits or sleeps (or a test calls
- * [advance]), running the timers that come due on the way. Single-threaded: a wait runs
- * the timers (which may change what the waiter waits for) and returns, as a notify would.
- */
 class FakeClock(var now: Long = 0) : Clock {
-    /** How much later than asked a sleep returns (a busy device wakes the sleeping thread late). */
     var oversleep: Long = 0
     private class Task(val at: Long, val seq: Int, val task: Runnable)
     private val tasks = ArrayList<Task>()
@@ -24,7 +13,6 @@ class FakeClock(var now: Long = 0) : Clock {
     override fun sleep(ms: Long) = advance(ms + oversleep)
 
     override fun await(lock: Object, ms: Long) {
-        // lock.wait(0) waits until notified, with no time limit: a caller computing 0 hangs.
         require(ms > 0) { "lock.wait($ms): ${if (ms == 0L) "waits forever" else "negative timeout"}" }
         val next = tasks.minOfOrNull { it.at } ?: Long.MAX_VALUE
         advanceTo(minOf(now + ms, maxOf(next, now)))
@@ -34,7 +22,6 @@ class FakeClock(var now: Long = 0) : Clock {
     override fun postAt(task: Runnable, uptimeMs: Long) { tasks += Task(uptimeMs, nextSeq++, task) }
     override fun cancel(task: Runnable) { tasks.removeAll { it.task === task } }
 
-    /** Timers pending (a quiet timer armed, a Toast to take down). */
     val pending: Int get() = tasks.size
 
     fun advance(ms: Long) = advanceTo(now + ms)
@@ -49,7 +36,6 @@ class FakeClock(var now: Long = 0) : Clock {
         if (t > now) now = t
     }
 
-    /** Runs [action] every [everyMs] from [startAt] to [until] (an app that keeps changing). */
     fun repeat(startAt: Long, everyMs: Long, until: Long, action: () -> Unit) {
         lateinit var tick: Runnable
         tick = Runnable {
@@ -63,7 +49,6 @@ class FakeClock(var now: Long = 0) : Clock {
 class FakeProbe : UiProbe {
     var activeWindow = -1
     var activePkg: String? = null
-    /** When the window presented its last frame, read when asked: (now in ms) -> presented ns. */
     var framePresented: (() -> Long)? = null
     val settings = HashMap<String, String>()
     val cleared = ArrayList<Int>()
@@ -73,15 +58,12 @@ class FakeProbe : UiProbe {
     override fun clearFrameStats(window: Int) { cleared += window }
     override fun lastFramePresentedNanos(window: Int): Long = framePresented?.invoke() ?: 0
     override fun setting(ns: String, key: String): String? = settings["$ns/$key"]
-    /** The windows on screen (null: they cannot be read). */
     var windows: IntArray? = intArrayOf()
     override fun windowIds(): IntArray? = windows
-    /** The windows' bounds (issue #317), by id: a window without one has an empty box. */
     var boxes: Map<Int, Box> = emptyMap()
     override fun windowBounds(): Map<Int, Box>? = windows?.associateWith { boxes[it] ?: Box(0, 0, 0, 0) }
 }
 
-/** Records what is injected. [onTouch] and [onKey] stand in for the app reacting. */
 class FakeInjector(override val density: Float = 2f) : Injector {
     var onPrepareSwipe: () -> Unit = {}
     override fun prepareSwipe() = onPrepareSwipe()
@@ -89,12 +71,10 @@ class FakeInjector(override val density: Float = 2f) : Injector {
     val touches = ArrayList<Sent<Touch>>()
     val keys = ArrayList<Sent<Key>>()
     var onTouch: (Touch) -> Unit = {}
-    /** A touch injected waiting for the app to finish handling it (a busy app returns late). */
     var onSyncTouch: (Touch) -> Unit = {}
     var onKey: (Key) -> Unit = {}
 
     override val path = "fake"
-    /** Whether the platform takes a touch (false: reported not injected, issue #204). */
     var accept: (Touch, Boolean) -> Boolean = { _, _ -> true }
     override fun touch(t: Touch, sync: Boolean): Boolean {
         touches += Sent(t, sync)
@@ -104,7 +84,6 @@ class FakeInjector(override val density: Float = 2f) : Injector {
     }
     override fun key(k: Key, sync: Boolean) { keys += Sent(k, sync); onKey(k) }
 
-    /** a-z, 0-9 and space have keys; anything else (an emoji) has none. */
     override fun keysFor(ch: Char): List<Key>? {
         val code = when (ch) {
             in 'a'..'z' -> KeyEvent.KEYCODE_A + (ch - 'a')
@@ -124,7 +103,6 @@ class FakeField(
     override var selectionEnd: Int = value.length,
     var acceptSelect: Boolean = true,
     override val nativePlainText: Boolean = false,
-    /** The node's input type (InputType); 0: the node does not say (issue #299). */
     override var inputType: Int = 0,
     override var packageName: CharSequence? = null,
     override var maxLength: Int = -1,
@@ -175,17 +153,10 @@ class FakeNode(
     override val childCount: Int get() = children.size
     override fun child(i: Int): UiNode? = children.getOrNull(i)
 
-    // Issue #321: the node as the app has it now, which only a refresh brings in: what the
-    // fields above hold is what the cache last got (a translation, which sends no event,
-    // leaves them as they were).
-    /** Where the app has the view now (null: where the cache says). */
     var appBounds: Box? = null
-    /** Whether the app has the view still shown (null: as the cache says). */
     var appShown: Boolean? = null
-    /** The app no longer has the node. */
     var gone = false
     var refreshes = 0
-    /** Called as a refresh asks the app. */
     var onRefresh: () -> Unit = {}
     override fun refresh(): Boolean {
         refreshes++
@@ -221,7 +192,6 @@ class FakeNodes : Nodes {
 
     var prefetchRequests = ArrayList<Boolean>()
     override fun windows(prefetchChildren: Boolean): List<UiWindow> { windowReads++; prefetchRequests += prefetchChildren; return windowList }
-    /** What asking for the active root throws, if set (a window gone mid-read, issue #373). */
     var activeError: Throwable? = null
     override fun activeRoot(prefetchChildren: Boolean): UiNode? {
         activeRootReads++; prefetchRequests += prefetchChildren
@@ -242,7 +212,6 @@ class FakeDevice : Device {
     var exits = 0
     val shells = ArrayList<String>()
     var shellResult = ShellResult(0, "ok\n", false)
-    /** Answers by command when set, instead of [shellResult]. */
     var answer: ((String) -> ShellResult)? = null
     var shotRequest: Triple<Double, String, Int>? = null
 
@@ -250,7 +219,6 @@ class FakeDevice : Device {
     override fun rotation() = turned
     override fun rotate(to: Rotation) { rotations += to }
     override fun foregroundPackage() = foreground
-    /** The Activities apps declare, "pkg/class" (issue #280). */
     val activities = HashSet<String>()
     override fun isActivity(pkg: String, cls: String) = "$pkg/$cls" in activities
     override fun screenshot(scale: Double, format: String, quality: Int): Shot {
@@ -258,7 +226,6 @@ class FakeDevice : Device {
         return Shot(540, 1200, format, ByteArray(10) { it.toByte() })
     }
     override fun shell(cmd: String, timeoutMs: Int): ShellResult { shells += cmd; return answer?.invoke(cmd) ?: shellResult }
-    /** In-process dumps asked for ("service arg..."), and their answers by that string; null: cannot. */
     val dumps = ArrayList<String>()
     var dumpAnswer: ((String) -> ShellResult?)? = null
     override fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? {
@@ -269,39 +236,17 @@ class FakeDevice : Device {
     override fun exitSoon() { exits++ }
 }
 
-/**
- * Issue #279: a controlled text field whose app rewrites every value it is given, as a Compose
- * TextField with `onValueChange = { value = it.uppercase() }`. Install it with [attach].
- *
- * A key edits the value the field last restarted its input with, not the latest one: each new
- * value restarts the field's input, which is through a frame ([frameMs], on the clock) after
- * the key, when the field also shows the new value. A key that comes before that frame (keys
- * sent together, with no wait between them) edits the value from before the key ahead of it,
- * and so overwrites that key: the field ends up with a subsequence of what was typed.
- *
- * A key for which [lagging] is true shows in the field a frame later as any other, but its
- * restart never comes: the next key edits the value from before it, whatever the pace (a
- * field that loses that key for good).
- */
 class RewritingField(
     private val clock: FakeClock,
     private val frameMs: Long = 16,
     private val transform: (String) -> String = { it.uppercase() },
     private val lagging: (Char) -> Boolean = { false },
-    /** False: a DEL changes nothing (issue #297 review). */
     private val takesDel: Boolean = true,
-    /** The node's input type (issue #299: a phone field). */
     inputType: Int = 0,
-    /** How long after a key the field shows it and restarts (issue #299: an app under load); [frameMs] by default. */
     private val showAfter: (Char?) -> Long = { frameMs },
-    /**
-     * Issue #299: the app drops a key outright, showing nothing of it, when this says so; its
-     * argument is how many times that character's key has come (1 the first time).
-     */
     private val drops: (Char, Int) -> Boolean = { _, _ -> false },
 ) {
     val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0, inputType = inputType)
-    /** The value a key edits: the one the field last restarted its input with. */
     private var base = ""
     private val seen = HashMap<Char, Int>()
 
@@ -332,13 +277,6 @@ class RewritingField(
     }
 }
 
-/**
- * Issue #297: a field that takes every key and loses none, but shows each one late, as a
- * Flutter field whose engine renders behind the accessibility tree: the app handles the keys
- * in order, each taking [lagFrames] frames (in turn, 3 to 5), and the field shows the text up
- * to a key once that key is handled. Injecting a key takes [injectMs] on the clock. Install it
- * with [attach].
- */
 class LaggingField(
     private val clock: FakeClock,
     private val lagFrames: List<Int> = listOf(4, 3, 5, 3, 4),
@@ -371,21 +309,6 @@ class LaggingField(
     }
 }
 
-/**
- * Issue #289: a plain field erased at its caret: keys go in at the caret, a DEL deletes the
- * grapheme before it (an emoji with its skin tone whole), text set replaces it all and puts
- * the caret at its end. [filter] keeps the characters the field takes; [lose] is lost once,
- * from a key or a text set.
- *
- * With [reportsCaretAtEnd], accessibility reports the selection at the end of the
- * text wherever the real caret is, as a Compose field did after a tap that left its caret
- * mid-text. [takesSelect] (ACTION_SET_SELECTION), [takesEndKey], [takesDel] and [takesSetText]
- * false make a field that ignores that way of editing it. With [later], a DEL shows in the
- * field when [later] runs it (a frame after the key, as in Compose). [app] is the app's own
- * rewrite of every value the field is given (a mask, a formatter, a prefix put back). With
- * [selectLater], a selection the field accepts moves its caret only when [selectLater] runs it
- * (a Compose field applies ACTION_SET_SELECTION a frame later, issue #289 on the device).
- */
 class EraseField(
     var value: String = "",
     var caret: Int = value.length,
@@ -406,7 +329,6 @@ class EraseField(
     override val text: CharSequence get() = value
     override val selectionStart get() = if (reportsCaretAtEnd) value.length else caret
     override val selectionEnd get() = if (reportsCaretAtEnd) value.length else caret
-    /** The texts set on it (ACTION_SET_TEXT). */
     val sets = ArrayList<String>()
 
     override fun setText(text: CharSequence): Boolean {

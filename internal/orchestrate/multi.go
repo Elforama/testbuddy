@@ -1,5 +1,3 @@
-// Package orchestrate runs flows across devices: a work queue over a device pool for
-// suites, and multi-device flows where each device role runs its own commands.
 package orchestrate
 
 import (
@@ -16,38 +14,25 @@ import (
 	"github.com/elforama/testbuddy/internal/js"
 )
 
-// MultiResult is a multi-device flow's outcome.
 type MultiResult struct {
 	Status   engine.Status
 	Err      error
 	Duration time.Duration
-	Devices  map[string]string // role -> device name
-	Videos   []engine.Video    // screen recordings (Options.Record), by role
+	Devices  map[string]string
+	Videos   []engine.Video
 }
 
-// RunMulti runs a multi-device flow. drivers maps each role to its device.
-//
-// Top-level steps run in order. A `- alice: [...]` step runs on alice; a `parallel:` step
-// runs each role's commands at the same time and waits for all (the first failure cancels
-// the others). Devices coordinate with `signal` / `waitForSignal`. All devices share one
-// JavaScript `output` object, so a value one device reads can be typed on another.
 func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options) (res MultiResult) {
 	runMultiInto(ctx, f, drivers, base, &res)
 	return res
 }
 
-// runMultiInto is RunMulti, into res: when the flow crashes (a panic), res still has what the
-// run did, its videos among them, for the crash's result (issue #107).
 func runMultiInto(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options, res *MultiResult) {
 	start := time.Now()
 	*res = MultiResult{Devices: map[string]string{}}
 	shared := js.New("")
 	signals := engine.NewSignals()
 	runners := map[string]*engine.Runner{}
-	// Every runner is ended on every way out (a role that fails to start, a cancelled run, a
-	// crash, the flow's end): Begin starts its recording before anything can fail (issue
-	// #40). Each runner has its own defer, so one that fails to end does not keep the others
-	// from ending; this one, deferred first, runs last and lists the videos role by role.
 	videos := map[string][]engine.Video{}
 	defer func() {
 		for _, role := range f.Config.Devices {
@@ -65,11 +50,9 @@ func runMultiInto(ctx context.Context, f *flow.Flow, drivers map[string]driver.D
 		o.Role = role.Name
 		o.Signals = signals
 		o.JS = shared
-		// TB_ROLE before the flow's env, so it can use it; the role's env last, so it wins
 		o.Env = append(append([]flow.KV{}, base.Env...), flow.KV{Key: "TB_ROLE", Value: role.Name})
 		r := engine.New(d, o)
 		defer func() {
-			// Ending a runner stops its recordings: collect its videos after.
 			r.End()
 			videos[role.Name] = r.Videos()
 		}()
@@ -128,8 +111,6 @@ func runSteps(ctx context.Context, cmds []*flow.Command, runners map[string]*eng
 		case c.Name == "parallel":
 			err = parallel(ctx, runners, c.Parallel, f)
 		default:
-			// A plain command: fine when there is a single device, or for commands that do
-			// not touch a device (scripts, signals).
 			r, ok := soleRunner(runners)
 			if !ok && deviceFree(c) {
 				r, ok = anyRunner(runners), true
@@ -171,7 +152,6 @@ func anyRunner(rs map[string]*engine.Runner) *engine.Runner {
 	return nil
 }
 
-// parallel runs each role's commands concurrently; the first failure cancels the rest.
 func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map[string][]*flow.Command, f *flow.Flow) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -203,10 +183,6 @@ func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map
 	return first
 }
 
-// runListSafely runs a role's commands on their own goroutine (a parallel: block, or the
-// flow's onFlowStart / onFlowComplete), turning a crash (a panic) into the role's error: a
-// panic there would end the process at once, before the flow's deferred End calls stop the
-// devices' recordings, with every device's agent still running (issue #107).
 func runListSafely(ctx context.Context, r *engine.Runner, cmds []*flow.Command, f *flow.Flow) (err error) {
 	defer func() {
 		if p := recover(); p != nil {

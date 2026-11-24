@@ -49,22 +49,20 @@ type rawNode struct {
 	V  string `json:"v"`
 	R  string `json:"r"`
 	F  int    `json:"f"`
-	MO int    `json:"mo"` // the root of an open modal dialog (page.js modalPass)
-	UM int    `json:"um"` // under the open modal dialog
+	MO int    `json:"mo"`
+	UM int    `json:"um"`
 
 	Frame *struct {
 		Src  string `json:"src"`
 		X, Y int
 	} `json:"frame"`
 
-	// CV is what covers the element on screen, from the page's hit test (page.js hitPass).
 	CV []rawHit `json:"cv"`
 
-	main bool // from the main document (spliceFrames)
-	host int  // not main: the main-document index of the frame element it is spliced into
+	main bool
+	host int
 }
 
-// rawHit is a cover at one sample point of an element (ui.Hit).
 type rawHit struct {
 	P  int        `json:"p"`
 	X  int        `json:"x"`
@@ -73,7 +71,6 @@ type rawHit struct {
 	L  []rawLayer `json:"l"`
 }
 
-// rawRef is an element of a snapshot: its index, or (-1) its box and tag when not listed.
 type rawRef struct {
 	I int     `json:"i"`
 	B *[4]int `json:"b"`
@@ -85,8 +82,6 @@ type rawLayer struct {
 	K string `json:"k"`
 }
 
-// moved is the hit with its snapshot indices shifted by base and its points by (dx, dy): a
-// frame's own snapshot spliced into the page's.
 func (h rawHit) moved(base, dx, dy int) rawHit {
 	ref := func(r rawRef) rawRef {
 		if r.I >= 0 {
@@ -106,7 +101,6 @@ func (h rawHit) moved(base, dx, dy int) rawHit {
 	return h
 }
 
-// snapshotIn evaluates the helper's snapshot in a frame session.
 func (d *Driver) snapshotIn(ctx context.Context, session string) ([]rawNode, error) {
 	var r struct {
 		Result struct {
@@ -130,14 +124,13 @@ func (d *Driver) snapshotIn(ctx context.Context, session string) ([]rawNode, err
 	return snap.Nodes, err
 }
 
-// frameFor finds the attached session for an iframe placeholder.
 func (d *Driver) frameFor(src string, used map[string]bool) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	best, bestOrder := "", 1<<30
 	cur := d.curSessionLocked()
 	for id, f := range d.frames {
-		if used[id] || f.tab != cur { // another tab's frame (issue #78)
+		if used[id] || f.tab != cur {
 			continue
 		}
 		if f.url == src {
@@ -150,9 +143,6 @@ func (d *Driver) frameFor(src string, used map[string]bool) string {
 	return best
 }
 
-// spliceFrames replaces cross-origin iframe placeholders' (empty) content with the frame's
-// own snapshot, shifted to where the frame sits on the page. The covers each node carries
-// (rawNode.CV) are kept pointing at the same elements in the spliced list.
 func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 	has := false
 	for _, n := range nodes {
@@ -168,7 +158,7 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		return nodes
 	}
 	out := make([]rawNode, 0, len(nodes))
-	pos := make([]int, len(nodes)) // where each main-document node lands in out
+	pos := make([]int, len(nodes))
 	used := map[string]bool{}
 	for i, n := range nodes {
 		n.main = true
@@ -198,22 +188,17 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 			c.Frame = nil
 			c.host = i
 			if n.UM != 0 {
-				c.UM = 1 // a frame under the page's modal dialog: all of it is
+				c.UM = 1
 			}
 			for k, h := range c.CV {
 				c.CV[k] = h.moved(base, n.Frame.X, n.Frame.Y)
 			}
 			out = append(out, c)
 		}
-		// The frame element is its document's viewport: what of the frame lies outside it does
-		// not show, and scrolls into it, as a list's rows (ClipRect, occlusion.VisiblePart). It
-		// is listed as scrolling when some of its content lies outside it (review of #315); a
-		// frame whose content fits is left as it was, so scrolling around it does not change.
 		if overflows {
 			out[pos[i]].F |= 8
 		}
 	}
-	// The main document's covers point at its own nodes: where they now are.
 	for i := range out {
 		if !out[i].main {
 			continue
@@ -242,7 +227,6 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	var js string
 	err := d.eval(ctx, "window.__tb ? window.__tb.snapshot() : null", &js)
 	if err == nil && js == "" {
-		// a document that predates the helper (about:blank): install it now
 		d.eval(ctx, pageJS, nil)
 		err = d.eval(ctx, "window.__tb.snapshot()", &js)
 	}
@@ -294,8 +278,6 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	return s, nil
 }
 
-// linkCovers gives each node the covers its raw read carries (ui.Hit), pointing at the nodes
-// listed (or at stand-ins for elements that are not).
 func linkCovers(nodes []*ui.Node, raw []rawNode) {
 	for i, r := range raw {
 		if len(r.CV) == 0 || i >= len(nodes) {
@@ -310,8 +292,6 @@ func linkCovers(nodes []*ui.Node, raw []rawNode) {
 	}
 }
 
-// linkHit is the cover h over n, its elements pointing at the nodes listed (or at stand-ins for
-// elements that are not); ok is false when it names no element.
 func linkHit(nodes []*ui.Node, n *ui.Node, h rawHit) (ui.Hit, bool) {
 	ref := func(r rawRef) *ui.Node {
 		if r.I >= 0 && r.I < len(nodes) {
@@ -336,13 +316,6 @@ func linkHit(nodes []*ui.Node, n *ui.Node, h rawHit) (ui.Hit, bool) {
 	return hit, true
 }
 
-// pageOverFrames adds to a cross-origin frame's elements what the page draws over them (issue
-// #315): a dialog, a backdrop, a banner of the page (or of a same-origin frame holding the
-// frame) over the frame. The frame's own read (its hitPass) cannot see them: the page is in
-// another process. One evaluation in the page tests the points package occlusion reads on each
-// element of a frame that shows (occlusion.SamplePoints); at a point where a click reaches
-// something of the page instead of the frame element, the page's cover replaces the frame's own
-// (the page draws over all of the frame). A failed evaluation leaves the frame's own covers.
 func (d *Driver) pageOverFrames(ctx context.Context, s *ui.Screen, nodes []*ui.Node, raw []rawNode, cssMap []int) {
 	var asked []int
 	var req []any
@@ -372,7 +345,6 @@ func (d *Driver) pageOverFrames(ctx context.Context, s *ui.Screen, nodes []*ui.N
 	if err := json.Unmarshal([]byte(js), &got); err != nil || len(got) != len(asked) {
 		return
 	}
-	// The page's indices are its own (main-document) nodes': where they now are.
 	re := func(r rawRef) rawRef {
 		if r.I >= 0 && r.I < len(cssMap) {
 			r.I = cssMap[r.I]
@@ -418,7 +390,7 @@ func (d *Driver) pageOverFrames(ctx context.Context, s *ui.Screen, nodes []*ui.N
 func (r rawNode) node() *ui.Node {
 	hint := r.H
 	if r.V != "" {
-		hint = "" // the placeholder only counts while the field is empty
+		hint = ""
 	}
 	n := &ui.Node{Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}, Class: r.C,
 		Text: r.T, ID: r.ID, Desc: r.CD, Hint: hint, Value: r.V,
@@ -431,8 +403,6 @@ func (r rawNode) node() *ui.Node {
 	return n
 }
 
-// ReadDevToolsPage reads a single document from a debuggable embedded WebView.
-// Coordinates are relative to its viewport, in CSS pixels.
 func ReadDevToolsPage(ctx context.Context, socket string) (int, []*ui.Node, error) {
 	conn, err := dialCDP(ctx, socket, nil)
 	if err != nil {
@@ -459,8 +429,6 @@ func ReadDevToolsPage(ctx context.Context, socket string) (int, []*ui.Node, erro
 	return raw.W, nodes, nil
 }
 
-// QueryCSS returns the indices (into the last Screen's nodes) of the elements a CSS
-// selector matches.
 func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 	b, _ := json.Marshal(sel)
 	var js string
@@ -482,11 +450,6 @@ func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 	return out, nil
 }
 
-// CoveredAt says what a click at (x, y) would reach instead of the screen node at index (a
-// veil, a dialog's backdrop, a toast over it), or "" when it reaches the node. Same-origin
-// frames' nodes are checked through the frame. A cross-origin frame's node is checked in the
-// page, against its frame element (issue #315): what the page draws over the frame; what the
-// frame draws over its own node is its read's (Covers).
 func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
 	d.mu.Lock()
 	snap := -1

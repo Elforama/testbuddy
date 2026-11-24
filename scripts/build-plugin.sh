@@ -1,8 +1,4 @@
 #!/bin/sh
-# Refreshes the Claude Code plugin's bundled CLI and shared references, then validates
-# the plugin and its marketplace entry when the `claude` CLI is available.
-#
-# Usage: scripts/build-plugin.sh [--with-agents]   (--with-agents rebuilds both device agents first)
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"

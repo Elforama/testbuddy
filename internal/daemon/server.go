@@ -15,17 +15,13 @@ import (
 	"time"
 )
 
-// How long a stopping daemon waits for the requests it cancelled to end, and then for its
-// stop hooks (closing the sessions' devices), before it exits anyway.
 const (
 	stopRequestsLimit = 5 * time.Second
 	stopHooksLimit    = 10 * time.Second
 )
 
-// Handler serves one request. send streams a partial response (for watch-like commands).
 type Handler func(ctx context.Context, req Request, send func(Response)) Response
 
-// Server accepts CLI connections on the unix socket.
 type Server struct {
 	handlers map[string]Handler
 	idle     time.Duration
@@ -33,15 +29,11 @@ type Server struct {
 	active   int
 	lastUse  time.Time
 	stop     chan struct{}
-	// ctx is every request's parent: cancelled (under mu) when the server stops, so the
-	// requests still running end, and no new one starts.
-	ctx    context.Context
-	cancel context.CancelFunc
-	reqs   sync.WaitGroup // requests running
-	onStop []func(context.Context)
-	// stopped is closed once shutdown has finished (the stop hooks have run): the connection
-	// that asked the server to stop is closed only then, so its client can wait for it.
-	stopped chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
+	reqs     sync.WaitGroup
+	onStop   []func(context.Context)
+	stopped  chan struct{}
 }
 
 func NewServer(idle time.Duration) *Server {
@@ -52,24 +44,16 @@ func NewServer(idle time.Duration) *Server {
 
 func (s *Server) Handle(cmd string, h Handler) { s.handlers[cmd] = h }
 
-// OnStop adds f to what the server runs when it stops (Stop, the idle exit, a signal from
-// StopOnSignals), before Serve returns: after the requests still running were cancelled and
-// have ended. f must return by ctx's deadline.
 func (s *Server) OnStop(f func(ctx context.Context)) { s.onStop = append(s.onStop, f) }
 
 type stopAfterReplyKey struct{}
 
-// StopAfterReply, called by a handler, stops the server once the handler's answer is written
-// to its client (the stop command: its answer must reach the client before the socket goes).
 func StopAfterReply(ctx context.Context) {
 	if f, ok := ctx.Value(stopAfterReplyKey{}).(*atomic.Bool); ok {
 		f.Store(true)
 	}
 }
 
-// StopOnSignals stops the server, as Stop does, when the process gets one of sigs. After the
-// first, the signals are the system's again (a second Ctrl-C ends the process at once). The
-// returned func stops listening for them.
 func (s *Server) StopOnSignals(sigs ...os.Signal) func() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, sigs...)
@@ -87,9 +71,6 @@ func (s *Server) StopOnSignals(sigs ...os.Signal) func() {
 	return func() { once.Do(func() { signal.Stop(ch); close(done) }) }
 }
 
-// shutdown runs as Serve returns: it cancels the requests still running, waits for them to
-// end (up to stopRequestsLimit) so that nothing is using a device while it is closed, then
-// runs the stop hooks, which have stopHooksLimit to finish.
 func (s *Server) shutdown() {
 	s.Stop()
 	s.mu.Lock()
@@ -110,7 +91,6 @@ func (s *Server) shutdown() {
 	close(s.stopped)
 }
 
-// Stop makes Serve return.
 func (s *Server) Stop() {
 	select {
 	case <-s.stop:
@@ -119,7 +99,6 @@ func (s *Server) Stop() {
 	}
 }
 
-// Serve listens until Stop, or until idle with no client for the idle duration.
 func (s *Server) Serve() error {
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return err
@@ -133,24 +112,19 @@ func (s *Server) Serve() error {
 	if err != nil {
 		return err
 	}
-	// Closing the listener would unlink the path, whoever's socket it is by then; the
-	// deferred check below removes it instead.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	os.Chmod(path, 0o600)
 	mine, _ := os.Stat(path)
 	defer func() {
-		// Remove the socket only if it is still ours: a replacement daemon may already
-		// have created its own at the same path.
 		if cur, err := os.Stat(path); err == nil && mine != nil && os.SameFile(cur, mine) {
 			os.Remove(path)
 		}
 	}()
 	log.Printf("tb daemon listening on %s (pid %d)", path, os.Getpid())
 	defer s.shutdown()
-	defer ln.Close() // first: no new connection while it shuts down
+	defer ln.Close()
 
 	go func() {
-		// The idle check runs every minute, or more often for a short idle limit (tests).
 		t := time.NewTicker(min(time.Minute, max(s.idle/4, 5*time.Millisecond)))
 		defer t.Stop()
 		for {
@@ -203,12 +177,6 @@ func (s *Server) serveConn(c net.Conn) {
 		_, err := c.Write(append(b, '\n'))
 		return err
 	}
-	// One goroutine reads the connection for its whole life and hands each request line to
-	// the loop below. When the client goes away (Ctrl-C, a closed terminal) it sees the end
-	// of the stream at once, even while a request runs, and cancels ctx: the running command
-	// stops at its next cancellation point instead of finishing for nobody and keeping the
-	// device busy (issue #57). A client sends its next request only after the answer to the
-	// last one, so the reader is waiting on the socket whenever a request runs.
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	lines := make(chan []byte)
@@ -244,7 +212,7 @@ func (s *Server) serveConn(c net.Conn) {
 			continue
 		}
 		s.mu.Lock()
-		if s.ctx.Err() != nil { // stopping
+		if s.ctx.Err() != nil {
 			s.mu.Unlock()
 			write(Response{Exit: 1, Text: "the tb daemon is stopping"})
 			return
@@ -253,8 +221,6 @@ func (s *Server) serveConn(c net.Conn) {
 		s.mu.Unlock()
 		keep, stopping := s.serveRequest(ctx, req, h, write)
 		if stopping {
-			// The stop command: its client waits for this connection to close, which it does
-			// once the server has finished stopping (issue #124).
 			<-s.stopped
 			return
 		}
@@ -264,9 +230,6 @@ func (s *Server) serveConn(c net.Conn) {
 	}
 }
 
-// serveRequest runs one request and writes its answer; keep false means the connection is
-// done with (its client went away, or the daemon is stopping); stopping means the request
-// stopped the server (StopAfterReply).
 func (s *Server) serveRequest(ctx context.Context, req Request, h Handler, write func(Response) error) (keep, stopping bool) {
 	defer s.reqs.Done()
 	var stopAfter atomic.Bool

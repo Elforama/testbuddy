@@ -7,8 +7,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Display renders evaluated values the way flows see them: strings raw, numbers as JavaScript
-// prints them, and objects/arrays in display form (not JSON).
 func TestDisplayValues(t *testing.T) {
 	e := New("android")
 	cases := []struct{ src, want string }{
@@ -59,7 +57,6 @@ func TestDisplayValues(t *testing.T) {
 	}
 }
 
-// Display handles Go-side values: nil, undefined, null and plain runtime values.
 func TestDisplayGoValues(t *testing.T) {
 	rt := goja.New()
 	cases := []struct {
@@ -86,8 +83,6 @@ func TestDisplayGoValues(t *testing.T) {
 	}
 }
 
-// display formats nested Go values directly: quoted strings below the top level, floats
-// without exponent noise, nil as null, and "..." past the depth limit.
 func TestDisplayNested(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -117,7 +112,6 @@ func TestDisplayNested(t *testing.T) {
 	}
 }
 
-// A function displays as JavaScript source-ish text, never as a Go pointer.
 func TestDisplayFunction(t *testing.T) {
 	e := New("android")
 	v, err := e.Eval("(function named() { return 1 })", nil)
@@ -130,7 +124,6 @@ func TestDisplayFunction(t *testing.T) {
 	}
 }
 
-// Truthy is the condition rule for `true:` after interpolation.
 func TestTruthyTable(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -175,7 +168,6 @@ func TestTruthyTable(t *testing.T) {
 	}
 }
 
-// A condition's `true:` value goes through Interpolate then Truthy; this pins the combination.
 func TestInterpolateThenTruthy(t *testing.T) {
 	e := New("android")
 	sc := scope(map[string]string{"FLAG": "false", "ON": "true", "ZERO": "0"})

@@ -11,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// The Flutter and UIKit screens here belong to the SAME bundle/PID. A bundle-only
-// detector incorrectly applies the Flutter drag to both.
 func TestFlutterSurfaceRouting(t *testing.T) {
 	if os.Getenv("TB_FLUTTER_BENCH") != "1" || os.Getenv("TB_IOS_UDID") == "" {
 		t.Skip("requires the Flutter benchmark installed on a nominated simulator")

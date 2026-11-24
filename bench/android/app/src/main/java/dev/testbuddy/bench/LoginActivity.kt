@@ -20,7 +20,6 @@ class LoginActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
-        // No system UI over the app (spec): keep autofill and its "Save password?" sheet out.
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         (findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as ViewGroup)
             .getChildAt(0).padForSystemBars()
@@ -28,7 +27,7 @@ class LoginActivity : Activity() {
         logo = findViewById(R.id.logo_spinner)
         val username = findViewById<EditText>(R.id.username)
         val password = findViewById<EditText>(R.id.password)
-        password.typeface = Typeface.DEFAULT // textPassword makes the hint monospace
+        password.typeface = Typeface.DEFAULT
         val error = findViewById<View>(R.id.error)
         val loading = findViewById<View>(R.id.loading)
 
@@ -53,7 +52,6 @@ class LoginActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        // One turn every 1.5 s, forever.
         logoSpin = forever { ms -> logo.rotation = (ms % 1500L) * 360f / 1500f }
     }
 

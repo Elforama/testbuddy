@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TestSelectorScalarIsText pins that a bare string is a text selector, numbers included.
 func TestSelectorScalarIsText(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{"- assertVisible: Welcome.*\n", "Welcome.*"},
@@ -20,7 +19,6 @@ func TestSelectorScalarIsText(t *testing.T) {
 	}
 }
 
-// TestSelectorAllFields pins every scalar, size, state and trait field of a selector map.
 func TestSelectorAllFields(t *testing.T) {
 	s := step(t, `- assertVisible:
     text: Welcome.*
@@ -53,7 +51,6 @@ func TestSelectorAllFields(t *testing.T) {
 	}
 }
 
-// TestSelectorUnsetFieldsStayNil pins that absent or null optional fields are nil, not zero.
 func TestSelectorUnsetFieldsStayNil(t *testing.T) {
 	s := step(t, "- assertVisible:\n    text: X\n    width:\n    enabled: ~\n    traits:\n    below:\n").Selector
 	if s.Width != nil || s.Height != nil || s.Tolerance != nil || s.Enabled != nil || s.Selected != nil ||
@@ -62,7 +59,6 @@ func TestSelectorUnsetFieldsStayNil(t *testing.T) {
 	}
 }
 
-// TestSelectorInterpolatedStrings pins that ${...} is kept raw in string fields.
 func TestSelectorInterpolatedStrings(t *testing.T) {
 	s := step(t, "- tapOn:\n    text: ${NAME}\n    id: ${ID}\n    index: ${IDX}\n").Selector
 	if s.Text != "${NAME}" || s.ID != "${ID}" || s.Index != "${IDX}" {
@@ -70,7 +66,6 @@ func TestSelectorInterpolatedStrings(t *testing.T) {
 	}
 }
 
-// TestSelectorRelations pins below/above/leftOf/rightOf/childOf/containsChild/containsDescendants.
 func TestSelectorRelations(t *testing.T) {
 	s := step(t, `- tapOn:
     text: Buy
@@ -107,7 +102,6 @@ func TestSelectorRelations(t *testing.T) {
 	}
 }
 
-// TestSelectorRelationsNest pins that relative selectors nest to any depth.
 func TestSelectorRelationsNest(t *testing.T) {
 	s := step(t, `- tapOn:
     text: A
@@ -124,7 +118,6 @@ func TestSelectorRelationsNest(t *testing.T) {
 	}
 }
 
-// TestNestedSelectorsAcceptTapOptions pins that tap options inside nested selectors are tolerated.
 func TestNestedSelectorsAcceptTapOptions(t *testing.T) {
 	s := step(t, `- tapOn:
     text: A
@@ -140,7 +133,6 @@ func TestNestedSelectorsAcceptTapOptions(t *testing.T) {
 	}
 }
 
-// TestSelectorOptional pins that `optional: true` in a selector makes the command optional.
 func TestSelectorOptional(t *testing.T) {
 	for _, body := range []string{
 		"- tapOn: {text: X, optional: true}\n",
@@ -157,7 +149,6 @@ func TestSelectorOptional(t *testing.T) {
 	}
 }
 
-// TestSelectorErrors pins rejected selector values, with the line of the bad value.
 func TestSelectorErrors(t *testing.T) {
 	runErrCases(t, hdr, []errCase{
 		{"width not a number", "- tapOn:\n    text: X\n    width: wide\n", `expected a number, got "wide"`, 5},
@@ -184,7 +175,6 @@ func TestSelectorErrors(t *testing.T) {
 	})
 }
 
-// TestHasCriteria pins which selector fields count as filtering criteria.
 func TestHasCriteria(t *testing.T) {
 	i, b := 1, true
 	sub := &Selector{Text: "x"}

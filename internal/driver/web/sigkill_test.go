@@ -15,12 +15,8 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// openHelperEnv makes this test binary, run again, act as a tb that opens a browser and waits
-// to be killed (TestOpenHelperProcess).
 const openHelperEnv = "TB_TEST_OPEN_HELPER"
 
-// TestOpenHelperProcess is not a test: run by TestSigkilledTbLeavesNoBrowser in a process of
-// its own, it opens the stub browser the way tb does, prints the profile and waits.
 func TestOpenHelperProcess(t *testing.T) {
 	if os.Getenv(openHelperEnv) != "1" {
 		t.Skip("run by TestSigkilledTbLeavesNoBrowser")
@@ -31,16 +27,13 @@ func TestOpenHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Stdout.WriteString("profile " + d.profile + "\n")
-	time.Sleep(60 * time.Second) // killed long before
+	time.Sleep(60 * time.Second)
 	os.Exit(1)
 }
 
-// issue #81: a tb killed with SIGKILL (a CI job cancelled or timed out) could not close its
-// browser: Chrome, in a process group of its own since issue #124, kept running with its helper
-// processes, and its tb-chrome-* profile stayed on disk.
 func TestSigkilledTbLeavesNoBrowser(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
-	helperFile := withHelper(t, f, true) // a browser that runs until it is killed
+	helperFile := withHelper(t, f, true)
 	chromeFile := filepath.Join(f.dir, "chrome.pid")
 	rulesPath := filepath.Join(f.dir, "chrome.rules")
 	rules, err := os.ReadFile(rulesPath)
@@ -83,7 +76,7 @@ func TestSigkilledTbLeavesNoBrowser(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("the helper tb did not open the browser within 15 s")
 	}
-	browser := helperPID(t, chromeFile) // both killed when the test ends, if still running
+	browser := helperPID(t, chromeFile)
 	helper := helperPID(t, helperFile)
 	if _, err := os.Stat(profile); err != nil {
 		t.Fatalf("no profile before the kill: %v", err)

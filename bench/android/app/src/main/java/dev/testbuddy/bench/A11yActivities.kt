@@ -19,10 +19,6 @@ import android.widget.TextView
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.appcompat.widget.AppCompatSeekBar
 
-/**
- * A tap handler that leaves the view NOT clickable: no click action, no button role, nothing
- * for accessibility services to find. Deliberately bad (scenario 9).
- */
 @SuppressLint("ClickableViewAccessibility")
 fun View.onBareTap(block: (MotionEvent) -> Unit) {
     val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -34,7 +30,6 @@ fun View.onBareTap(block: (MotionEvent) -> Unit) {
     isLongClickable = false
 }
 
-/** "Secret offer" rendered into a bitmap: text only a screenshot can read. */
 fun Context.offerBitmap(): Bitmap {
     val w = dp(220)
     val h = dp(64)
@@ -51,7 +46,6 @@ fun Context.offerBitmap(): Bitmap {
     return bmp
 }
 
-/** A 5-segment volume bar drawn on one canvas: no accessibility children, no value. */
 class VolumeBar(context: Context, private val onLevel: (Int) -> Unit) : View(context) {
     private var level = 3
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -80,15 +74,10 @@ class VolumeBar(context: Context, private val onLevel: (Int) -> Unit) : View(con
     }
 }
 
-/**
- * A card that is ONE accessibility element: it reports no children at all, so even a dump that
- * includes "not important" views (as UI Automator's does) only sees the card's merged label.
- */
 class MergedCard(context: Context) : LinearLayout(context) {
     override fun addChildrenForAccessibility(outChildren: ArrayList<View>) {}
 }
 
-/** Scenario 9, "Poor accessibility": the Good form built badly on purpose. */
 class PoorA11yActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,7 +85,6 @@ class PoorA11yActivity : ScenarioActivity() {
         val result = pinnedText(R.id.poor_result, "Nothing yet")
         fun say(s: String) { result.text = s }
 
-        // Icon-only "buttons": images, no description, no id, not clickable.
         content.row(top = 12) {
             for ((icon, outcome) in listOf(R.drawable.ic_heart to "Liked", R.drawable.ic_share to "Shared",
                 R.drawable.ic_trash to "Trashed")) {
@@ -108,10 +96,8 @@ class PoorA11yActivity : ScenarioActivity() {
             }
         }
 
-        // A custom-drawn volume bar: one view, no children.
         content.put(VolumeBar(this) { say("Volume $it") }, w = dp(220), h = dp(40), top = 12)
 
-        // A label that is not linked to its field; the field has no hint and no id.
         content.row(top = 12) {
             text(text = "Nickname")
             put(AppCompatEditText(context).apply {
@@ -120,14 +106,12 @@ class PoorA11yActivity : ScenarioActivity() {
             }, w = 0, weight = 1f)
         }
 
-        // Tappable plain text.
         content.text(text = "Continue", size = 18f).apply {
             setTextColor(color(R.color.accent))
             setPadding(0, dp(8), 0, dp(8))
             onBareTap { say("Continued") }
         }
 
-        // Three identical "Edit" buttons, told apart only by the title above each.
         for (name in listOf("Alpha", "Beta", "Gamma")) {
             content.column(top = 4) {
                 text(text = name, bold = true)
@@ -137,7 +121,6 @@ class PoorA11yActivity : ScenarioActivity() {
             }
         }
 
-        // A card that is ONE accessibility element: its children are hidden from the tree.
         val card = content.put(MergedCard(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(color(R.color.surface), 12)
@@ -159,7 +142,6 @@ class PoorA11yActivity : ScenarioActivity() {
             }
         }
 
-        // A 12 x 12 dp target.
         content.row(top = 12) {
             text(text = "Tiny:")
             put(View(context).apply {
@@ -168,7 +150,6 @@ class PoorA11yActivity : ScenarioActivity() {
             }, w = dp(12), h = dp(12))
         }
 
-        // Words in an image, no description.
         content.put(ImageView(this).apply {
             setImageBitmap(offerBitmap())
             scaleType = ImageView.ScaleType.FIT_START
@@ -177,7 +158,6 @@ class PoorA11yActivity : ScenarioActivity() {
     }
 }
 
-/** Scenario 10, "Good accessibility": the same controls with ids, labels, roles and state. */
 class GoodA11yActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

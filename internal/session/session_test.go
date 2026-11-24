@@ -14,8 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/devlock"
 )
 
-// Register serves every session command over the daemon socket; ping answers the build id
-// and stop ends the server.
 func TestRegisterOverSocket(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	srv := daemon.NewServer(time.Hour)
@@ -33,7 +31,7 @@ func TestRegisterOverSocket(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("daemon did not listen: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond) // server start-up only
+		time.Sleep(10 * time.Millisecond)
 	}
 	defer c.Close()
 	r := bufio.NewReader(c)
@@ -55,7 +53,6 @@ func TestRegisterOverSocket(t *testing.T) {
 	if resp := send(daemon.Request{Cmd: "ping"}); !resp.OK || resp.Text != daemon.BuildID() {
 		t.Errorf("ping = %+v", resp)
 	}
-	// every command is registered: with no device open they answer, rather than "unknown command"
 	for _, cmd := range []string{"devices", "open", "close", "look", "locate", "do", "watch", "shot", "log", "save", "clear"} {
 		resp := send(daemon.Request{Cmd: cmd, Args: json.RawMessage(`{"device":"nothing-here"}`)})
 		if strings.Contains(resp.Text, "unknown command") {
@@ -100,7 +97,6 @@ func TestLocateReportsAmbiguityWithoutTapping(t *testing.T) {
 	}
 }
 
-// Every handler rejects arguments that are not its JSON object with exit 2.
 func TestHandlersRejectBadArgs(t *testing.T) {
 	s := New()
 	for name, h := range map[string]handler{"open": s.open, "close": s.close, "look": s.look, "shot": s.shot, "do": s.do, "save": s.save, "watch": s.watch} {
@@ -111,7 +107,6 @@ func TestHandlersRejectBadArgs(t *testing.T) {
 	}
 }
 
-// A command finds its device by alias, serial or name; with one device open it needs none.
 func TestResolve(t *testing.T) {
 	s := New()
 	a := addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "alice")
@@ -132,7 +127,6 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// Unknown devices are looked up among connected ones; with none connected the error says so.
 func TestResolveNotOpen(t *testing.T) {
 	s := New()
 	ctx := context.Background()
@@ -143,24 +137,20 @@ func TestResolveNotOpen(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 	addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "")
-	// a platform with one device open still looks for a matching connected device
 	if _, err := s.resolve(ctx, devArgs{Platform: "ios"}); err == nil || !strings.Contains(err.Error(), "no ios device is connected") {
 		t.Errorf("err = %v", err)
 	}
 }
 
-// A name outlives its connection: after the device drops, the name still means that
-// device's serial (a reconnect looks for it).
 func TestResolveRemembersNames(t *testing.T) {
 	s := New()
-	s.names["alice"] = "emulator-5554" // her connection dropped
+	s.names["alice"] = "emulator-5554"
 	_, err := s.resolve(context.Background(), devArgs{Device: "alice"})
 	if err == nil || !strings.Contains(err.Error(), `no connected device matches "emulator-5554"`) {
 		t.Errorf("err = %v, want a lookup of alice's serial", err)
 	}
 }
 
-// When the named device is connected again (unnamed), the remembered name re-attaches to it.
 func TestResolveReattachesName(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7")
 	s := New()
@@ -175,7 +165,6 @@ func TestResolveReattachesName(t *testing.T) {
 	}
 }
 
-// label shows the alias with the device name, or the name and serial.
 func TestDevLabel(t *testing.T) {
 	d := &Dev{Info: device.Info{Name: "Pixel 7", Serial: "emulator-5554"}}
 	if got := d.label(); got != "Pixel 7 emulator-5554" {
@@ -187,7 +176,6 @@ func TestDevLabel(t *testing.T) {
 	}
 }
 
-// devices lists every connected device, marking open ones and their session names.
 func TestDevices(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7", "emulator-5556 Pixel_8", "R58M Galaxy_S22")
 	s := New()
@@ -217,7 +205,6 @@ android R58M "Galaxy S22" (device)  connected
 	}
 }
 
-// With nothing connected, devices says how to get a device.
 func TestDevicesNone(t *testing.T) {
 	resp, _ := call(t, New().devices, nil, "")
 	if !resp.OK || resp.Text != "no devices: start an Android emulator or boot an iOS simulator\n" || string(resp.JSON) != "null" {
@@ -225,7 +212,6 @@ func TestDevicesNone(t *testing.T) {
 	}
 }
 
-// open names an already-connected device and sets its default app.
 func TestOpenNamesDevice(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7")
 	s := New()
@@ -237,14 +223,12 @@ func TestOpenNamesDevice(t *testing.T) {
 	if d.Name != "alice" || d.AppID != "com.chat" || s.names["alice"] != "emulator-5554" {
 		t.Errorf("dev name=%q app=%q names=%v", d.Name, d.AppID, s.names)
 	}
-	// opening again without a name keeps it
 	resp, _ = call(t, s.open, map[string]any{"device": "alice"}, "")
 	if !resp.OK || !strings.HasPrefix(resp.Text, "connected alice: ") || d.AppID != "com.chat" {
 		t.Errorf("reopen %+v app %q", resp, d.AppID)
 	}
 }
 
-// open accepts an alias of an open device even when it is not in the device list.
 func TestOpenByAlias(t *testing.T) {
 	s := New()
 	addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "alice")
@@ -254,7 +238,6 @@ func TestOpenByAlias(t *testing.T) {
 	}
 }
 
-// A name already used by another device is refused.
 func TestOpenNameTaken(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7", "emulator-5556 Pixel_8")
 	s := New()
@@ -266,7 +249,6 @@ func TestOpenNameTaken(t *testing.T) {
 	}
 }
 
-// open of a device that is not connected fails with exit 2.
 func TestOpenUnknown(t *testing.T) {
 	resp, _ := call(t, New().open, map[string]any{"device": "Pixel 99"}, "")
 	if resp.Exit != 2 || !strings.Contains(resp.Text, `no connected device matches "Pixel 99"`) {
@@ -274,7 +256,6 @@ func TestOpenUnknown(t *testing.T) {
 	}
 }
 
-// close drops one device, its driver and its name.
 func TestCloseOne(t *testing.T) {
 	s := New()
 	fa, fb := newFake("emulator-5554", "Pixel 7", device.Android), newFake("UDID-1", "iPhone 17", device.IOS)
@@ -298,7 +279,6 @@ func TestCloseOne(t *testing.T) {
 	}
 }
 
-// close all drops every device and every name.
 func TestCloseAll(t *testing.T) {
 	s := New()
 	fa, fb := newFake("a", "A", device.Android), newFake("b", "B", device.IOS)
@@ -314,7 +294,6 @@ func TestCloseAll(t *testing.T) {
 	}
 }
 
-// close of an unknown device fails with exit 2.
 func TestCloseUnknown(t *testing.T) {
 	resp, _ := call(t, New().close, map[string]any{"device": "ghost"}, "")
 	if resp.Exit != 2 {
@@ -322,8 +301,6 @@ func TestCloseUnknown(t *testing.T) {
 	}
 }
 
-// A session holds its device: a device another process holds is refused before tb connects,
-// naming the holder; closing a session (or all) frees its device for other processes.
 func TestSessionLocks(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -339,7 +316,6 @@ func TestSessionLocks(t *testing.T) {
 	}
 	other.Release()
 
-	// A session's lock is freed by close, and by close all.
 	for _, all := range []bool{false, true} {
 		f := newFake("emulator-5554", "Pixel", device.Android)
 		d := addDev(s, f, "alice")
@@ -368,8 +344,6 @@ func TestSessionLocks(t *testing.T) {
 	}
 }
 
-// One session per device in a daemon: opening a device another named session has, under a new
-// name, is refused (it would take that session over); the same name, or no name, reuses it.
 func TestSessionOneNamePerDevice(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel", device.Android)
@@ -385,9 +359,6 @@ func TestSessionOneNamePerDevice(t *testing.T) {
 	}
 }
 
-// issue #57: Ctrl-C on a `tb do` that waits for an element ends that wait. The daemon cancels
-// the command when its client disconnects, so the device is free for the next `tb do` at
-// once instead of after the full wait, and the session works as before.
 func TestDoCancelledWhenClientDisconnects(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -413,7 +384,7 @@ func TestDoCancelledWhenClientDisconnects(t *testing.T) {
 			if time.Now().After(deadline) {
 				t.Fatalf("daemon did not listen: %v", err)
 			}
-			time.Sleep(10 * time.Millisecond) // server start-up only
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 	request := func(c net.Conn, cmd string, args any) {
@@ -425,11 +396,10 @@ func TestDoCancelledWhenClientDisconnects(t *testing.T) {
 		}
 	}
 
-	// The first client waits 20 s for an element that never shows, then goes away.
 	first := dial()
 	request(first, "do", map[string]any{"commands": "extendedWaitUntil:\n  visible: Never there\n  timeout: 20000\n"})
 	deadline := time.Now().Add(5 * time.Second)
-	for d.mu.TryLock() { // the wait has started once it holds the device
+	for d.mu.TryLock() {
 		d.mu.Unlock()
 		if time.Now().After(deadline) {
 			t.Fatal("the first do did not start")
@@ -438,7 +408,6 @@ func TestDoCancelledWhenClientDisconnects(t *testing.T) {
 	}
 	first.Close()
 
-	// The next client's command runs at once.
 	second := dial()
 	defer second.Close()
 	request(second, "do", map[string]any{"commands": "inputText: hello"})

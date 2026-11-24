@@ -1,4 +1,3 @@
-// Package ui is the platform-neutral screen model: a tree of nodes read from a device.
 package ui
 
 import (
@@ -32,84 +31,55 @@ func (r Rect) Intersect(o Rect) Rect {
 
 func (r Rect) Overlaps(o Rect) bool { return !r.Intersect(o).Empty() }
 
-// Coll is a list's size (Rows, Cols; -1 unknown) or an item's row and column in one.
 type Coll struct{ Rows, Cols int }
 
-// Node is one element on screen.
 type Node struct {
-	Text  string // Android text / iOS title or value
-	Desc  string // Android content-description / iOS label (accessibilityText in selectors)
-	ID    string // Android resource-id / iOS accessibilityIdentifier
-	Hint  string // placeholder
-	Value string // iOS value
+	Text  string
+	Desc  string
+	ID    string
+	Hint  string
+	Value string
 	Error string
-	State string // Android stateDescription
-	Class string // Android class name / iOS element type
+	State string
+	Class string
 
 	Bounds        Rect
-	PreciseBounds *[4]float64 // optional sub-point edges (left, top, right, bottom)
+	PreciseBounds *[4]float64
 
 	Clickable, LongClickable, Enabled, Focused, Checked, Checkable, Selected bool
 	Scrollable, Password, Editable, Visible, ShowingHint                     bool
 
-	// Android scroll containers: whether it can scroll further (forward = down or right),
-	// and a list's size / an item's row and column in it, when the app reports them.
 	MoreAfter, MoreBefore bool
 	Coll, Item            *Coll
 
-	// DrawOrder is the node's place among its siblings as drawn (Android: later is drawn on
-	// top, elevation and custom drawing order counted), when the platform reports it
-	// (DrawOrderKnown). The tree's order is by place on screen, not as drawn.
 	DrawOrder      int
 	DrawOrderKnown bool
 
-	// Covers is what the platform's own hit test found over the node (the web: the browser
-	// says what a click at each of its sample points reaches). Package occlusion reads it;
-	// nil on platforms whose covers it works out from the tree.
 	Covers []Hit
 
-	// Modal: the node is the root of a modal dialog open on screen (the web: a <dialog> shown
-	// modal, or an element with aria-modal="true"). UnderModal: the node is outside that
-	// dialog and does not hold it: the page under the dialog, which a person cannot reach
-	// while it is open. A node inside the dialog, or one that holds it (the body), has neither.
-	// Only the web sets them so far.
 	Modal, UnderModal bool
 
-	Window   int // index of its window in Screen.Windows
-	Depth    int // depth within its window
-	Index    int // pre-order position in Screen.Nodes
+	Window   int
+	Depth    int
+	Index    int
 	Parent   *Node
 	Children []*Node
 
-	// Ref: the node's place, from 1, among the nodes the Android agent wrote for its window in
-	// the read Screen.Read, by which the agent can find the very node again (0: none, such as
-	// a node tb added).
 	Ref int
 }
 
-// Hit is a cover the platform's own hit test found over a node, at one of the points package
-// occlusion samples on it: a click there reaches By, not the node.
 type Hit struct {
-	// Point is which sample point: 0 the middle of the node's visible part, 1 to 4 the middles
-	// of its quarters (top left, top right, bottom left, bottom right). X, Y is where it is.
-	Point int
-	X, Y  int
-	// By is what takes the click: the outermost element of the branch drawn over the node that
-	// takes clicks (a drawer, a backdrop, a header), listed or a stand-in for one that is not.
-	By *Node
-	// Layers are the elements of that branch that may make it a modal layer, innermost first.
+	Point  int
+	X, Y   int
+	By     *Node
 	Layers []HitLayer
 }
 
-// HitLayer is an element of a cover's branch and why it may be a modal layer: Kind is "modal"
-// (shown modal: a <dialog> opened with showModal, in the top layer, or aria-modal="true"),
-// "fixed" or "sticky" (positioned so: modal when it holds the node and is no bar).
 type HitLayer struct {
 	Node *Node
 	Kind string
 }
 
-// Label is what a person reads on the node: its text, else its accessibility description.
 func (n *Node) Label() string {
 	if n.Text != "" && !(n.ShowingHint && n.Text == n.Hint) {
 		return n.Text
@@ -117,7 +87,6 @@ func (n *Node) Label() string {
 	return n.Desc
 }
 
-// ShortClass is the last segment of the class name.
 func (n *Node) ShortClass() string {
 	c := n.Class
 	if i := strings.LastIndexAny(c, "."); i >= 0 {
@@ -126,7 +95,6 @@ func (n *Node) ShortClass() string {
 	return c
 }
 
-// IsDescendantOf reports whether n is anc or inside it.
 func (n *Node) IsDescendantOf(anc *Node) bool {
 	for p := n; p != nil; p = p.Parent {
 		if p == anc {
@@ -136,7 +104,6 @@ func (n *Node) IsDescendantOf(anc *Node) bool {
 	return false
 }
 
-// Walk visits n and its subtree in pre-order. Returning false skips a node's children.
 func (n *Node) Walk(fn func(*Node) bool) {
 	if !fn(n) {
 		return
@@ -146,36 +113,30 @@ func (n *Node) Walk(fn func(*Node) bool) {
 	}
 }
 
-// Window is one window (an app, the keyboard, a system dialog).
 type Window struct {
 	ID      int
-	Type    string // app, keyboard, system, overlay
+	Type    string
 	Package string
 	Title   string
 	Active  bool
 	Focused bool
 	Bounds  Rect
-	Nodes   []*Node // this window's nodes, pre-order with Depth set (input to Link)
+	Nodes   []*Node
 	Roots   []*Node
 }
 
-// Screen is one read of the device's screen.
 type Screen struct {
 	Platform string
 	Width    int
 	Height   int
-	Seq      int64 // the device's change counter when it was read
-	// Read: the Android agent's number for this read, which its nodes' Ref refer to (0: none).
+	Seq      int64
 	Read     int64
 	Keyboard bool
-	// Unread: windows the device listed but could not read (Android: no root yet, as a
-	// window being replaced after a turn); they are not in Windows.
-	Unread  int
-	Windows []*Window // top-most first
-	Nodes   []*Node   // every node, pre-order, windows top-most first
+	Unread   int
+	Windows  []*Window
+	Nodes    []*Node
 }
 
-// Foreground is the package or bundle id of the active app window.
 func (s *Screen) Foreground() string {
 	for _, w := range s.Windows {
 		if w.Active && w.Type == "app" {
@@ -190,7 +151,6 @@ func (s *Screen) Foreground() string {
 	return ""
 }
 
-// Link fills Parent, Children, Index and Window from each node's Depth, given nodes per window in pre-order.
 func (s *Screen) Link() {
 	s.Nodes = s.Nodes[:0]
 	for wi, w := range s.Windows {
@@ -217,8 +177,6 @@ func (s *Screen) Link() {
 	}
 }
 
-// Signature hashes what the screen shows (structure, text, bounds, state), to tell whether
-// two reads differ.
 func (s *Screen) Signature() uint64 {
 	h := uint64(14695981039346656037)
 	mix := func(str string) {
@@ -246,11 +204,6 @@ func (s *Screen) Signature() uint64 {
 	return h
 }
 
-// ClipRect is the part of the screen where n can show: the screen, cut to every scrolling
-// ancestor's bounds (a row scrolled out of its list is not on screen, though inside the
-// screen). Ignored: ancestors with empty bounds, and a window's root, whose scrolling is
-// the window's own (a web page's body: its box moves up off the screen as the page scrolls,
-// while what shows is the window).
 func (n *Node) ClipRect(screen Rect) Rect {
 	r := screen
 	for p := n.Parent; p != nil; p = p.Parent {
