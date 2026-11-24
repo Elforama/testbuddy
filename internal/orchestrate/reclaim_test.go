@@ -268,3 +268,36 @@ func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
 	}
 	pool.Close()
 }
+
+// Third review of issue #397: TB_DEVICE's device (Prefer) busy in the caller's own session does
+// not keep the caller's other, idle session from being taken back for the run.
+func TestPoolPreferBusyStillReclaimsAnother(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	la, err := devlock.TryAcquire("a", `tb session "a" (tb open/do/look)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer la.Release()
+	lb, err := devlock.TryAcquire("b", `tb session "b" (tb open/do/look)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	defer pool.Close()
+	pool.Prefer = "a"
+	var asked []string
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		if serial == "a" {
+			return Reclaimed{Busy: true, Label: "a"}
+		}
+		lb.Release()
+		return Reclaimed{OK: true}
+	}
+	got, err := pool.allocOrWait(context.Background(), []Need{{}})
+	// a, busy, is asked again on each try (as any busy own session); b is taken back.
+	if err != nil || got[""].Serial != "b" || asked[len(asked)-1] != "b" || asked[0] != "a" {
+		t.Errorf("Prefer busy, another idle own session: %v, %v, asked %v", got, err, asked)
+	}
+}

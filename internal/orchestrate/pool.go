@@ -272,15 +272,14 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		n := needs[i]
 		var held []string
 		free := ""
-		if s := p.Prefer; s != "" && !claimed[s] && p.lost[s] == nil && p.locks[s] == nil {
+		if s := p.Prefer; s != "" && !claimed[s] && p.lost[s] == nil && p.locks[s] == nil && p.preferPending() {
+			// TB_DEVICE's device, which the caller's own session may give back: asked even
+			// though another device is free. Once its holder answered (not the caller's, busy,
+			// could not be asked), the need is served like any other, below.
 			if d, ok := p.deviceBySerial(s); ok && p.fits(n, d) {
-				if o, isHeld := p.held[s]; isHeld && isSession(o) && p.reclaims[s] < maxReclaims {
-					if a, done := p.asked[s]; !(done && a.owner == o.PID && !a.Busy && !a.Unknown && !a.OK) {
-						claimed[s] = true
-						groups = append(groups, []string{s})
-						continue
-					}
-				}
+				claimed[s] = true
+				groups = append(groups, []string{s})
+				continue
 			}
 		}
 		for _, d := range p.devices {
