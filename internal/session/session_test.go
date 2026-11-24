@@ -139,7 +139,8 @@ func TestResolveNotOpen(t *testing.T) {
 	if _, err := s.resolve(ctx, devArgs{}); err == nil || !strings.Contains(err.Error(), "no device is connected") {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no connected device matches "bob"`) {
+	// issue #400: a name that is no device may be a session's: the error says so
+	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no session or connected device is named "bob"`) {
 		t.Errorf("err = %v", err)
 	}
 	addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "")
