@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/engine"
 )
@@ -219,4 +220,51 @@ func TestPoolReclaimsForATwoDeviceFlow(t *testing.T) {
 	if err != nil || len(got) != 2 || fmt.Sprint(asked) != "[b]" {
 		t.Errorf("issue #395, two devices: %v, %v, asked %v", got, err, asked)
 	}
+}
+
+// Round 3 review of issue #395: the needs go in tryAlloc's order (an android-only role before
+// one that takes any device), and a browser role is always servable (browsers are made on
+// demand), so neither keeps the caller's session from being taken back.
+func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	hold := func(serial string) *devlock.Lock {
+		t.Helper()
+		l, err := devlock.TryAcquire(serial, `tb session "x" (tb open/do/look)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+
+	// alice takes any device, bob android only: android A is free, the simulator I is the
+	// caller's. tryAlloc gives A to bob, so I is taken back for alice.
+	li := hold("I")
+	pool := NewPool([]device.Info{{Serial: "A", Name: "A", Platform: device.Android}, {Serial: "I", Name: "I", Platform: device.IOS}})
+	var asked []string
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		li.Release()
+		return Reclaimed{OK: true}
+	}
+	got, err := pool.allocOrWait(context.Background(), []Need{{Role: "alice"}, {Role: "bob", Platform: "android"}})
+	if err != nil || got["bob"].Serial != "A" || got["alice"].Serial != "I" || fmt.Sprint(asked) != "[I]" {
+		t.Errorf("mixed platforms: %v, %v, asked %v", got, err, asked)
+	}
+	pool.Close()
+
+	// A phone role in the caller's session and two browser roles with one browser so far.
+	la := hold("A")
+	pool = NewPool([]device.Info{{Serial: "A", Name: "A", Platform: device.Android}, chrome})
+	asked = nil
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		la.Release()
+		return Reclaimed{OK: true}
+	}
+	got, err = pool.allocOrWait(context.Background(), []Need{{Role: "phone", Device: "A"}, {Role: "w1", Platform: "web"}, {Role: "w2", Platform: "web"}})
+	if err != nil || len(got) != 3 || fmt.Sprint(asked) != "[A]" {
+		t.Errorf("phone and two browsers: %v, %v, asked %v", got, err, asked)
+	}
+	pool.Close()
 }

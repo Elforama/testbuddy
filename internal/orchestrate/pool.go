@@ -131,16 +131,9 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// One free device serves one need (pinned needs first, as tryAlloc hands them out).
-	var order []Need
-	for _, pinned := range []bool{true, false} {
-		for _, n := range needs {
-			if (n.Device != "") == pinned {
-				order = append(order, n)
-			}
-		}
-	}
 	claimed := map[string]bool{}
-	for _, n := range order {
+	for _, i := range needOrder(needs) {
+		n := needs[i]
 		var holders []string
 		free := ""
 		for _, d := range p.devices {
@@ -157,6 +150,9 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 		if free != "" {
 			claimed[free] = true
 			continue
+		}
+		if n.Platform == string(device.Web) && n.Device == "" {
+			continue // browsers are made on demand (addWeb)
 		}
 		if len(holders) > 0 {
 			msg := strings.Join(holders, "; ")
@@ -224,17 +220,10 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 	// The needs in tryAlloc's order (pinned first), each given a free device that fits as
 	// tryAlloc would, so one free device does not count for two needs (a two-device flow with
 	// one device free and the other in the caller's session).
-	var order []Need
-	for _, pinned := range []bool{true, false} {
-		for _, n := range needs {
-			if (n.Device != "") == pinned {
-				order = append(order, n)
-			}
-		}
-	}
 	claimed := map[string]bool{}
 	var groups [][]string // per need with no free device: the devices to ask, in order
-	for _, n := range order {
+	for _, i := range needOrder(needs) {
+		n := needs[i]
 		var held []string
 		free := ""
 		for _, d := range p.devices {
@@ -258,6 +247,9 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		if free != "" {
 			claimed[free] = true
 			continue
+		}
+		if n.Platform == string(device.Web) && n.Device == "" {
+			continue // browsers are made on demand (addWeb)
 		}
 		if len(held) == 0 {
 			p.mu.Unlock()
@@ -294,6 +286,29 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		}
 	}
 	return got
+}
+
+// needOrder is the order tryAlloc serves needs in: pinned to a device first, then those with a
+// platform, then any device. reclaimOwn and heldElsewhere follow it too, so a free device goes
+// to the same need there as in tryAlloc.
+func needOrder(needs []Need) []int {
+	order := make([]int, 0, len(needs))
+	for i, n := range needs {
+		if n.Device != "" {
+			order = append(order, i)
+		}
+	}
+	for i, n := range needs {
+		if n.Device == "" && n.Platform != "" {
+			order = append(order, i)
+		}
+	}
+	for i, n := range needs {
+		if n.Device == "" && n.Platform == "" {
+			order = append(order, i)
+		}
+	}
+	return order
 }
 
 func (p *Pool) Devices() []device.Info { return p.devices }
@@ -337,23 +352,7 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 	defer p.mu.Unlock()
 	got := map[string]device.Info{}
 	taken := map[string]bool{}
-	order := make([]int, 0, len(needs))
-	for i, n := range needs {
-		if n.Device != "" {
-			order = append(order, i)
-		}
-	}
-	for i, n := range needs {
-		if n.Device == "" && n.Platform != "" {
-			order = append(order, i)
-		}
-	}
-	for i, n := range needs {
-		if n.Device == "" && n.Platform == "" {
-			order = append(order, i)
-		}
-	}
-	for _, i := range order {
+	for _, i := range needOrder(needs) {
 		n := needs[i]
 		found := false
 		for _, d := range p.devices {
