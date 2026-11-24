@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -504,5 +507,107 @@ func TestEventLogKeepsTheOrder(t *testing.T) {
 			t.Errorf("only %d rows at %s, in the middle of the burst", len(s.Rows), s.Start)
 		}
 		full = full || len(s.Rows) == l.rows
+	}
+}
+
+// statesByScan is logStates as first written: every row checked at every cut. The sweep must
+// give the same states.
+func statesByScan(rows []*eventRow, holds []hold) []logState {
+	var paused [][2]time.Duration
+	var extra time.Duration
+	for _, h := range holds {
+		at := h.At + extra
+		paused = append(paused, [2]time.Duration{at, at + h.Dur})
+		extra += h.Dur
+	}
+	var cuts []time.Duration
+	for _, r := range rows {
+		cuts = append(cuts, r.shown, r.gone)
+	}
+	for _, p := range paused {
+		cuts = append(cuts, p[0], p[1])
+	}
+	sort.Slice(cuts, func(i, j int) bool { return cuts[i] < cuts[j] })
+	var states []logState
+	for i := 0; i+1 < len(cuts); i++ {
+		a, b := cuts[i], cuts[i+1]
+		if b <= a {
+			continue
+		}
+		s := logState{Start: a, End: b}
+		for _, r := range rows {
+			if r.shown <= a && a < r.gone {
+				s.Rows = append(s.Rows, *r)
+			}
+		}
+		for _, p := range paused {
+			if p[0] <= a && a < p[1] {
+				s.Paused = true
+			}
+		}
+		if len(s.Rows) == 0 && !s.Paused {
+			continue
+		}
+		if k := len(states); k > 0 && states[k-1].End == a && sameState(states[k-1], s) {
+			states[k-1].End = b
+			continue
+		}
+		states = append(states, s)
+	}
+	return states
+}
+
+// The layout's states are the same as checking every row at every cut, and come quickly for
+// a long run of a chatty app (found in review: the scan was quadratic).
+func TestLogStatesSweep(t *testing.T) {
+	rnd := rand.New(rand.NewSource(1))
+	for round := 0; round < 50; round++ {
+		var evs []Event
+		at := time.Duration(0)
+		for i := 0; i < 300; i++ {
+			at += time.Duration(rnd.Intn(400)) * time.Millisecond
+			evs = append(evs, Event{at, fmt.Sprint(i)})
+		}
+		l := layoutEvents(evs, 0)
+		var rows []*eventRow
+		seen := map[eventRow]bool{}
+		for _, s := range l.states {
+			for _, r := range s.Rows {
+				if !seen[r] {
+					seen[r] = true
+					rr := r
+					rows = append(rows, &rr)
+				}
+			}
+		}
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].shown < rows[j].shown })
+		if got, want := logStates(rows, l.holds), statesByScan(rows, l.holds); !reflect.DeepEqual(got, want) {
+			t.Fatalf("round %d: the sweep's states differ from the scan's", round)
+		}
+	}
+	var evs []Event
+	for i := 0; i < 60_000; i++ {
+		evs = append(evs, Event{time.Duration(i) * 20 * time.Millisecond, "e"})
+	}
+	start := time.Now()
+	layoutEvents(evs, 0)
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("60,000 events laid out in %s", d)
+	}
+}
+
+// A touch's ring stays up through a hold that comes while it shows, so the held frame shows
+// where the touch went (found in review: it vanished mid-hold, seen in a live run).
+func TestTouchRingLastsThroughAHold(t *testing.T) {
+	_, touches := heldNotes(nil, []Touch{{At: dms(2150), Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}},
+		[]hold{{At: dms(2200), Dur: time.Second}})
+	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,2.150,3.750)'") {
+		t.Errorf("ring shown %s, want 2.15 s to 3.75 s (0.6 s and the 1 s hold)", overlayAt(touches[0]))
+	}
+	// one before the hold is not touched
+	_, touches = heldNotes(nil, []Touch{{At: dms(500), Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}},
+		[]hold{{At: dms(2200), Dur: time.Second}})
+	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,0.500,1.100)'") {
+		t.Errorf("ring shown %s, want 0.5 s to 1.1 s", overlayAt(touches[0]))
 	}
 }

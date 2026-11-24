@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -235,6 +236,40 @@ func TestAnnotateDrawsCaptionsWhenTheEventsFail(t *testing.T) {
 	}
 	if len(calls) != 2 || len(calls[1].Events) != 0 || len(calls[1].Caps) == 0 || len(calls[1].Touches) != 1 {
 		t.Errorf("burns %+v, want a second one with the captions and touches only", calls)
+	}
+}
+
+// A video draws at most maxVideoEvents events, the first ones, so a chatty app's long run does
+// not take longer to draw than the burn may (found in review: then it lost them all).
+func TestAnnotateCapsTheEventsAVideoDraws(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	dir := t.TempDir()
+	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	events := func(_ string, start, end time.Time) []AnnotateEvent {
+		var out []AnnotateEvent
+		for i := 0; i < maxVideoEvents+500; i++ {
+			out = append(out, AnnotateEvent{At: start.Add(end.Sub(start) * time.Duration(i) / time.Duration(maxVideoEvents+500)), Text: fmt.Sprint(i)})
+		}
+		return out
+	}
+	var trace strings.Builder
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Annotate: true,
+		AnnotateEvents: events, Trace: NewTrace(&trace)})
+	r.annotateWait = func(context.Context, time.Duration) {}
+	var got []annotate.Event
+	r.annotateBurn = func(_ context.Context, _ string, d annotate.Drawing) error {
+		got = d.Events
+		return nil
+	}
+	if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	if len(got) != maxVideoEvents || got[0].Text != "0" {
+		t.Errorf("drew %d events from %q, want the first %d", len(got), got[0].Text, maxVideoEvents)
+	}
+	if !strings.Contains(trace.String(), "500 more") {
+		t.Errorf("the log does not say what was left out:\n%s", trace.String())
 	}
 }
 

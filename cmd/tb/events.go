@@ -58,6 +58,9 @@ func serveEvents(a *args, con *console) (*runEvents, string) {
 	}
 	if !con.quiet {
 		con.printf("events: %s (tb mark \"text\", or POST from the app)\n", srv.URL)
+		if srv.Shared {
+			con.printf("  another tb run is taking events too: tb mark sends there unless given --url %s\n", srv.URL)
+		}
 	}
 	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}}, srv.URL
 }

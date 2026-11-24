@@ -125,7 +125,7 @@ func TestBurnWithFFmpeg(t *testing.T) {
 	before, _ := os.Stat(path)
 	err = Burn(context.Background(), path, Drawing{
 		Caps:    []Caption{{0, time.Second, "tapOn: \"Save\""}, {time.Second, 2 * time.Second, "assertVisible: \"Saved\""}},
-		Touches: []Touch{{300 * time.Millisecond, "tap", [][2]float64{{0.5, 0.5}}}, {time.Second, "swipe", [][2]float64{{0.5, 0.8}, {0.5, 0.2}}}}})
+		Touches: []Touch{{At: 300 * time.Millisecond, Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}, {At: time.Second, Kind: "swipe", Pts: [][2]float64{{0.5, 0.8}, {0.5, 0.2}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

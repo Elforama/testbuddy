@@ -143,6 +143,11 @@ func (r *Runner) noteTouch(kind string, w, h int, pts [][2]int) {
 	r.rec.touches = append(r.rec.touches, t)
 }
 
+// maxVideoEvents is the most events a video draws, the first ones: each change of its event log
+// is an image ffmpeg reads, and tens of thousands of them (a long run of a chatty app) would
+// take longer to draw than stopTimeout allows.
+const maxVideoEvents = 2000
+
 // AnnotateEvent is an event sent to tb while the flow ran (`tb mark`, the event endpoint):
 // its text, and when tb got it.
 type AnnotateEvent struct {
@@ -163,6 +168,10 @@ func (r *Runner) annotateVideo(v Video) {
 	}
 	if len(caps) == 0 && len(touches) == 0 && len(events) == 0 {
 		return
+	}
+	if n := len(events); n > maxVideoEvents {
+		events = events[:maxVideoEvents]
+		r.logLine(fmt.Sprintf("--annotate: %s shows its first %d events; %d more came while it recorded", filepath.Base(v.Path), maxVideoEvents, n-maxVideoEvents))
 	}
 	burn := r.annotateBurn
 	if burn == nil {

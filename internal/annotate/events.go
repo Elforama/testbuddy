@@ -175,6 +175,9 @@ func busiest(events []Event) int {
 }
 
 // logStates cuts the drawn video into stretches over which the band shows the same thing.
+// rows come in order of shown, and leave in that order too (one leaves when its time is over
+// or when the next pushes it out, the oldest first), so the rows up at a cut are a window of
+// them that only moves forward: a sweep, not a scan of every row at every cut.
 func logStates(rows []*eventRow, holds []hold) []logState {
 	var paused [][2]time.Duration // the holds, in the drawn video's time
 	var extra time.Duration
@@ -192,20 +195,25 @@ func logStates(rows []*eventRow, holds []hold) []logState {
 	}
 	sort.Slice(cuts, func(i, j int) bool { return cuts[i] < cuts[j] })
 	var states []logState
+	lo, hi, pi := 0, 0, 0
 	for i := 0; i+1 < len(cuts); i++ {
 		a, b := cuts[i], cuts[i+1]
 		if b <= a {
 			continue
 		}
-		s := logState{Start: a, End: b}
-		for _, r := range rows {
-			if r.shown <= a && a < r.gone {
-				s.Rows = append(s.Rows, *r)
-			}
+		for hi < len(rows) && rows[hi].shown <= a {
+			hi++
 		}
-		for _, p := range paused {
-			if p[0] <= a && a < p[1] {
-				s.Paused = true
+		for lo < hi && rows[lo].gone <= a {
+			lo++
+		}
+		for pi < len(paused) && paused[pi][1] <= a {
+			pi++
+		}
+		s := logState{Start: a, End: b, Paused: pi < len(paused) && paused[pi][0] <= a}
+		for _, r := range rows[lo:hi] {
+			if a < r.gone {
+				s.Rows = append(s.Rows, *r)
 			}
 		}
 		if len(s.Rows) == 0 && !s.Paused {

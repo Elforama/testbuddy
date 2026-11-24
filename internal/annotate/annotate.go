@@ -44,6 +44,9 @@ type Touch struct {
 	At   time.Duration
 	Kind string
 	Pts  [][2]float64
+	// Shown is how long the ring shows, when not its kind's usual time (touchShown): longer
+	// when a hold comes while it shows (heldNotes).
+	Shown time.Duration
 }
 
 // FFmpegPath finds ffmpeg: TB_FFMPEG, else the PATH. A variable so tests need no ffmpeg.
@@ -186,7 +189,9 @@ func heldNotes(caps []Caption, touches []Touch, holds []hold) ([]Caption, []Touc
 	}
 	var t2 []Touch
 	for _, t := range touches {
+		end := later(t.At+touchShown(t), holds)
 		t.At = later(t.At, holds)
+		t.Shown = end - t.At // through any hold while it shows
 		t2 = append(t2, t)
 	}
 	return c2, t2
@@ -369,13 +374,7 @@ func graph(f frame) string {
 func overlayAt(t Touch) string {
 	a := secs(t.At)
 	p0, p1 := t.Pts[0], t.Pts[len(t.Pts)-1]
-	shown := tapShown
-	switch t.Kind {
-	case "longPress":
-		shown = pressShown
-	case "swipe":
-		shown = swipeShown
-	}
+	shown := touchShown(t)
 	at := func(v0, v1 float64, size string) string {
 		if t.Kind != "swipe" || v0 == v1 {
 			return fmt.Sprintf("'%s*%s-%s/2'", num(v0), size, strings.ToLower(size))
@@ -384,6 +383,20 @@ func overlayAt(t Touch) string {
 		return fmt.Sprintf("'%s*(%s+(%s)*%s)-%s/2'", size, num(v0), num(v1-v0), k, strings.ToLower(size))
 	}
 	return fmt.Sprintf("x=%s:y=%s:enable='between(t,%s,%s)'", at(p0[0], p1[0], "W"), at(p0[1], p1[1], "H"), a, secs(t.At+shown))
+}
+
+// touchShown is how long t's ring shows: t.Shown, else its kind's time.
+func touchShown(t Touch) time.Duration {
+	if t.Shown > 0 {
+		return t.Shown
+	}
+	switch t.Kind {
+	case "longPress":
+		return pressShown
+	case "swipe":
+		return swipeShown
+	}
+	return tapShown
 }
 
 func secs(d time.Duration) string { return strconv.FormatFloat(d.Seconds(), 'f', 3, 64) }

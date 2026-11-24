@@ -76,6 +76,34 @@ func TestHandlerTakesABurst(t *testing.T) {
 	}
 }
 
+// A request's events keep their order and its one time, whichever devices they name (found in
+// review: they were grouped by device, each group stamped apart).
+func TestHandlerKeepsARequestsOrder(t *testing.T) {
+	h := NewHub()
+	n := 0
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { n++; return base.Add(time.Duration(n) * time.Millisecond) }
+	srv := httptest.NewServer(h.Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/event", "application/json",
+		strings.NewReader(`["cart_opened",{"text":"push_shown","device":"pixel"},"checkout"]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	got := h.Between(base, base.Add(time.Hour), "pixel")
+	var texts []string
+	for _, e := range got {
+		texts = append(texts, e.Text)
+		if !e.At.Equal(got[0].At) {
+			t.Errorf("%s at %s, not with the rest at %s", e.Text, e.At, got[0].At)
+		}
+	}
+	if strings.Join(texts, ",") != "cart_opened,push_shown,checkout" {
+		t.Errorf("order %v", texts)
+	}
+}
+
 // A page in Chrome asks first (CORS, and the private network check for a loopback address).
 func TestHandlerAnswersThePreflight(t *testing.T) {
 	srv := httptest.NewServer(NewHub().Handler())
@@ -186,5 +214,42 @@ func TestHubCutsLongText(t *testing.T) {
 	got := h.Between(time.Time{}, time.Now().Add(time.Minute))
 	if len(got) != 1 || len([]rune(got[0].Text)) != maxText || !strings.HasSuffix(got[0].Text, "…") {
 		t.Errorf("kept %d runes", len([]rune(got[0].Text)))
+	}
+}
+
+// A second run at once (on another port) leaves the first's address file alone, so tb mark
+// keeps reaching the first, and ending the second does not take it away (found in review).
+func TestServeLeavesALiveRunsAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(EnvURL, "")
+	a, err := Serve(NewHub(), 0, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := Serve(NewHub(), 0, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := Find("", dir); u != a.URL {
+		t.Errorf("tb mark finds %q, want the first run's %q", u, a.URL)
+	}
+	if !b.Shared {
+		t.Error("the second run does not know tb mark finds the first")
+	}
+	b.Close()
+	if u, _ := Find("", dir); u != a.URL {
+		t.Errorf("after the second ended, tb mark finds %q, want %q", u, a.URL)
+	}
+	a.Close()
+	// a file left by a run that died is taken over
+	os.WriteFile(AddrFile(dir), []byte("http://127.0.0.1:1/event\n"), 0o644)
+	c, err := Serve(NewHub(), 0, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if u, _ := Find("", dir); u != c.URL || c.Shared {
+		t.Errorf("tb mark finds %q, want the new run's %q", u, c.URL)
 	}
 }

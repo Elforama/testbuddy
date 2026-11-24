@@ -77,14 +77,24 @@ type Hub struct {
 // NewHub returns an empty hub.
 func NewHub() *Hub { return &Hub{now: time.Now} }
 
-// Add keeps events, stamped now, and returns how many it kept.
+// Add keeps texts as events for device, stamped now, and returns how many it kept.
 func (h *Hub) Add(device string, texts ...string) int {
+	evs := make([]Event, len(texts))
+	for i, t := range texts {
+		evs[i] = Event{Text: t, Device: device}
+	}
+	return h.AddEvents(evs)
+}
+
+// AddEvents keeps evs (their At is ignored) in their order, all stamped now as one burst, and
+// returns how many it kept: those with text, up to maxEvents, each cut to maxText runes.
+func (h *Hub) AddEvents(evs []Event) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	at := h.now()
 	n := 0
-	for _, t := range texts {
-		t = strings.TrimSpace(t)
+	for _, e := range evs {
+		t := strings.TrimSpace(e.Text)
 		if t == "" {
 			continue
 		}
@@ -95,7 +105,7 @@ func (h *Hub) Add(device string, texts ...string) int {
 			h.dropped++
 			continue
 		}
-		h.events = append(h.events, Event{At: at, Text: t, Device: device})
+		h.events = append(h.events, Event{At: at, Text: t, Device: e.Device})
 		n++
 	}
 	return n
@@ -171,23 +181,14 @@ func (h *Hub) Handler() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// stamp them all together, as they came: one burst
-		byDevice := map[string][]string{}
-		var order []string
-		for _, e := range evs {
-			d := e.Device
-			if d == "" {
-				d = r.URL.Query().Get("device")
+		// one burst: stamped together, in the order they came
+		dev := r.URL.Query().Get("device")
+		for i := range evs {
+			if evs[i].Device == "" {
+				evs[i].Device = dev
 			}
-			if _, ok := byDevice[d]; !ok {
-				order = append(order, d)
-			}
-			byDevice[d] = append(byDevice[d], e.Text)
 		}
-		n := 0
-		for _, d := range order {
-			n += h.Add(d, byDevice[d]...)
-		}
+		n := h.AddEvents(evs)
 		hd.Set("Content-Type", "application/json")
 		fmt.Fprintf(w, "{\"ok\":true,\"count\":%d}\n", n)
 	})
@@ -342,9 +343,12 @@ func value(v any) string {
 type Server struct {
 	URL  string // http://127.0.0.1:PORT/event
 	Port int
-	srv  *http.Server
-	ln   net.Listener
-	file string // the address file, removed at Close
+	// Shared says another run's endpoint was already in the address file and still answers:
+	// the file is left to it, so tb mark without --url sends there, not here.
+	Shared bool
+	srv    *http.Server
+	ln     net.Listener
+	file   string // the address file, removed at Close
 }
 
 // Serve serves h's endpoint on the loopback address at port (0: any free port), and writes its
@@ -359,11 +363,34 @@ func Serve(h *Hub, port int, dir string) (*Server, error) {
 		srv: &http.Server{Handler: h.Handler(), ReadHeaderTimeout: 10 * time.Second}}
 	go s.srv.Serve(ln)
 	if dir != "" {
-		s.file = AddrFile(dir)
-		os.MkdirAll(dir, 0o755)
-		os.WriteFile(s.file, []byte(s.URL+"\n"), 0o644)
+		if b, err := os.ReadFile(AddrFile(dir)); err == nil && answers(strings.TrimSpace(string(b))) {
+			s.Shared = true // another run is taking events: its file stays
+		} else {
+			s.file = AddrFile(dir)
+			os.MkdirAll(dir, 0o755)
+			os.WriteFile(s.file, []byte(s.URL+"\n"), 0o644)
+		}
 	}
 	return s, nil
+}
+
+// answers says an endpoint is taking events at u: a run still going, not a file left by one
+// that died.
+func answers(u string) bool {
+	if u == "" {
+		return false
+	}
+	c := http.Client{Timeout: 500 * time.Millisecond}
+	req, err := http.NewRequest(http.MethodOptions, u, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusNoContent && resp.Header.Get("Access-Control-Allow-Private-Network") == "true"
 }
 
 // Close stops the endpoint and removes its address file (when it is still this server's).
