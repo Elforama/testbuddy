@@ -433,6 +433,10 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 		device.Info
 		Session string `json:"session,omitempty"`
 		Open    bool   `json:"open"`
+		// InUse: another tb process holds the device (a tb test run, another daemon's
+		// session), read from its lock (issue #398). Free: no tb holds it.
+		InUse *devlock.Owner `json:"in_use,omitempty"`
+		Free  bool           `json:"free"`
 	}
 	var out []jdev
 	for _, d := range all {
@@ -445,6 +449,15 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 				line += "  session: " + name
 			} else {
 				line += "  connected"
+			}
+		} else if d.Platform != device.Web && !devlock.Disabled() {
+			// browsers are not locked (each run starts its own); with locking off, tb cannot tell
+			if o, held := devlock.Probe(d.Serial); held {
+				jd.InUse = &o
+				line += "  in use: " + o.String()
+			} else {
+				jd.Free = true
+				line += "  free"
 			}
 		}
 		out = append(out, jd)

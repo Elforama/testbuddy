@@ -161,6 +161,25 @@ func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Loc
 
 // Holder reads who holds (or last held) a device's lock. Only meaningful when TryAcquire
 // just failed: a released lock's file keeps its last owner.
+// Probe reports, without taking the device, whether another tb process holds it, and who
+// (issue #398: tb devices shows it). It checks with a shared lock held for an instant, which a
+// tb taking the device at that instant may find taken: it is refused, as for any holder, and
+// says so. Unlocked (TB_NO_DEVICE_LOCK), every device is free.
+func Probe(serial string) (Owner, bool) {
+	if Disabled() {
+		return Owner{}, false
+	}
+	f, err := os.Open(path(serial))
+	if err != nil {
+		return Owner{}, false // never locked
+	}
+	defer f.Close()
+	if held, err := heldElsewhere(f); err != nil || !held {
+		return Owner{}, false
+	}
+	return Holder(serial), true
+}
+
 func Holder(serial string) Owner {
 	b, err := os.ReadFile(path(serial))
 	if err != nil {

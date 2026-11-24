@@ -184,3 +184,37 @@ func TestPathAndDir(t *testing.T) {
 		t.Error("unnamed owner")
 	}
 }
+
+// issue #398: Probe says whether another holds a device, and who, without taking it.
+func TestProbe(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	if _, held := Probe("emulator-5554"); held {
+		t.Error("a device never locked is held")
+	}
+	l, err := TryAcquire("emulator-5554", "tb test flows/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o, held := Probe("emulator-5554"); !held || o.What != "tb test flows/" {
+		t.Errorf("held: %+v %v", o, held)
+	}
+	// Probing does not take it: the holder keeps it, and nobody else gets it.
+	if _, err := TryAcquire("emulator-5554", "tb test"); err == nil {
+		t.Error("the device was free after a probe")
+	}
+	l.Release()
+	if _, held := Probe("emulator-5554"); held {
+		t.Error("released, still held")
+	}
+	// Probing leaves it free for the next one.
+	l2, err := TryAcquire("emulator-5554", "tb test")
+	if err != nil {
+		t.Errorf("after probes: %v", err)
+	}
+	l2.Release()
+	t.Setenv("TB_NO_DEVICE_LOCK", "1")
+	if _, held := Probe("emulator-5554"); held {
+		t.Error("locking off: held")
+	}
+}
