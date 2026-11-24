@@ -70,8 +70,8 @@ func TestCmdReleasePaths(t *testing.T) {
 }
 
 // issue #184: `tb release -p ios` sends the platform with its `close all`, so the daemon
-// closes only the iOS sessions. Without -p it closes them all, as before; forced, every agent's
-// (issue #399: tb close all alone leaves other owners' sessions).
+// closes only the iOS sessions. Without -p it closes them all, as before: the caller's, and with
+// --force every agent's (issue #399).
 func TestReleaseSendsThePlatformToClose(t *testing.T) {
 	f := startFakeDaemon(t)
 	old := listDevices
@@ -81,9 +81,10 @@ func TestReleaseSendsThePlatformToClose(t *testing.T) {
 		argv []string
 		want map[string]any
 	}{
-		{[]string{"-p", "ios"}, map[string]any{"device": "all", "platform": "ios", "force": true}},
-		{nil, map[string]any{"device": "all", "platform": "", "force": true}},
-		{[]string{"-d", "Pixel 7", "-p", "android"}, map[string]any{"device": "Pixel 7", "platform": "android", "force": true}},
+		{[]string{"-p", "ios"}, map[string]any{"device": "all", "platform": "ios"}},
+		{nil, map[string]any{"device": "all", "platform": ""}},
+		{[]string{"-d", "Pixel 7", "-p", "android"}, map[string]any{"device": "Pixel 7", "platform": "android"}},
+		{[]string{"--force"}, map[string]any{"device": "all", "platform": "", "force": true}},
 	} {
 		capture(t, func() { cmdRelease(c.argv) })
 		cmd, args, _ := f.last(t)

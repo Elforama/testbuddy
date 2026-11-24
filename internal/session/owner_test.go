@@ -143,3 +143,47 @@ func TestYieldOnlyToTheSameOwner(t *testing.T) {
 		t.Errorf("its owner: %+v", y)
 	}
 }
+
+// Review of issue #399: a session whose connection dropped (its device lent to its owner's tb
+// test) stays its owner's: another owner cannot take the device over by serial or with no -d,
+// close it by the device's name, or open a session under its name; tb open -d alice says it is
+// another agent's; tb close -d X --force closes one foreign session.
+func TestDroppedSessionStaysItsOwners(t *testing.T) {
+	t.Setenv("TB_HOME", t.TempDir())
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	adbLists(t, "emulator-5750 sdk_gphone64_arm64", "emulator-5752 sdk_gphone64_arm64")
+	s := New()
+	s.openDrv = func(_ context.Context, info device.Info) (driver.Driver, error) {
+		f := newFake(info.Serial, info.Name, info.Platform)
+		f.show(loginScreen()...)
+		return f, nil
+	}
+	defer s.CloseAll(context.Background())
+	if r, _ := call(t, s.open, map[string]any{"device": "emulator-5750", "name": "alice", "owner": "a1"}, ""); !r.OK {
+		t.Fatalf("open: %q", r.Text)
+	}
+	args, _ := json.Marshal(YieldArgs{Serial: "emulator-5750", Owner: "a1"})
+	s.yield(context.Background(), daemon.Request{Args: args}, nil) // lent to a1's tb test, which ended
+	refused := "of another agent: use another device"
+	for _, c := range []struct {
+		name string
+		h    handler
+		args map[string]any
+	}{
+		{"look by serial", s.look, map[string]any{"device": "emulator-5750", "owner": "a2"}},
+		{"close by the device's name", s.close, map[string]any{"device": "sdk gphone64 arm64", "owner": "a2"}},
+		{"open under its name", s.open, map[string]any{"device": "emulator-5752", "name": "alice", "owner": "a2"}},
+		{"open -d alice", s.open, map[string]any{"device": "alice", "owner": "a2"}},
+	} {
+		if r, _ := call(t, c.h, c.args, ""); r.OK || !strings.Contains(r.Text, refused) {
+			t.Errorf("a2, %s: %q", c.name, r.Text)
+		}
+	}
+	if r, _ := call(t, s.look, map[string]any{"device": "alice", "owner": "a1"}, ""); !r.OK {
+		t.Errorf("a1 comes back by name: %q", r.Text)
+	}
+	if r, _ := call(t, s.close, map[string]any{"device": "alice", "owner": "a2", "force": true}, ""); !r.OK || !strings.Contains(r.Text, "closed alice") {
+		t.Errorf("tb close -d alice --force: %q", r.Text)
+	}
+}

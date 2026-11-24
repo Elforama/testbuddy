@@ -240,7 +240,7 @@ func (s *Service) openDev(a devArgs) (*Dev, error) {
 	if a.Device != "" {
 		for _, d := range s.devs {
 			if d.matches(a) {
-				if d.foreign(a.Owner) {
+				if a.denies(d) {
 					return nil, errForeign(d)
 				}
 				return d, nil
@@ -291,7 +291,7 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 	name, want := "", a.Device
 	if serial, ok := s.names[a.Device]; ok {
 		name, want = a.Device, serial
-		if d := s.dropped[serial]; d != nil && d.Name == name && d.foreign(a.Owner) {
+		if d := s.dropped[serial]; d != nil && d.Name == name && a.denies(d) {
 			err := errForeign(d)
 			s.mu.Unlock()
 			return nil, err
@@ -317,13 +317,21 @@ func (d *Dev) label() string {
 // with none, is not let in. A session opened with no owner is anyone's, as before.
 func (d *Dev) foreign(owner string) bool { return d.owner != "" && d.owner != owner }
 
+// foreignError is the refusal for a session of another owner.
+type foreignError struct{ msg string }
+
+func (e *foreignError) Error() string { return e.msg }
+
 // errForeign is the refusal for a session of another owner; the caller holds s.mu.
 func errForeign(d *Dev) error {
 	if d.Name != "" {
-		return fmt.Errorf("%s is session %q of another agent: use another device", d.Info.Serial, d.Name)
+		return &foreignError{fmt.Sprintf("%s is session %q of another agent: use another device", d.Info.Serial, d.Name)}
 	}
-	return fmt.Errorf("%s is session %q of another agent: use another device", d.Info.Serial, d.Info.Serial)
+	return &foreignError{fmt.Sprintf("%s has a session of another agent: use another device", d.Info.Serial)}
 }
+
+// denies: a refuses the caller on session d (another owner's), unless forced (tb close -f).
+func (a devArgs) denies(d *Dev) bool { return d.foreign(a.Owner) && !a.Force }
 
 // labelOf is label for a caller that does not hold s.mu.
 func (s *Service) labelOf(d *Dev) string {
@@ -341,6 +349,22 @@ func (s *Service) nameOf(d *Dev) string {
 
 func (s *Service) connect(ctx context.Context, info device.Info, name, owner string) (*Dev, error) {
 	s.mu.Lock()
+	if d := s.dropped[info.Serial]; d != nil && d.foreign(owner) {
+		// another owner's session whose connection dropped (its device lent to that owner's
+		// tb test): it reconnects by its name; nobody else takes the device over meanwhile
+		err := errForeign(d)
+		s.mu.Unlock()
+		return nil, err
+	}
+	if name != "" {
+		if serial, ok := s.names[name]; ok {
+			if d := s.dropped[serial]; d != nil && d.Name == name && d.foreign(owner) {
+				err := errForeign(d) // the name is another owner's dropped session's
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
+	}
 	if d, ok := s.devs[info.Serial]; ok {
 		if d.foreign(owner) {
 			err := errForeign(d)
@@ -524,6 +548,10 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		if d, err2 := s.resolve(ctx, a.devArgs); err2 == nil {
 			info = d.Info
 		} else {
+			var fe *foreignError
+			if errors.As(err2, &fe) {
+				return fail(2, "%v", err2) // another owner's session: say so (issue #399)
+			}
 			return fail(2, "%v", err)
 		}
 	}
@@ -583,7 +611,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		left := 0                    // another owner's sessions, not closed (issue #399)
 		for _, m := range []map[string]*Dev{s.devs, s.dropped} {
 			for _, d := range onPlatform(m, a.Platform) {
-				if d.foreign(a.Owner) && !a.Force {
+				if a.denies(d) {
 					left++
 					continue
 				}
@@ -659,6 +687,11 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		// A device named by its name: the session that dropped on its current serial, if any.
 		s.mu.Lock()
 		d = s.dropped[info.Serial]
+		if d != nil && a.denies(d) {
+			err := errForeign(d)
+			s.mu.Unlock()
+			return fail(2, "%v", err)
+		}
 		s.mu.Unlock()
 		if d == nil {
 			return daemon.Response{OK: true, Text: fmt.Sprintf("no tb session is open on %s %s: nothing to close\n", info.Name, info.Serial)}
@@ -775,7 +808,7 @@ func (s *Service) droppedDev(a devArgs) (*Dev, error) {
 	if d == nil || (a.Platform != "" && a.Platform != string(d.Info.Platform)) {
 		return nil, nil
 	}
-	if d.foreign(a.Owner) {
+	if a.denies(d) {
 		return nil, errForeign(d)
 	}
 	return d, nil

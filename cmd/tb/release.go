@@ -18,7 +18,8 @@ import (
 // with --keep-agents, an open session, or a crashed run leaves behind. A device another tb is
 // using (a run, a session in another daemon) is left alone.
 func cmdRelease(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
+		flagSpec{[]string{"force"}, boolFlag})
 	if err == nil {
 		// `tb release emulator-5700` is `-d emulator-5700`, never every device (issue #249).
 		err = a.devicePos()
@@ -44,9 +45,13 @@ func cmdRelease(argv []string) int {
 	// platform's sessions (issue #184).
 	closeCode := 0
 	if daemon.Running() {
-		// every agent's sessions on the devices freed (issue #399: tb close all alone leaves
-		// other owners')
-		closeCode = agentCall("close", []string{"-d", which, "-p", platform, "--force"}, []flagSpec{{[]string{"force"}, boolFlag}})
+		// the caller's sessions; other agents' (TB_SESSION_OWNER) only with --force (issue #399):
+		// their devices stay held, and are left alone below
+		closeArgs := []string{"-d", which, "-p", platform}
+		if a.flag("force") {
+			closeArgs = append(closeArgs, "--force")
+		}
+		closeCode = agentCall("close", closeArgs, []flagSpec{{[]string{"force"}, boolFlag}})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

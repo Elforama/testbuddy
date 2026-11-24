@@ -274,7 +274,7 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 	var structured json.RawMessage
 	switch name {
 	case "devices":
-		resp = call("devices", nil)
+		resp = call("devices", map[string]any{})
 	case "open":
 		headless, _ := args["headless"].(bool)
 		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": str("platform")}

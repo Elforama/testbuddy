@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 )
 
@@ -55,5 +56,16 @@ func TestTBSessionOwnerIsSent(t *testing.T) {
 	agentCall("look", nil, nil)
 	if _, args, _ := f.last(t); args["owner"] != nil {
 		t.Errorf("no owner: %v", args)
+	}
+}
+
+// Review of issue #399: the MCP devices tool sends the owner too, so an agent's own sessions are
+// not marked as another agent's.
+func TestMCPDevicesSendsTheOwner(t *testing.T) {
+	f := startFakeDaemon(t)
+	t.Setenv("TB_SESSION_OWNER", "agent-1")
+	mcpCall(context.Background(), "devices", map[string]any{})
+	if cmd, args, _ := f.last(t); cmd != "devices" || args["owner"] != "agent-1" {
+		t.Errorf("mcp devices: %s %v", cmd, args)
 	}
 }
