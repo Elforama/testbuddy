@@ -26,8 +26,8 @@ happens and what to do.
   test flows/ (pid 4242, since 10:31:07, in /path)`. Use another device (with several
   connected, `tb test` picks a free one), or wait (`tb test --wait-for-device 5m`). Your own
   session (the same daemon, `TB_HOME`) gives its device to your `tb test` / `tb replay` run when
-  no command is running in it, and the next `tb look` or `tb do` opens it again: no `tb close`
-  needed in between. Locks die with their process. Browsers are not locked.
+  no command is running in it (`tb do`, `tb watch`), and the next `tb look` or `tb do` opens it
+  again: no `tb close` needed in between. Locks die with their process. Browsers are not locked.
   `TB_NO_DEVICE_LOCK=1` turns locking off.
 - In one daemon, a device open as session "a" is not opened again under another name: use
   `-d a`, or close it first.

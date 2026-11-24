@@ -29,6 +29,12 @@ func TestReclaimAsksTheOwnDaemon(t *testing.T) {
 		t.Errorf("busy: %+v", r)
 	}
 
+	// A daemon that cannot answer it (an older build has no yield): could not be asked.
+	f.answer("yield", daemon.Response{Exit: 2, Text: "unknown command yield"})
+	if r := reclaimFromOwnSession(context.Background(), "emulator-5750"); r != (orchestrate.Reclaimed{Unknown: true}) {
+		t.Errorf("a daemon that cannot answer: %+v", r)
+	}
+
 	t.Setenv("TB_HOME", t.TempDir()) // no daemon there
 	if r := reclaimFromOwnSession(context.Background(), "emulator-5750"); r != (orchestrate.Reclaimed{}) {
 		t.Errorf("no daemon: %+v", r)

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/connect"
@@ -56,6 +57,9 @@ type Dev struct {
 	// dialogMark: the JavaScript dialogs tb answered up to this mark (driver.DialogLog) were
 	// printed by do or look already (dialogNotes); guarded by mu
 	dialogMark int
+	// watching counts the tb watch commands on the device: a watch holds mu only while it
+	// reads the screen, so it is running between reads too (yield, issue #395)
+	watching atomic.Int32
 
 	// steps is written only with both mu and stepsMu held (by do and clear), so it can
 	// be read with either: tb log takes stepsMu alone and answers at once, even during a
@@ -632,9 +636,12 @@ type Yielded struct {
 // yield gives the device a session of this daemon holds to a `tb test` or `tb replay` run of
 // the same caller (issue #395): look at a device, write a flow, run it is how an agent works,
 // and the session it looked with would otherwise refuse the run. Only a session with no
-// command running gives its device up; its connection closes (tb's agent stays on the device
-// for the run) and its name is kept, so the next tb look or tb do on it opens it again. A
-// device this daemon holds no session on is not its to give: Yielded is false, Busy too.
+// command running (tb do, tb watch, ...) gives its device up; its connection closes (tb's
+// agent stays on the device for the run) and it is kept as a session whose connection
+// dropped: its name stays, so the next tb look or tb do on it opens it again, and tb close -d
+// still stops tb's agent. A session still closing (its connection dropped under a command)
+// holds the device too, busy. A device this daemon holds no session on is not its to give:
+// Yielded is false, Busy too.
 func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[YieldArgs](req)
 	if err != nil {
@@ -646,18 +653,29 @@ func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	s.mu.Lock()
 	d := s.devs[a.Serial]
+	if d == nil {
+		if c := s.closing[a.Serial]; c != nil {
+			label := c.label()
+			s.mu.Unlock()
+			return answer(Yielded{Busy: true, Label: label})
+		}
+	}
 	s.mu.Unlock()
 	if d == nil {
 		return answer(Yielded{})
 	}
-	if !d.mu.TryLock() {
+	if d.watching.Load() > 0 || !d.mu.TryLock() {
 		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
 	}
 	defer d.mu.Unlock()
+	if d.watching.Load() > 0 { // a watch that started as the lock was taken
+		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
+	}
 	s.mu.Lock()
 	label := d.label()
 	if s.devs[a.Serial] == d {
 		delete(s.devs, a.Serial)
+		s.dropped[a.Serial] = d
 	}
 	s.mu.Unlock()
 	d.shut(false)

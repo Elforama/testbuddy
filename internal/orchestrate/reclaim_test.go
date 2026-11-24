@@ -97,3 +97,92 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 		t.Errorf("asked another daemon's session %d times, want once", calls)
 	}
 }
+
+// Review of issue #395: only as many of the caller's sessions are taken back as the run needs,
+// and none for a job that still could not start. A daemon that could not be asked (an older
+// build, no answer) is not said to be another agent's.
+func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	hold := func(serial, what string) *devlock.Lock {
+		t.Helper()
+		l, err := devlock.TryAcquire(serial, what)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	schedule := func(pool *Pool, j *Job) Result {
+		t.Helper()
+		var res []Result
+		within(t, 10*time.Second, func() {
+			res = Schedule(context.Background(), pool, []*Job{j}, 0, 0, false, newRecorder(t).hooks())
+		})
+		pool.Close()
+		return res[0]
+	}
+
+	// Two idle sessions fit a flow with no device named: one is taken back, not both.
+	la, lb := hold("a", `tb session "a" (tb open/do/look)`), hold("b", `tb session "b" (tb open/do/look)`)
+	pool := poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	var asked []string
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		map[string]*devlock.Lock{"a": la, "b": lb}[serial].Release()
+		return Reclaimed{OK: true}
+	}
+	if r := schedule(pool, job(typingFlow(t, "f1"))); r.Status != engine.Passed || len(asked) != 1 {
+		t.Errorf("two sessions, one needed: %s, asked %v (%v)", r.Status, asked, r.Err)
+	}
+	la.Release()
+	lb.Release()
+
+	// A free device fits: no session is asked.
+	la = hold("a", `tb session "a" (tb open/do/look)`)
+	pool = poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	asked = nil
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		return Reclaimed{OK: true}
+	}
+	if r := schedule(pool, job(typingFlow(t, "f2"))); r.Status != engine.Passed || len(asked) != 0 {
+		t.Errorf("a free device: %s, asked %v", r.Status, asked)
+	}
+
+	// Two roles: alice fits only the caller's session, bob only a device another run holds.
+	// The job cannot start, so the session is left alone.
+	lb = hold("b", "tb test other/")
+	pool = poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	asked = nil
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		return Reclaimed{OK: true}
+	}
+	j := job(typingFlow(t, "f3"))
+	j.Needs = []Need{{Role: "alice", Device: "a"}, {Role: "bob", Device: "b"}}
+	if r := schedule(pool, j); r.Status != engine.Failed || len(asked) != 0 {
+		t.Errorf("a job that still could not start: %s, asked %v", r.Status, asked)
+	}
+	lb.Release()
+
+	// The caller's daemon could not be asked: the old message, not "another daemon's".
+	pool = poolOf(newFake("a", "A", "android"))
+	pool.Reclaim = func(context.Context, string) Reclaimed { return Reclaimed{Unknown: true} }
+	j = job(typingFlow(t, "f4"))
+	j.Needs = []Need{{Device: "a"}}
+	r := schedule(pool, j)
+	if e := fmt.Sprint(r.Err); r.Status != engine.Failed || strings.Contains(e, "another tb daemon") || !strings.Contains(e, "if that session is yours, close it: tb close -d a") {
+		t.Errorf("a daemon that could not be asked: %s %v", r.Status, r.Err)
+	}
+
+	// A session that opens again at once (a tb look alongside) is not asked over and over.
+	pool = poolOf(newFake("a", "A", "android"))
+	calls := 0
+	pool.Reclaim = func(context.Context, string) Reclaimed { calls++; return Reclaimed{OK: true} } // but la stays held
+	j = job(typingFlow(t, "f5"))
+	j.Needs = []Need{{Device: "a"}}
+	if r := schedule(pool, j); r.Status != engine.Failed || calls != maxReclaims {
+		t.Errorf("a session that comes back: %s, asked %d times, want %d", r.Status, calls, maxReclaims)
+	}
+	la.Release()
+}
