@@ -35,6 +35,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   -p, --platform android|ios|web  run on this platform only
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
+                             (TB_DEVICE is the default --device of a run of one device at a time)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
@@ -142,9 +143,17 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 	// --device takes devices (a,b) and role pins for multi-device flows (alice="iPhone 17").
+	// TB_DEVICE stands for --device in a run of one device at a time (no -p, no sharding, no
+	// multi-device flow): whoever starts an agent pins it to its device once (issue #397).
+	deviceArgs := a.list("device")
+	if len(deviceArgs) == 0 && platform == "" && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan) {
+		if d := strings.TrimSpace(os.Getenv("TB_DEVICE")); d != "" {
+			deviceArgs = []string{d}
+		}
+	}
 	rolePins := map[string]string{} // role -> serial
 	var want []string
-	for _, w := range a.list("device") {
+	for _, w := range deviceArgs {
 		if role, dev, ok := strings.Cut(w, "="); ok && role != "" {
 			d, err := device.Pick(devs, "", strings.Trim(dev, `"'`))
 			if err != nil {
@@ -225,6 +234,9 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		parallel = shardSplit
 	}
 	_ = multi
+	// No device named and several phones or simulators could run the flows: the run says which
+	// it took, and why not the others, before its first flow there (issue #397).
+	chosenForYou := len(deviceArgs) == 0 && parallel == 1 && !multi && phones(devs) > 1
 	if a.flag("continuous") {
 		fmt.Fprintln(os.Stderr, "note: --continuous is not supported yet; running once")
 	}
@@ -316,6 +328,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		shardOf[d.Serial] = i + 1
 	}
 
+	announced := "" // the device chosenForYou last named
 	var pagesMu sync.Mutex
 	pages := map[*orchestrate.Job]string{} // each attempt's timeline page
 	logs := newFlowLogs()
@@ -355,7 +368,15 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
-			con.flowStart(j, orchestrate.DeviceLabel(ds))
+			label := orchestrate.DeviceLabel(ds)
+			if d, ok := ds[""]; ok && len(ds) == 1 && chosenForYou && d.Platform != device.Web {
+				label = d.Name + " (" + d.Serial + ")"
+				if d.Serial != announced {
+					announced = d.Serial
+					con.printf("%s\n", deviceChoiceNote(d, pool.PassedOver(d.Serial)))
+				}
+			}
+			con.flowStart(j, label)
 		},
 		Failure: func(r orchestrate.Result, drivers map[string]driver.Driver, notes map[string]string) {
 			// read while the attempt still holds its devices, from a device opened again if
@@ -970,3 +991,34 @@ func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Recla
 
 // reclaimWait bounds asking the caller's daemon for a device (closing a session's connection).
 const reclaimWait = 15 * time.Second
+
+// hasMultiDeviceFlow: a flow of the plan has device roles (alice, bob).
+func hasMultiDeviceFlow(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if len(f.Config.Devices) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// phones counts the phones and simulators among devs (browsers are made on demand).
+func phones(devs []device.Info) int {
+	n := 0
+	for _, d := range devs {
+		if d.Platform != device.Web {
+			n++
+		}
+	}
+	return n
+}
+
+// deviceChoiceNote says which device a run that named none took, and why not the others
+// (issue #397).
+func deviceChoiceNote(d device.Info, passed []string) string {
+	s := fmt.Sprintf("note: no device named, so this run uses %s (%s)", d.Name, d.Serial)
+	if len(passed) > 0 {
+		s += "; not " + strings.Join(passed, ", not ")
+	}
+	return s + ". Pin one with --device or TB_DEVICE."
+}

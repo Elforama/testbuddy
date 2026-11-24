@@ -180,6 +180,35 @@ func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
 	return fmt.Sprintf("%s (%s) is in use by %s (if that session is yours, close it: tb close -d %s)", d.Name, d.Serial, o, d.Serial)
 }
 
+// PassedOver says, for a run that named no device, why each other phone or simulator in the
+// pool is not the one chosen (issue #397): "emulator-5594 (in use by tb session "alice" ...)",
+// "emulator-5750 (not tried: an earlier one fit)". Browsers are left out: they are made on
+// demand.
+func (p *Pool) PassedOver(chosen string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, d := range p.devices {
+		if d.Serial == chosen || d.Platform == device.Web {
+			continue
+		}
+		why := "not tried: an earlier one fit"
+		switch o, held := p.held[d.Serial]; {
+		case held && p.locks[d.Serial] == nil:
+			why = "in use by " + o.String()
+			if a, ok := p.asked[d.Serial]; ok && a.owner == o.PID && a.Busy {
+				why = "held by your own tb session " + a.Label + ", busy"
+			}
+		case p.lost[d.Serial] != nil:
+			why = "its connection was lost"
+		case p.busy[d.Serial]:
+			why = "running another flow of this run"
+		}
+		out = append(out, d.Serial+" ("+why+")")
+	}
+	return out
+}
+
 // isSession: o is a tb look / tb do / tb open session's daemon.
 func isSession(o devlock.Owner) bool { return strings.HasPrefix(o.What, "tb session") }
 
