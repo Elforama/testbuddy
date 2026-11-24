@@ -67,9 +67,35 @@ func TestDevicesShowsWhoHoldsEachDevice(t *testing.T) {
 				t.Errorf("json, free: %v", d)
 			}
 		case "emulator-5594":
-			if d["free"] != false || d["session"] != "mine" {
+			if _, has := d["free"]; has || d["session"] != "mine" {
 				t.Errorf("json, own session: %v", d)
 			}
 		}
+	}
+}
+
+// Review of issue #398: this daemon's own session still closing (its connection dropped under a
+// command) holds its device: marked so, not "in use" by another tb; with locking off tb cannot
+// tell, and marks nothing (no "free" in --json either).
+func TestDevicesClosingAndUnknown(t *testing.T) {
+	t.Setenv("TB_HOME", t.TempDir())
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	adbLists(t, "emulator-5594 sdk_gphone64_arm64", "emulator-5750 sdk_gphone64_arm64")
+	l, err := devlock.TryAcquire("emulator-5594", `tb session "x" (tb open/do/look)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
+	s := New()
+	s.closing["emulator-5594"] = &Dev{Info: device.Info{Serial: "emulator-5594"}}
+	r, _ := call(t, s.devices, map[string]any{}, "")
+	if !strings.Contains(r.Text, "emulator-5594 \"sdk gphone64 arm64\" (emulator)  closing (this daemon's session") || strings.Contains(r.Text, "in use") {
+		t.Errorf("closing:\n%s", r.Text)
+	}
+	t.Setenv("TB_NO_DEVICE_LOCK", "1")
+	r, _ = call(t, New().devices, map[string]any{}, "")
+	if strings.Contains(r.Text, "free") || strings.Contains(r.Text, "in use") || strings.Contains(string(r.JSON), `"free"`) {
+		t.Errorf("locking off:\n%s\n%s", r.Text, r.JSON)
 	}
 }

@@ -22,7 +22,8 @@ command overview.
 ## First steps
 
 Use `tb devices` to discover a running Android device or emulator, booted iOS simulator,
-or Chrome. Choose the intended device explicitly when several are available.
+or Chrome, and which are free or in use (by whom). Choose the intended device explicitly when
+several are available.
 
 ## Write a good flow
 
