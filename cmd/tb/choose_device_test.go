@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/elforama/testbuddy/internal/connect"
+	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/orchestrate"
+	"github.com/elforama/testbuddy/internal/session"
 )
 
 // withFakePhones makes tb see two Android emulators of the same name, each served by its own
@@ -91,5 +95,78 @@ func TestCmdTestUsesTBDevice(t *testing.T) {
 	}
 	if strings.Contains(out+errOut, "no device named") {
 		t.Errorf("a pinned run says it chose:\n%s", out+errOut)
+	}
+}
+
+// Review of issue #397: TB_DEVICE set to a session's name (which tb test cannot see) or to a
+// device that is gone does not break the run: it says so and chooses, saying which.
+func TestCmdTestTBDeviceThatNamesNoDevice(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	t.Setenv("TB_HOME", t.TempDir())
+	t.Setenv("TB_DEVICE", "alice")
+	withFakePhones(t)
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
+	var code int
+	out, errOut := capture(t, func() {
+		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+	})
+	all := out + errOut
+	if code != 0 || !strings.Contains(all, "TB_DEVICE=alice names no connected device") || !strings.Contains(all, "no device named, so this run uses") {
+		t.Errorf("exit %d:\n%s", code, all)
+	}
+}
+
+// Review of issue #397: a device that cannot run the flow (no app) is named for that, never "not
+// tried"; with only one device that can run it, the run had no choice and says nothing.
+func TestCmdTestNoteOnlyWhenThereWasAChoice(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	t.Setenv("TB_HOME", t.TempDir())
+	t.Setenv("TB_DEVICE", "")
+	withFakePhones(t)
+	old := orchestrate.AppInstalled
+	orchestrate.AppInstalled = func(_ context.Context, d device.Info, app string) bool { return d.Serial == "emulator-5750" }
+	t.Cleanup(func() { orchestrate.AppInstalled = old })
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
+	var code int
+	out, errOut := capture(t, func() {
+		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+	})
+	all := out + errOut
+	if code != 0 || strings.Contains(all, "no device named") || strings.Contains(all, "not tried") {
+		t.Errorf("one device with the app: exit %d:\n%s", code, all)
+	}
+}
+
+// Review of issue #397: TB_DEVICE's device, held by the caller's own idle session, is taken back
+// for the run rather than the run going to another free device.
+func TestCmdTestTBDeviceTakesBackTheOwnSession(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	t.Setenv("TB_DEVICE", "emulator-5594")
+	apps := withFakePhones(t)
+	l, err := devlock.TryAcquire("emulator-5594", `tb session "alice" (tb open/do/look)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := startFakeDaemon(t) // the caller's own daemon
+	f.hook = func(ctx context.Context, cmd string) {
+		if cmd == "yield" {
+			l.Release()
+		}
+	}
+	b, _ := json.Marshal(session.Yielded{Yielded: true, Label: "alice (sdk gphone64 arm64)"})
+	f.answer("yield", daemon.Response{OK: true, JSON: b})
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
+	var code int
+	out, errOut := capture(t, func() {
+		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+	})
+	if code != 0 || len(apps["emulator-5594"].launched) != 1 || len(apps["emulator-5750"].launched) != 0 {
+		t.Errorf("exit %d, on 5594 %v, on 5750 %v:\n%s", code, apps["emulator-5594"].launched, apps["emulator-5750"].launched, out+errOut)
 	}
 }

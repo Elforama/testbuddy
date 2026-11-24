@@ -35,7 +35,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   -p, --platform android|ios|web  run on this platform only
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
-                             (TB_DEVICE is the default --device of a run of one device at a time)
+                             (TB_DEVICE: the device a run of one device at a time tries first)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
@@ -143,12 +143,19 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 	// --device takes devices (a,b) and role pins for multi-device flows (alice="iPhone 17").
-	// TB_DEVICE stands for --device in a run of one device at a time (no -p, no sharding, no
-	// multi-device flow): whoever starts an agent pins it to its device once (issue #397).
 	deviceArgs := a.list("device")
-	if len(deviceArgs) == 0 && platform == "" && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan) {
-		if d := strings.TrimSpace(os.Getenv("TB_DEVICE")); d != "" {
-			deviceArgs = []string{d}
+	// No device named, one device at a time (no -p, no sharding, no multi-device flow): the
+	// run may choose, and says so (chosenForYou, below). TB_DEVICE, when it names a connected
+	// device, is the one it tries first: a flow that device cannot run (another platform, no
+	// app) still goes to another (issue #397).
+	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
+	preferred := ""
+	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
+		if d, err := device.Pick(devs, "", env); err == nil {
+			preferred = d.Serial
+			devs = preferFirst(devs, d.Serial)
+		} else if !a.flag("quiet") && !a.flag("json") {
+			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
 		}
 	}
 	rolePins := map[string]string{} // role -> serial
@@ -236,7 +243,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	_ = multi
 	// No device named and several phones or simulators could run the flows: the run says which
 	// it took, and why not the others, before its first flow there (issue #397).
-	chosenForYou := len(deviceArgs) == 0 && parallel == 1 && !multi && phones(devs) > 1
+	chosenForYou := single && parallel == 1 && phones(devs) > 1
 	if a.flag("continuous") {
 		fmt.Fprintln(os.Stderr, "note: --continuous is not supported yet; running once")
 	}
@@ -309,6 +316,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	pool.KeepAgents = a.flag("keep-agents")
 	pool.Reclaim = reclaimFromOwnSession
+	pool.Prefer = preferred
 	if w := a.str("wait-for-device"); w != "" {
 		d, err := parseWait(w)
 		if err != nil {
@@ -369,11 +377,15 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			label := orchestrate.DeviceLabel(ds)
-			if d, ok := ds[""]; ok && len(ds) == 1 && chosenForYou && d.Platform != device.Web {
-				label = d.Name + " (" + d.Serial + ")"
-				if d.Serial != announced {
+			// chosenForYou runs one flow at a time (parallel 1): announced needs no lock.
+			if d, ok := ds[""]; ok && len(ds) == 1 && chosenForYou && d.Platform != device.Web && len(j.Needs) == 1 {
+				passed, others := pool.PassedOver(j.Needs[0], d.Serial)
+				if others > 0 || d.Serial == preferred {
+					label = d.Name + " (" + d.Serial + ")"
+				}
+				if others > 0 && d.Serial != preferred && d.Serial != announced && !con.quiet {
 					announced = d.Serial
-					con.printf("%s\n", deviceChoiceNote(d, pool.PassedOver(d.Serial)))
+					con.printf("%s\n", deviceChoiceNote(d, passed))
 				}
 			}
 			con.flowStart(j, label)
@@ -1000,6 +1012,22 @@ func hasMultiDeviceFlow(plan *workspace.Plan) bool {
 		}
 	}
 	return false
+}
+
+// preferFirst moves the device serial to the front of devs: the pool tries devices in order.
+func preferFirst(devs []device.Info, serial string) []device.Info {
+	out := make([]device.Info, 0, len(devs))
+	for _, d := range devs {
+		if d.Serial == serial {
+			out = append(out, d)
+		}
+	}
+	for _, d := range devs {
+		if d.Serial != serial {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // phones counts the phones and simulators among devs (browsers are made on demand).

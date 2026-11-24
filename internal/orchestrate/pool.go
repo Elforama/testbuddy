@@ -41,6 +41,10 @@ type Pool struct {
 	// look, tb do, tb open) holds, so looking at a device and then testing on it needs no tb
 	// close in between (issue #395). nil: devices held by sessions are left to their holders.
 	Reclaim func(ctx context.Context, serial string) Reclaimed
+	// Prefer is a device a need that fits it should get even when another is free (TB_DEVICE,
+	// issue #397): held by the caller's own idle session, it is taken back (Reclaim) instead of
+	// the need going elsewhere. "" = none.
+	Prefer string
 
 	mu       sync.Mutex
 	devices  []device.Info
@@ -134,6 +138,10 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 	claimed := map[string]bool{}
 	for _, i := range needOrder(needs) {
 		n := needs[i]
+		if d, ok := p.deviceBySerial(p.Prefer); ok && p.fits(n, d) && p.preferPending() {
+			// TB_DEVICE's device: the run waits for it rather than take another (issue #397)
+			return fmt.Errorf("%s (TB_DEVICE). One tb at a time per device: wait for it, unset TB_DEVICE, or run with --wait-for-device", p.heldBy(d, p.held[d.Serial]))
+		}
 		var holders []string
 		free := ""
 		for _, d := range p.devices {
@@ -180,18 +188,23 @@ func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
 	return fmt.Sprintf("%s (%s) is in use by %s (if that session is yours, close it: tb close -d %s)", d.Name, d.Serial, o, d.Serial)
 }
 
-// PassedOver says, for a run that named no device, why each other phone or simulator in the
-// pool is not the one chosen (issue #397): "emulator-5594 (in use by tb session "alice" ...)",
-// "emulator-5750 (not tried: an earlier one fit)". Browsers are left out: they are made on
-// demand.
-func (p *Pool) PassedOver(chosen string) []string {
+// PassedOver says, for a run that named no device, why each other phone or simulator that could
+// serve need n is not the one chosen (issue #397): "emulator-5594 (in use by tb session "alice"
+// ...)", "emulator-5750 (no com.example.app installed)". Devices of another platform are left
+// out, and so are browsers (made on demand). others counts the devices among them that could
+// have run it (n fits them, app included): with none, the run had no choice to make.
+func (p *Pool) PassedOver(n Need, chosen string) (passed []string, others int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []string
 	for _, d := range p.devices {
-		if d.Serial == chosen || d.Platform == device.Web {
+		if d.Serial == chosen || d.Platform == device.Web || !n.fits(d) {
 			continue
 		}
+		if !p.fits(n, d) {
+			passed = append(passed, d.Serial+" (no "+n.AppID+" installed)")
+			continue
+		}
+		others++
 		why := "not tried: an earlier one fit"
 		switch o, held := p.held[d.Serial]; {
 		case held && p.locks[d.Serial] == nil:
@@ -204,9 +217,9 @@ func (p *Pool) PassedOver(chosen string) []string {
 		case p.busy[d.Serial]:
 			why = "running another flow of this run"
 		}
-		out = append(out, d.Serial+" ("+why+")")
+		passed = append(passed, d.Serial+" ("+why+")")
 	}
-	return out
+	return passed, others
 }
 
 // isSession: o is a tb look / tb do / tb open session's daemon.
@@ -255,6 +268,17 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		n := needs[i]
 		var held []string
 		free := ""
+		if s := p.Prefer; s != "" && !claimed[s] && p.lost[s] == nil && p.locks[s] == nil {
+			if d, ok := p.deviceBySerial(s); ok && p.fits(n, d) {
+				if o, isHeld := p.held[s]; isHeld && isSession(o) && p.reclaims[s] < maxReclaims {
+					if a, done := p.asked[s]; !(done && a.owner == o.PID && !a.Busy && !a.Unknown && !a.OK) {
+						claimed[s] = true
+						groups = append(groups, []string{s})
+						continue
+					}
+				}
+			}
+		}
 		for _, d := range p.devices {
 			if !p.fits(n, d) || claimed[d.Serial] || p.lost[d.Serial] != nil {
 				continue
@@ -315,6 +339,28 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		}
 	}
 	return got
+}
+
+// preferPending: Prefer is held by a session that may yet be the caller's own and give it
+// back (not asked yet, busy, or given back but taken again, within maxReclaims). The caller
+// holds mu.
+func (p *Pool) preferPending() bool {
+	o, held := p.held[p.Prefer]
+	if !held || !isSession(o) || p.reclaims[p.Prefer] >= maxReclaims || p.Reclaim == nil {
+		return false
+	}
+	a, done := p.asked[p.Prefer]
+	return !done || a.owner != o.PID || a.Busy || a.OK
+}
+
+// deviceBySerial finds a device of the pool; the caller holds mu.
+func (p *Pool) deviceBySerial(serial string) (device.Info, bool) {
+	for _, d := range p.devices {
+		if d.Serial == serial {
+			return d, true
+		}
+	}
+	return device.Info{}, false
 }
 
 // needOrder is the order tryAlloc serves needs in: pinned to a device first, then those with a
@@ -385,7 +431,13 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 		n := needs[i]
 		found := false
 		for _, d := range p.devices {
-			if p.busy[d.Serial] || taken[d.Serial] || p.lost[d.Serial] != nil || !p.fits(n, d) || !p.lock(d) {
+			if p.busy[d.Serial] || taken[d.Serial] || p.lost[d.Serial] != nil || !p.fits(n, d) {
+				continue
+			}
+			if !p.lock(d) {
+				if d.Serial == p.Prefer && p.preferPending() {
+					break // the caller's own session may give it back (reclaimOwn): no other yet
+				}
 				continue
 			}
 			got[n.Role] = d
@@ -719,6 +771,9 @@ func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
 
 // CheckApps finds which of the jobs' apps are installed on which devices (in parallel,
 // once per pair) and sets the pool's Installed lookup.
+// AppInstalled is device.AppInstalled, which CheckApps asks; tests replace it.
+var AppInstalled = device.AppInstalled
+
 func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
 	apps := map[string]bool{}
 	for _, j := range jobs {
@@ -741,7 +796,7 @@ func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
 			wg.Add(1)
 			go func(d device.Info, app string) {
 				defer wg.Done()
-				ok := device.AppInstalled(ctx, d, app)
+				ok := AppInstalled(ctx, d, app)
 				mu.Lock()
 				found[d.Serial+"\x00"+app] = ok
 				mu.Unlock()

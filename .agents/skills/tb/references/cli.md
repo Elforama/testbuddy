@@ -200,9 +200,10 @@ an agent can be pinned to its device once: a serial or device name, or the name 
 already open. A command with `-p` does not use it. With no device named and several phones or
 simulators connected, a session command is refused and lists them, rather than taking one;
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
-`tb test` takes `TB_DEVICE` as `--device` too, in a run of one device at a time (no `-p`, no
-sharding, no multi-device flow). With no device named and several phones or simulators that
-could run it, it says which one it took and why not the others before its first flow there.
+In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or multi-device flow),
+`TB_DEVICE` names the device tried first (a serial or device name: a session's name is not
+seen there); a flow it cannot run goes to another. When the run had a choice of phones or
+simulators, it says which one it took and why not the others before its first flow there.
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device
