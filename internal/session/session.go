@@ -60,6 +60,8 @@ type Dev struct {
 	// watching counts the tb watch commands on the device: a watch holds mu only while it
 	// reads the screen, so it is running between reads too (yield, issue #395)
 	watching atomic.Int32
+	// holder is the command that last took mu: while mu is held, the one running (issue #401)
+	holder atomic.Pointer[running]
 
 	// steps is written only with both mu and stepsMu held (by do and clear), so it can
 	// be read with either: tb log takes stepsMu alone and answers at once, even during a
@@ -104,14 +106,106 @@ func (d *Dev) shut(stopAgent bool) error {
 	return nil
 }
 
-// lockOpen takes d's device lock for a command. It fails, without the lock, when the session
-// was closed while the command waited for it (tb close, or its connection dropped).
-func (s *Service) lockOpen(d *Dev) error {
-	d.mu.Lock()
+// queuedNoteAfter is how long a command waits for the one running on its session before it says
+// so (issue #401).
+var queuedNoteAfter = time.Second
+
+// running is the command that holds a session's device lock.
+type running struct {
+	what  string // "tb do inputText: hello"
+	since time.Time
+}
+
+// describe names the command req runs, for a caller waiting for it: "tb do inputText: hello".
+func describe(req daemon.Request) string {
+	what := "tb " + req.Cmd
+	var args map[string]any
+	if json.Unmarshal(req.Args, &args) == nil {
+		var cmds []string
+		switch c := args["commands"].(type) {
+		case string: // the CLI sends a YAML list: one command a line, "- " first
+			for _, l := range strings.Split(c, "\n") {
+				if strings.HasPrefix(l, "- ") { // top-level commands only, not their options
+					cmds = append(cmds, strings.TrimSpace(strings.TrimSuffix(l[2:], ":")))
+				}
+			}
+			if len(cmds) == 0 { // not a list the CLI made: its lines, on one line
+				for _, l := range strings.Split(c, "\n") {
+					if l = strings.TrimSpace(l); l != "" {
+						cmds = append(cmds, l)
+					}
+				}
+			}
+		case []any:
+			for _, x := range c {
+				cmds = append(cmds, fmt.Sprint(x))
+			}
+		}
+		if len(cmds) > 0 {
+			what += " " + strings.Join(cmds, "; ")
+		}
+	}
+	if r := []rune(what); len(r) > 80 {
+		what = string(r[:79]) + "…"
+	}
+	return what
+}
+
+// lockOpen takes d's device lock for the command req. It fails, without the lock, when the
+// session was closed while the command waited for it (tb close, or its connection dropped).
+// Commands run one at a time per session: one that waits for another says so after
+// queuedNoteAfter, on stderr, and again when it starts (issue #401); with no_wait, it fails at
+// once instead, saying what runs.
+func (s *Service) lockOpen(d *Dev, req daemon.Request, send func(daemon.Response)) error {
+	var a struct {
+		NoWait bool `json:"no_wait"`
+	}
+	json.Unmarshal(req.Args, &a)
+	return s.lockFor(d, describe(req), a.NoWait, send)
+}
+
+// lockFor is lockOpen for the command what: send nil waits quietly.
+func (s *Service) lockFor(d *Dev, what string, noWait bool, send func(daemon.Response)) error {
+	if err := s.waitLock(d, what, noWait, send); err != nil {
+		return err
+	}
 	if d.closed {
+		d.holder.Store(nil)
 		d.mu.Unlock()
 		return fmt.Errorf("the session on %s was closed while this command waited for it", s.labelOf(d))
 	}
+	return nil
+}
+
+// waitLock takes d.mu for the command what, saying so when it has to wait (send nil: quietly),
+// or failing at once with noWait; it then records what as the command running (issue #401).
+func (s *Service) waitLock(d *Dev, what string, noWait bool, send func(daemon.Response)) error {
+	if !d.mu.TryLock() {
+		busy := func() string {
+			if r := d.holder.Load(); r != nil {
+				return fmt.Sprintf("%s (started %s ago)", r.what, time.Since(r.since).Round(time.Second))
+			}
+			return "another command"
+		}
+		if noWait {
+			return fmt.Errorf("%s is running a command: %s; without --no-wait this one waits for it", s.labelOf(d), busy())
+		}
+		if send == nil {
+			d.mu.Lock()
+		} else {
+			noted := make(chan struct{})
+			t := time.AfterFunc(queuedNoteAfter, func() {
+				send(daemon.Response{Stderr: true, Text: fmt.Sprintf("waiting for the command running on %s: %s\n", s.labelOf(d), busy())})
+				close(noted)
+			})
+			d.mu.Lock()
+			if !t.Stop() { // the note was sent, or is being sent: wait for it, then say we start
+				<-noted
+				send(daemon.Response{Stderr: true, Text: "now running " + what + "\n"})
+			}
+		}
+	}
+	d.holder.Store(&running{what: what, since: time.Now()})
 	return nil
 }
 
@@ -190,7 +284,7 @@ func (s *Service) CloseAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d.mu.Lock()
+			s.waitLock(d, "closing the session (the daemon is stopping)", false, nil)
 			defer d.mu.Unlock()
 			d.shut(false)
 		}()
@@ -398,7 +492,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		s.mu.Unlock()
 		// Close the dropped connection (a web session's Chrome goes with it) and free the
 		// device, once the command running on it has ended (issues #124, #153).
-		d.mu.Lock()
+		s.waitLock(d, "closing the session (its connection dropped)", false, nil)
 		d.shut(false)
 		d.mu.Unlock()
 		s.mu.Lock()
@@ -528,7 +622,7 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	if a.App != "" {
-		if err := s.lockOpen(d); err != nil {
+		if err := s.lockOpen(d, req, send); err != nil {
 			return fail(1, "%v", err)
 		}
 		d.AppID = a.App
@@ -700,6 +794,7 @@ func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemo
 	if d.watching.Load() > 0 { // a watch that started as the lock was taken
 		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
 	}
+	d.holder.Store(&running{what: "tb test (taking the device)", since: time.Now()})
 	s.mu.Lock()
 	label := d.label()
 	if s.devs[a.Serial] == d {
@@ -749,7 +844,7 @@ func (s *Service) droppedDev(a devArgs) (*Dev, error) {
 // is stopping), it leaves the session open and returns errCloseCancelled. Any other error says
 // what was left on the device (tb's agent).
 func (s *Service) closeDev(ctx context.Context, d *Dev) (string, error) {
-	d.mu.Lock()
+	s.waitLock(d, "tb close", false, nil)
 	defer d.mu.Unlock()
 	s.mu.Lock()
 	label := d.label()

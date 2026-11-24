@@ -207,6 +207,11 @@ there): your own idle session on it gives it back, and when it cannot run a flow
 a choice of phones or simulators, it says which one it took and why not the others before its
 first flow there.
 
+Commands on one session run one at a time. A command sent while another runs there waits for
+it, and after a second says so on stderr ("waiting for the command running on a1: tb do ...
+(started 5s ago)"), then again when it starts; with `--no-wait` it fails at once with that
+message instead.
+
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device
 flows. Maestro's names for these (`MAESTRO_FILENAME`, ...) are set too, and `MAESTRO_*`

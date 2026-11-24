@@ -26,6 +26,8 @@ type Response struct {
 	JSON  json.RawMessage `json:"json,omitempty"`
 	Image []byte          `json:"image,omitempty"`
 	More  bool            `json:"more,omitempty"`
+	// Stderr: a part the CLI prints on stderr (a note, not the command's output).
+	Stderr bool `json:"stderr,omitempty"`
 }
 
 // Dir is Test Buddy's state directory (~/.testbuddy).

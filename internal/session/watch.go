@@ -50,8 +50,18 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	// is held only for the read, so other commands can run while watch waits.
 	// A re-read after silence is fresh where the device keeps a node cache (Android): a view
 	// that changes its text with no event stays as it was in that cache (issue #322).
+	prevRead := false
+	// Only the first read says it waits (or fails with --no-wait): later ones wait quietly.
+	what := describe(req)
 	read := func(lockFailed string, fresh bool) (*look.Listing, *daemon.Response) {
-		if err := s.lockOpen(d); err != nil {
+		var err error
+		if prevRead {
+			err = s.lockFor(d, what, false, nil)
+		} else {
+			err = s.lockOpen(d, req, send)
+		}
+		prevRead = true
+		if err != nil {
 			r := fail(1, lockFailed, err)
 			return nil, &r
 		}
