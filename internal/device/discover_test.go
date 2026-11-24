@@ -417,3 +417,41 @@ esac`)
 		t.Errorf("xcrun calls %q", c)
 	}
 }
+
+// issue #396: a command that names no device refuses when several phones or simulators (of the
+// platform asked for) are connected, instead of taking the first; Chrome, always listed when
+// installed, counts only when no phone or simulator is connected.
+func TestPickOne(t *testing.T) {
+	chrome := WebDevice(1)
+	cases := []struct {
+		name     string
+		devs     []Info
+		platform Platform
+		want     string
+		got      string // serial; "" = error
+		err      string
+	}{
+		{"several", []Info{pixel, galaxy, iphone, chrome}, "", "", "", "3 devices are connected (emulator-5554, R58M, UDID-1): say which with -d (or set TB_DEVICE)"},
+		{"several of the platform", []Info{pixel, galaxy, iphone}, Android, "", "", "2 android devices are connected (emulator-5554, R58M): say which with -d (or set TB_DEVICE)"},
+		{"one of the platform", []Info{pixel, galaxy, iphone}, IOS, "", "UDID-1", ""},
+		{"one phone and Chrome", []Info{pixel, chrome}, "", "", "emulator-5554", ""},
+		{"Chrome only", []Info{chrome}, "", "", "web", ""},
+		{"web asked, phones too", []Info{pixel, galaxy, chrome}, Web, "", "web", ""},
+		{"named among several", []Info{pixel, galaxy, iphone}, "", "R58M", "R58M", ""},
+		{"none", nil, "", "", "", "no device is connected: start an Android emulator or boot an iOS simulator first"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d, err := PickOne(c.devs, c.platform, c.want)
+			if c.err != "" {
+				if err == nil || err.Error() != c.err {
+					t.Errorf("err = %v, want %q", err, c.err)
+				}
+				return
+			}
+			if err != nil || d.Serial != c.got {
+				t.Errorf("got %q, %v; want %q", d.Serial, err, c.got)
+			}
+		})
+	}
+}

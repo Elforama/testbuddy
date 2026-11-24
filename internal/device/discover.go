@@ -230,6 +230,35 @@ func Pick(devs []Info, platform Platform, want string) (Info, error) {
 	return cands[0], nil
 }
 
+// PickOne is Pick for a command that drives one device the caller may not have named (tb look,
+// tb do, tb open, ...): with no device named and more than one phone or simulator (of the
+// platform asked for) connected, it refuses, listing them, instead of taking the first one,
+// which may be another agent's (issue #396). With none named and no platform, browsers count
+// only when no phone or simulator is connected (Chrome is always listed when it is installed).
+func PickOne(devs []Info, platform Platform, want string) (Info, error) {
+	if want != "" {
+		return Pick(devs, platform, want)
+	}
+	var cands []Info
+	for _, d := range devs {
+		if (platform == "" && d.Platform != Web) || (platform != "" && d.Platform == platform) {
+			cands = append(cands, d)
+		}
+	}
+	if len(cands) > 1 {
+		serials := make([]string, len(cands))
+		for i, d := range cands {
+			serials[i] = d.Serial
+		}
+		what := "devices"
+		if platform != "" {
+			what = string(platform) + " devices"
+		}
+		return Info{}, fmt.Errorf("%d %s are connected (%s): say which with -d (or set TB_DEVICE)", len(cands), what, strings.Join(serials, ", "))
+	}
+	return Pick(devs, platform, want)
+}
+
 // AppInstalled reports whether the app (package or bundle id) is installed on the device.
 // It answers true when it cannot tell, so a failed check never hides a device.
 func AppInstalled(ctx context.Context, d Info, appID string) bool {

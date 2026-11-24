@@ -66,7 +66,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
--d takes a session name, serial/UDID or device name. With one device, -d is optional.
+-d takes a session name, serial/UDID or device name; TB_DEVICE is its default. With one device
+connected (or one session open), -d is optional; with several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.
 `
@@ -416,6 +417,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 }
 
 func callDaemon(cmd string, args map[string]any) int {
+	defaultDevice(args)
 	c, err := daemon.Connect()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -596,7 +598,7 @@ func cmdHierarchy(argv []string) int {
 	// (issue #124).
 	ctx, cancel := stopContext()
 	defer cancel()
-	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
+	info, err := device.PickOne(listDevices(ctx), device.Platform(a.str("platform")), orEnvDevice(a.str("device")))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -659,4 +661,21 @@ func cmdDaemon(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// orEnvDevice is the device a command names, or TB_DEVICE when it names none: whoever starts an
+// agent pins it to its device once (issue #396).
+func orEnvDevice(d string) string {
+	if d == "" {
+		return strings.TrimSpace(os.Getenv("TB_DEVICE"))
+	}
+	return d
+}
+
+// defaultDevice fills in TB_DEVICE for a session command's device when none is named (issue
+// #396). Commands that take no device (no "device" key) are left alone.
+func defaultDevice(args map[string]any) {
+	if d, ok := args["device"].(string); ok && d == "" {
+		args["device"] = orEnvDevice("")
+	}
 }

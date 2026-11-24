@@ -247,6 +247,7 @@ func mcpReply(ctx context.Context, req mcpRequest) map[string]any {
 func mcpCall(ctx context.Context, name string, args map[string]any) map[string]any {
 	str := func(k string) string { s, _ := args[k].(string); return s }
 	call := func(cmd string, a map[string]any) daemon.Response {
+		defaultDevice(a)
 		if ctx.Err() != nil {
 			return daemon.Response{Exit: 1, Text: cmd + " was cancelled"}
 		}

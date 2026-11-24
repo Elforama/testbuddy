@@ -279,7 +279,7 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 		name, want = a.Device, serial
 	}
 	s.mu.Unlock()
-	info, err := device.Pick(device.List(ctx), device.Platform(a.Platform), want)
+	info, err := device.PickOne(device.List(ctx), device.Platform(a.Platform), want)
 	if err != nil {
 		return nil, err
 	}
@@ -469,9 +469,9 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	info, err := device.Pick(device.List(ctx), device.Platform(a.Platform), a.Device)
+	info, err := device.PickOne(device.List(ctx), device.Platform(a.Platform), a.Device)
 	if err != nil {
-		// maybe it is an alias of an open device
+		// maybe it is an alias of an open device, or the one session open
 		if d, err2 := s.resolve(ctx, a.devArgs); err2 == nil {
 			info = d.Info
 		} else {
