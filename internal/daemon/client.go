@@ -68,6 +68,25 @@ func Connect() (*Client, error) {
 	}
 }
 
+// Dial connects to the daemon this caller would use (the same TB_HOME) only when one is already
+// running this build of tb: it never starts one or replaces an older one. nil when there is
+// none to ask.
+func Dial() *Client {
+	c, err := net.DialTimeout("unix", SocketPath(), 300*time.Millisecond)
+	if err != nil {
+		return nil
+	}
+	cl := newClient(c)
+	c.SetDeadline(time.Now().Add(2 * time.Second))
+	resp, err := cl.Call(Request{Cmd: "ping"}, nil)
+	c.SetDeadline(time.Time{})
+	if err != nil || resp.Text != BuildID() {
+		cl.Close()
+		return nil
+	}
+	return cl
+}
+
 // ErrNotRunning is StopDaemon's error when no daemon answers.
 var ErrNotRunning = errors.New("tb daemon is not running")
 

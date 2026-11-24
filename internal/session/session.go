@@ -147,6 +147,7 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("log", s.log)
 	srv.Handle("save", s.save)
 	srv.Handle("clear", s.clear)
+	srv.Handle("yield", s.yield)
 	srv.Handle("stop", func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 		daemon.StopAfterReply(ctx)
 		return daemon.Response{OK: true, Text: "tb daemon stopped"}
@@ -614,6 +615,54 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 }
 
 var errCloseCancelled = errors.New("tb close was cancelled")
+
+// YieldArgs names the device a `tb test` or `tb replay` run of this daemon's caller wants.
+type YieldArgs struct {
+	Serial string `json:"serial"`
+}
+
+// Yielded is yield's answer: whether this daemon gave the device up, and if not, whether one
+// of its sessions has it busy (Label names that session).
+type Yielded struct {
+	Yielded bool   `json:"yielded"`
+	Busy    bool   `json:"busy,omitempty"`
+	Label   string `json:"label,omitempty"`
+}
+
+// yield gives the device a session of this daemon holds to a `tb test` or `tb replay` run of
+// the same caller (issue #395): look at a device, write a flow, run it is how an agent works,
+// and the session it looked with would otherwise refuse the run. Only a session with no
+// command running gives its device up; its connection closes (tb's agent stays on the device
+// for the run) and its name is kept, so the next tb look or tb do on it opens it again. A
+// device this daemon holds no session on is not its to give: Yielded is false, Busy too.
+func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
+	a, err := decode[YieldArgs](req)
+	if err != nil {
+		return fail(2, "%v", err)
+	}
+	answer := func(y Yielded) daemon.Response {
+		b, _ := json.Marshal(y)
+		return daemon.Response{OK: true, JSON: b}
+	}
+	s.mu.Lock()
+	d := s.devs[a.Serial]
+	s.mu.Unlock()
+	if d == nil {
+		return answer(Yielded{})
+	}
+	if !d.mu.TryLock() {
+		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
+	}
+	defer d.mu.Unlock()
+	s.mu.Lock()
+	label := d.label()
+	if s.devs[a.Serial] == d {
+		delete(s.devs, a.Serial)
+	}
+	s.mu.Unlock()
+	d.shut(false)
+	return answer(Yielded{Yielded: true, Label: label})
+}
 
 // droppedDev finds the session, among those whose connection dropped, that a names: by its
 // session name (kept when the connection drops) or serial, not by the device's name (an

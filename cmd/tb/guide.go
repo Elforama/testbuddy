@@ -29,7 +29,7 @@ Explore an app:
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
-- tb close -d alice               releases the device for a test run; waits for a running command
+- tb close -d alice               releases the device (tb test/replay take it from your own idle session)
                                   (Ctrl-C that command, or tb daemon stop, to end a stuck one)
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
                                   start with a required launchApp and close the session after saving

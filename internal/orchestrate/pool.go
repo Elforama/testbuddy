@@ -37,6 +37,10 @@ type Pool struct {
 	KeepAgents bool
 	// WaitForDevice is how long a job waits for devices other processes hold (0: fail at once).
 	WaitForDevice time.Duration
+	// Reclaim asks the caller's own tb daemon to hand over a device one of its sessions (tb
+	// look, tb do, tb open) holds, so looking at a device and then testing on it needs no tb
+	// close in between (issue #395). nil: devices held by sessions are left to their holders.
+	Reclaim func(ctx context.Context, serial string) Reclaimed
 
 	mu      sync.Mutex
 	devices []device.Info
@@ -46,6 +50,7 @@ type Pool struct {
 	locks   map[string]*devlock.Lock // devices this run holds
 	held    map[string]devlock.Owner // devices another process held when last tried
 	lost    map[string]error         // devices whose connection was lost and that could not be opened again
+	asked   map[string]asked         // what Reclaim last answered for a device a session holds
 
 	onAllocOrWait func()              // tests: runs as allocOrWait starts (nil = nothing)
 	onLost        func(serial string) // tests: runs as driverForJob marks a device lost (nil = nothing)
@@ -53,7 +58,7 @@ type Pool struct {
 
 func NewPool(devs []device.Info) *Pool {
 	return &Pool{devices: devs, busy: map[string]bool{}, drivers: map[string]driver.Driver{}, opening: map[string]chan struct{}{},
-		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}}
+		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}, asked: map[string]asked{}}
 }
 
 // lock takes d's device lock for the run, once (browsers need none: each run starts its own).
@@ -91,6 +96,9 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 		if devs := p.tryAlloc(needs); devs != nil {
 			return devs, nil
 		}
+		if p.reclaimOwn(ctx, needs) {
+			continue // the caller's own session gave a device up: take it now
+		}
 		err := p.heldElsewhere(needs)
 		if err == nil {
 			return nil, nil
@@ -119,11 +127,7 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 				continue
 			}
 			if o, ok := p.held[d.Serial]; ok && p.locks[d.Serial] == nil {
-				h := fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
-				if strings.HasPrefix(o.What, "tb session") {
-					h += " (if that session is yours, close it: tb close -d " + d.Serial + ")"
-				}
-				holders = append(holders, h)
+				holders = append(holders, p.heldBy(d, o))
 				continue
 			}
 			free = true
@@ -134,6 +138,99 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 		}
 	}
 	return nil
+}
+
+// heldBy says who holds d, another process (owner o). For a session, it says whether the
+// session is the caller's own (Reclaim's answer) and what to do; the caller holds mu.
+func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
+	if !isSession(o) {
+		return fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
+	}
+	a, ok := p.asked[d.Serial]
+	switch {
+	case ok && a.owner == o.PID && a.Busy:
+		return fmt.Sprintf("%s (%s) is held by your own tb session %s, which is running a command (tb do, tb watch): wait for it to end, or stop it and run tb close -d %s",
+			d.Name, d.Serial, a.Label, d.Serial)
+	case ok && a.owner == o.PID && !a.OK:
+		return fmt.Sprintf("%s (%s) is in use by %s: a session of another tb daemon (another agent's, or one with another TB_HOME), not yours to close",
+			d.Name, d.Serial, o)
+	}
+	return fmt.Sprintf("%s (%s) is in use by %s (if that session is yours, close it: tb close -d %s)", d.Name, d.Serial, o, d.Serial)
+}
+
+// isSession: o is a tb look / tb do / tb open session's daemon.
+func isSession(o devlock.Owner) bool { return strings.HasPrefix(o.What, "tb session") }
+
+// Reclaimed is Reclaim's answer for a device a session holds: OK, the caller's own daemon
+// gave it up; Busy, one of its sessions has it, running a command (Label names it); neither,
+// the session is not the caller's daemon's.
+type Reclaimed struct {
+	OK    bool
+	Busy  bool
+	Label string
+}
+
+// asked is Reclaim's last answer for a device, and the holder's pid it was for.
+type asked struct {
+	Reclaimed
+	owner int
+}
+
+// reclaimOwn asks Reclaim for the devices sessions hold that a need could run on, when no
+// other device that fits is free of other processes (a device busy with this run's own jobs
+// counts as free: the need waits for it instead). true: one was given up, so the needs can be
+// tried again at once. A session found not the caller's own is not asked again while the same
+// process holds the device; one busy with a command is asked again on the next try.
+func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
+	if p.Reclaim == nil {
+		return false
+	}
+	p.mu.Lock()
+	var ask []string
+	seen := map[string]bool{}
+	for _, n := range needs {
+		var held []string
+		free := false
+		for _, d := range p.devices {
+			if !p.fits(n, d) {
+				continue
+			}
+			o, ok := p.held[d.Serial]
+			if !ok || p.locks[d.Serial] != nil {
+				free = true
+				break
+			}
+			if a, done := p.asked[d.Serial]; isSession(o) && !(done && a.owner == o.PID && !a.Busy) {
+				held = append(held, d.Serial)
+			}
+		}
+		if free {
+			continue
+		}
+		for _, s := range held {
+			if !seen[s] {
+				seen[s] = true
+				ask = append(ask, s)
+			}
+		}
+	}
+	owners := map[string]int{}
+	for _, s := range ask {
+		owners[s] = p.held[s].PID
+	}
+	p.mu.Unlock()
+	got := false
+	for _, s := range ask {
+		r := p.Reclaim(ctx, s)
+		p.mu.Lock()
+		p.asked[s] = asked{Reclaimed: r, owner: owners[s]}
+		if r.OK {
+			delete(p.held, s)
+			got = true
+		}
+		p.mu.Unlock()
+	}
+	return got
 }
 
 func (p *Pool) Devices() []device.Info { return p.devices }

@@ -24,6 +24,7 @@ import (
 	"github.com/elforama/testbuddy/internal/look"
 	"github.com/elforama/testbuddy/internal/orchestrate"
 	"github.com/elforama/testbuddy/internal/report"
+	"github.com/elforama/testbuddy/internal/session"
 	"github.com/elforama/testbuddy/internal/workspace"
 )
 
@@ -295,6 +296,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		pool.LockAs = "tb replay " + plan.Flows[0].Path
 	}
 	pool.KeepAgents = a.flag("keep-agents")
+	pool.Reclaim = reclaimFromOwnSession
 	if w := a.str("wait-for-device"); w != "" {
 		d, err := parseWait(w)
 		if err != nil {
@@ -932,4 +934,26 @@ func claimDir(parent, name string) string {
 		}
 	}
 	return filepath.Join(parent, name)
+}
+
+// reclaimFromOwnSession asks the caller's own tb daemon (the same TB_HOME, already running) to
+// hand over a device one of its idle sessions holds (issue #395), and says so on stderr: an
+// agent looks at a device with tb look, writes a flow, and runs it on the same device. The
+// session's name is kept: the next tb look or tb do on the device opens it again.
+func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Reclaimed {
+	cl := daemon.Dial()
+	if cl == nil {
+		return orchestrate.Reclaimed{}
+	}
+	defer cl.Close()
+	args, _ := json.Marshal(session.YieldArgs{Serial: serial})
+	resp, err := cl.Call(daemon.Request{Cmd: "yield", Args: args}, nil)
+	var y session.Yielded
+	if err != nil || !resp.OK || json.Unmarshal(resp.JSON, &y) != nil {
+		return orchestrate.Reclaimed{}
+	}
+	if y.Yielded {
+		fmt.Fprintf(os.Stderr, "note: closed your tb session %s for this run; tb look or tb do on it opens it again\n", y.Label)
+	}
+	return orchestrate.Reclaimed{OK: y.Yielded, Busy: y.Busy, Label: y.Label}
 }
