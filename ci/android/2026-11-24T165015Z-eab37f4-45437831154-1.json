@@ -1,0 +1,144 @@
+{
+  "branch": "main",
+  "commit": "eab37f49a1e22d5053ba40123b3277c47099c2f1",
+  "date": "2026-11-24T16:50:15Z",
+  "event": "push",
+  "flows": {
+    "bench/flows/device/android/compose-interop.yaml": {
+      "name": "Views inside Compose (AndroidView) are seen, on screen and only there",
+      "passed": true,
+      "seconds": 7.14
+    },
+    "bench/flows/device/android/compose-multiline.yaml": {
+      "name": "Enter types a new line in a multi-line Compose field",
+      "passed": true,
+      "seconds": 10.05
+    },
+    "bench/flows/device/android/kept-stack.yaml": {
+      "name": "A screen kept mounted under the one pushed on top is no cover over it",
+      "passed": true,
+      "seconds": 6.61
+    },
+    "bench/flows/device/android/keyboard-scroll-clear.yaml": {
+      "name": "Controls: a row flush with the keyboard is scrolled clear of it",
+      "passed": true,
+      "seconds": 18.51
+    },
+    "bench/flows/device/android/keyboard-shelf.yaml": {
+      "name": "Lists: a shelf under the keyboard is brought up, then swiped at its own height",
+      "passed": true,
+      "seconds": 10.11
+    },
+    "bench/flows/device/android/launch-clean-task.yaml": {
+      "name": "launchApp after a stop starts in a clean task (Android)",
+      "passed": true,
+      "seconds": 22.52
+    },
+    "bench/flows/device/android/restored-feed.yaml": {
+      "name": "A check after a turn waits for the content the recreated screen reloads",
+      "passed": true,
+      "seconds": 15.53
+    },
+    "bench/flows/device/android/webview-dom.yaml": {
+      "name": "Resolve WebView DOM ids beyond accessibility",
+      "passed": true,
+      "seconds": 7.28
+    },
+    "bench/flows/device/navigation-deep-link.yaml": {
+      "name": "Open a deep link with its navigation stack",
+      "passed": true,
+      "seconds": 4.7
+    },
+    "bench/flows/journey.yaml": {
+      "name": "Bench journey",
+      "passed": true,
+      "seconds": 49.89
+    },
+    "bench/flows/kill-app-android.yaml": {
+      "name": "killApp keeps the saved state (Android)",
+      "passed": false,
+      "seconds": 22.6
+    },
+    "bench/flows/scenarios/a11y_good.yaml": {
+      "name": "Scenario good accessibility",
+      "passed": true,
+      "seconds": 23.18
+    },
+    "bench/flows/scenarios/a11y_poor.yaml": {
+      "name": "Scenario poor accessibility",
+      "passed": true,
+      "seconds": 11.93
+    },
+    "bench/flows/scenarios/animations.yaml": {
+      "name": "Scenario animations",
+      "passed": true,
+      "seconds": 44.72
+    },
+    "bench/flows/scenarios/controls.yaml": {
+      "name": "Scenario controls",
+      "passed": true,
+      "seconds": 46.62
+    },
+    "bench/flows/scenarios/errors.yaml": {
+      "name": "Scenario errors and retries",
+      "passed": true,
+      "seconds": 25.16
+    },
+    "bench/flows/scenarios/keyboard.yaml": {
+      "name": "Scenario keyboard",
+      "passed": true,
+      "seconds": 25.03
+    },
+    "bench/flows/scenarios/lists.yaml": {
+      "name": "Scenario lists",
+      "passed": true,
+      "seconds": 51.31
+    },
+    "bench/flows/scenarios/native.yaml": {
+      "name": "Scenario native toolkits",
+      "passed": true,
+      "seconds": 25.86
+    },
+    "bench/flows/scenarios/navigation.yaml": {
+      "name": "Scenario navigation and back stack",
+      "passed": true,
+      "seconds": 21.34
+    },
+    "bench/flows/scenarios/onboarding.yaml": {
+      "name": "Scenario onboarding and login",
+      "passed": true,
+      "seconds": 25.84
+    },
+    "bench/flows/scenarios/overlays.yaml": {
+      "name": "Scenario overlays",
+      "passed": true,
+      "seconds": 22.54
+    },
+    "bench/flows/scenarios/permissions.yaml": {
+      "name": "Scenario permissions",
+      "passed": true,
+      "seconds": 15.37
+    },
+    "bench/flows/scenarios/slow.yaml": {
+      "name": "Scenario slow and janky",
+      "passed": true,
+      "seconds": 23.18
+    },
+    "bench/flows/scenarios/transitions.yaml": {
+      "name": "Scenario screen transitions",
+      "passed": true,
+      "seconds": 10.24
+    },
+    "bench/flows/scripting.yaml": {
+      "name": "Scripting",
+      "passed": true,
+      "seconds": 6.15
+    }
+  },
+  "platform": "android",
+  "run_attempt": "1",
+  "run_id": "45437831154",
+  "runner": "Linux X64 ubuntu26 20261116.202.1",
+  "total_seconds": 553.4,
+  "url": "https://github.com/Elforama/testbuddy/actions/runs/45437831154"
+}
