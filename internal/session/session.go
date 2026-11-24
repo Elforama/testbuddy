@@ -281,6 +281,7 @@ func onPlatform(m map[string]*Dev, platform string) []*Dev {
 
 // resolve finds (and connects, if needed) the device a command is for.
 func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
+	a.Force = false // force is tb close's alone: no other command gets past another owner (issue #399)
 	s.mu.Lock()
 	if d, err := s.openDev(a); d != nil || err != nil {
 		s.mu.Unlock()

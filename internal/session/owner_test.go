@@ -51,6 +51,7 @@ func TestSessionsOfAnotherOwner(t *testing.T) {
 		{"look with no -d", s.look, agent2},
 		{"do by name", s.do, with(agent2, "device", "alice", "commands", "launchApp")},
 		{"close by name", s.close, with(agent2, "device", "alice")},
+		{"look, forced", s.look, with(agent2, "device", "alice", "force", true)},
 	} {
 		r, _ := call(t, c.h, c.args, "")
 		if r.OK || !strings.Contains(r.Text, refused) {
