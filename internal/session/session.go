@@ -125,9 +125,12 @@ func describe(req daemon.Request) string {
 		switch c := args["commands"].(type) {
 		case string: // the CLI sends a YAML list: one command a line, "- " first
 			for _, l := range strings.Split(c, "\n") {
-				if l = strings.TrimSpace(l); l != "" {
-					cmds = append(cmds, strings.TrimPrefix(l, "- "))
+				if strings.HasPrefix(l, "- ") { // top-level commands only, not their options
+					cmds = append(cmds, strings.TrimSpace(strings.TrimSuffix(l[2:], ":")))
 				}
+			}
+			if len(cmds) == 0 && strings.TrimSpace(c) != "" {
+				cmds = []string{strings.TrimSpace(c)}
 			}
 		case []any:
 			for _, x := range c {
@@ -163,6 +166,7 @@ func (s *Service) lockFor(d *Dev, what string, noWait bool, send func(daemon.Res
 		return err
 	}
 	if d.closed {
+		d.holder.Store(nil)
 		d.mu.Unlock()
 		return fmt.Errorf("the session on %s was closed while this command waited for it", s.labelOf(d))
 	}
@@ -276,7 +280,7 @@ func (s *Service) CloseAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d.mu.Lock()
+			s.waitLock(d, "tb closing it (the daemon is stopping)", false, nil)
 			defer d.mu.Unlock()
 			d.shut(false)
 		}()
@@ -484,7 +488,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		s.mu.Unlock()
 		// Close the dropped connection (a web session's Chrome goes with it) and free the
 		// device, once the command running on it has ended (issues #124, #153).
-		d.mu.Lock()
+		s.waitLock(d, "tb closing it (its connection dropped)", false, nil)
 		d.shut(false)
 		d.mu.Unlock()
 		s.mu.Lock()
@@ -758,10 +762,10 @@ func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemo
 		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
 	}
 	defer d.mu.Unlock()
-	d.holder.Store(&running{what: "tb test (taking the device)", since: time.Now()})
 	if d.watching.Load() > 0 { // a watch that started as the lock was taken
 		return answer(Yielded{Busy: true, Label: s.labelOf(d)})
 	}
+	d.holder.Store(&running{what: "tb test (taking the device)", since: time.Now()})
 	s.mu.Lock()
 	label := d.label()
 	if s.devs[a.Serial] == d {

@@ -104,4 +104,9 @@ func TestDescribeYAMLList(t *testing.T) {
 	if got := describe(req); got != "tb do launchApp: com.example; tapOn: Login" {
 		t.Errorf("describe: %q", got)
 	}
+	// tb wait's command, with options under it: only the command is named.
+	req.Args = []byte(`{"commands":"- extendedWaitUntil:\n    visible: \"Hi\"\n    timeout: 17000\n- tapOn:\n    id: login\n"}`)
+	if got := describe(req); got != "tb do extendedWaitUntil; tapOn" {
+		t.Errorf("describe, nested: %q", got)
+	}
 }
