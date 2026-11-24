@@ -38,3 +38,22 @@ func TestTBDeviceIsNotUsedWithAPlatform(t *testing.T) {
 		t.Errorf("tb look -p web with TB_DEVICE: %v", args)
 	}
 }
+
+// issue #399: TB_SESSION_OWNER goes with every daemon command as "owner"; tb close --force too.
+func TestTBSessionOwnerIsSent(t *testing.T) {
+	f := startFakeDaemon(t)
+	t.Setenv("TB_SESSION_OWNER", "agent-1")
+	agentCall("look", nil, nil)
+	if _, args, _ := f.last(t); args["owner"] != "agent-1" {
+		t.Errorf("look: %v", args)
+	}
+	agentCall("close", []string{"all", "--force"}, []flagSpec{{[]string{"force"}, boolFlag}})
+	if cmd, args, _ := f.last(t); cmd != "close" || args["owner"] != "agent-1" || args["force"] != true || args["device"] != "all" {
+		t.Errorf("close all --force: %s %v", cmd, args)
+	}
+	t.Setenv("TB_SESSION_OWNER", "")
+	agentCall("look", nil, nil)
+	if _, args, _ := f.last(t); args["owner"] != nil {
+		t.Errorf("no owner: %v", args)
+	}
+}

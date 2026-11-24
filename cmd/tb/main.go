@@ -67,6 +67,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
 With one device connected, or one session open (except for tb open), -d is optional; with
 several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
@@ -108,7 +109,7 @@ func main() {
 		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, textFlag}, {[]string{"app", "a"}, textFlag},
 			{[]string{"headless"}, boolFlag}})
 	case "close":
-		code = agentCall("close", rest, nil)
+		code = agentCall("close", rest, []flagSpec{{[]string{"force"}, boolFlag}})
 	case "release":
 		code = cmdRelease(rest)
 	case "look":
@@ -419,6 +420,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 
 func callDaemon(cmd string, args map[string]any) int {
 	defaultDevice(args)
+	withOwner(args)
 	c, err := daemon.Connect()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -683,5 +685,14 @@ func defaultDevice(args map[string]any) {
 	}
 	if d, ok := args["device"].(string); ok && d == "" {
 		args["device"] = orEnvDevice("")
+	}
+}
+
+// withOwner sends the caller's TB_SESSION_OWNER with a daemon command: a session it opens is
+// that owner's, and another owner's sessions are refused to it (issue #399). Unset, nothing is
+// sent, and sessions are anyone's, as before.
+func withOwner(args map[string]any) {
+	if o := strings.TrimSpace(os.Getenv("TB_SESSION_OWNER")); o != "" && args != nil {
+		args["owner"] = o
 	}
 }

@@ -80,7 +80,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
-| `tb close [-d alice \| all] [-p ios]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
+| `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; `--force`, every agent's. A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
 | `tb release [-d DEVICE \| all] [-p ios]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
@@ -200,6 +200,13 @@ an agent can be pinned to its device once: a serial or device name, or the name 
 already open. A command with `-p` does not use it. With no device named and several phones or
 simulators connected, a session command is refused and lists them, rather than taking one;
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
+
+`TB_SESSION_OWNER` makes the sessions a caller opens its own: set it once per agent (any name).
+Another agent (another owner, or a caller with none) is refused on them ("emulator-5750 is
+session "alice" of another agent: use another device"), a command with no `-d` does not use
+them, `tb close all` leaves them (unless `--force`), `tb test` does not take their device back,
+and `tb devices` marks them "(another agent's)". Sessions opened with no owner are anyone's, as
+before.
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device

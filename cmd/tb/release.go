@@ -44,7 +44,9 @@ func cmdRelease(argv []string) int {
 	// platform's sessions (issue #184).
 	closeCode := 0
 	if daemon.Running() {
-		closeCode = agentCall("close", []string{"-d", which, "-p", platform}, nil)
+		// every agent's sessions on the devices freed (issue #399: tb close all alone leaves
+		// other owners')
+		closeCode = agentCall("close", []string{"-d", which, "-p", platform, "--force"}, []flagSpec{{[]string{"force"}, boolFlag}})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

@@ -120,7 +120,7 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 	f.show(loginScreen()...)
 	s := New()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return f, nil }
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	free := func() bool {
@@ -164,7 +164,7 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 		}
 	}
 	// Opening it again meanwhile is refused: this daemon still holds the device, and says so.
-	if _, err := s.connect(context.Background(), f.info, "alice"); err == nil || !strings.Contains(err.Error(), "is still closing") {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err == nil || !strings.Contains(err.Error(), "is still closing") {
 		t.Errorf("reopening a device whose dropped session still closes: %v", err)
 	}
 
@@ -207,7 +207,7 @@ func TestSessionNameNoRace(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+			if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 				t.Errorf("connect: %v", err)
 				return
 			}

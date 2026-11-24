@@ -77,7 +77,7 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -135,7 +135,7 @@ func TestCloseAllClosesADroppedSession(t *testing.T) {
 		f := newFake("chrome", "Chrome", device.Web)
 		k := &killCount{fakeDriver: f}
 		countOpens(s, k)
-		d, err := s.connect(context.Background(), f.info, "alice")
+		d, err := s.connect(context.Background(), f.info, "alice", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +204,7 @@ func TestPlainCloseClosesTheDroppedSession(t *testing.T) {
 		s := New()
 		f := newFake("emulator-5554", "Pixel 7", device.Android)
 		opens := countOpens(s, f)
-		if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+		if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 		dropAndWait(t, s, f)
@@ -227,7 +227,7 @@ func TestCloseDoesNotMatchADroppedSessionByDeviceName(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -250,7 +250,7 @@ func TestCloseAllStopsDroppedSessionsAgents(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -277,7 +277,7 @@ func TestConnectAfterCloseAllClosesTheDriver(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	countOpens(s, f)
 	s.CloseAll(context.Background())
-	if _, err := s.connect(context.Background(), f.info, "alice"); err == nil || !strings.Contains(err.Error(), "the tb daemon is stopping") {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err == nil || !strings.Contains(err.Error(), "the tb daemon is stopping") {
 		t.Errorf("connect after CloseAll: %v", err)
 	}
 	var closed int
@@ -300,7 +300,7 @@ func TestCloseByDeviceNameFindsTheDroppedSessionOnItsSerial(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, ""); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -326,7 +326,7 @@ func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
 		name string
 	}{{fa, "alice"}, {fb, "bob"}} {
 		countOpens(s, x.f)
-		if _, err := s.connect(context.Background(), x.f.info, x.name); err != nil {
+		if _, err := s.connect(context.Background(), x.f.info, x.name, ""); err != nil {
 			t.Fatal(err)
 		}
 		dropAndWait(t, s, x.f)
@@ -353,7 +353,7 @@ func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
 	}
 	for name, f := range fakes {
 		countOpens(s, f)
-		if _, err := s.connect(context.Background(), f.info, name); err != nil {
+		if _, err := s.connect(context.Background(), f.info, name, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
