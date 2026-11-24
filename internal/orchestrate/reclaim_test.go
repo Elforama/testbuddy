@@ -186,3 +186,37 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 	}
 	la.Release()
 }
+
+// Re-review of issue #395: a two-device flow, one device free and the other in the caller's
+// idle session. The free device serves one role only, so the session is taken back for the
+// other; with no Reclaim, the error names the holder instead of "no device could run it".
+func TestPoolReclaimsForATwoDeviceFlow(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	needs := []Need{{Role: "alice"}, {Role: "bob"}}
+	lb, err := devlock.TryAcquire("b", `tb session "b" (tb open/do/look)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lb.Release()
+
+	pool := poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	got, err := pool.allocOrWait(context.Background(), needs)
+	if got != nil || err == nil || !strings.Contains(err.Error(), "B (b) is in use by tb session") {
+		t.Errorf("no Reclaim: %v, %v", got, err)
+	}
+	pool.Close()
+
+	pool = poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
+	defer pool.Close()
+	var asked []string
+	pool.Reclaim = func(_ context.Context, serial string) Reclaimed {
+		asked = append(asked, serial)
+		lb.Release()
+		return Reclaimed{OK: true}
+	}
+	got, err = pool.allocOrWait(context.Background(), needs)
+	if err != nil || len(got) != 2 || fmt.Sprint(asked) != "[b]" {
+		t.Errorf("issue #395, two devices: %v, %v, asked %v", got, err, asked)
+	}
+}

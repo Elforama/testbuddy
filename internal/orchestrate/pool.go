@@ -97,7 +97,17 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 		if devs := p.tryAlloc(needs); devs != nil {
 			return devs, nil
 		}
-		if p.reclaimOwn(ctx, needs) {
+		rctx, cancel := ctx, context.CancelFunc(func() {})
+		if p.WaitForDevice > 0 { // asking does not run on far past the wait (min 2 s to ask at all)
+			until := deadline
+			if soon := time.Now().Add(2 * time.Second); until.Before(soon) {
+				until = soon
+			}
+			rctx, cancel = context.WithDeadline(ctx, until)
+		}
+		got := p.reclaimOwn(rctx, needs)
+		cancel()
+		if got {
 			continue // the caller's own session gave a device up: take it now
 		}
 		err := p.heldElsewhere(needs)
@@ -120,20 +130,35 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 func (p *Pool) heldElsewhere(needs []Need) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, n := range needs {
+	// One free device serves one need (pinned needs first, as tryAlloc hands them out).
+	var order []Need
+	for _, pinned := range []bool{true, false} {
+		for _, n := range needs {
+			if (n.Device != "") == pinned {
+				order = append(order, n)
+			}
+		}
+	}
+	claimed := map[string]bool{}
+	for _, n := range order {
 		var holders []string
-		free := false
+		free := ""
 		for _, d := range p.devices {
-			if !p.fits(n, d) {
+			if !p.fits(n, d) || claimed[d.Serial] {
 				continue
 			}
 			if o, ok := p.held[d.Serial]; ok && p.locks[d.Serial] == nil {
 				holders = append(holders, p.heldBy(d, o))
 				continue
 			}
-			free = true
+			free = d.Serial
+			break
 		}
-		if !free && len(holders) > 0 {
+		if free != "" {
+			claimed[free] = true
+			continue
+		}
+		if len(holders) > 0 {
 			msg := strings.Join(holders, "; ")
 			return fmt.Errorf("%s. One tb at a time per device: wait for it, use another device, or run with --wait-for-device", msg)
 		}
@@ -196,24 +221,33 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 		return false
 	}
 	p.mu.Lock()
+	// The needs in tryAlloc's order (pinned first), each given a free device that fits as
+	// tryAlloc would, so one free device does not count for two needs (a two-device flow with
+	// one device free and the other in the caller's session).
+	var order []Need
+	for _, pinned := range []bool{true, false} {
+		for _, n := range needs {
+			if (n.Device != "") == pinned {
+				order = append(order, n)
+			}
+		}
+	}
+	claimed := map[string]bool{}
 	var groups [][]string // per need with no free device: the devices to ask, in order
-	for _, n := range needs {
+	for _, n := range order {
 		var held []string
-		free := false
+		free := ""
 		for _, d := range p.devices {
-			if !p.fits(n, d) {
+			if !p.fits(n, d) || claimed[d.Serial] || p.lost[d.Serial] != nil {
 				continue
 			}
-			if _, tried := p.held[d.Serial]; !tried && p.lost[d.Serial] == nil {
+			if _, tried := p.held[d.Serial]; !tried {
 				p.lock(d) // not tried yet (tryAlloc stops at the first need it cannot serve)
 			}
 			o, ok := p.held[d.Serial]
 			if !ok || p.locks[d.Serial] != nil {
-				free = p.lost[d.Serial] == nil
-				if free {
-					break
-				}
-				continue
+				free = d.Serial
+				break
 			}
 			a, done := p.asked[d.Serial]
 			mine := done && a.owner == o.PID
@@ -221,7 +255,8 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 				held = append(held, d.Serial)
 			}
 		}
-		if free {
+		if free != "" {
+			claimed[free] = true
 			continue
 		}
 		if len(held) == 0 {
