@@ -60,6 +60,8 @@ type Dev struct {
 	// watching counts the tb watch commands on the device: a watch holds mu only while it
 	// reads the screen, so it is running between reads too (yield, issue #395)
 	watching atomic.Int32
+	// holder is the command that last took mu: while mu is held, the one running (issue #401)
+	holder atomic.Pointer[running]
 
 	// steps is written only with both mu and stepsMu held (by do and clear), so it can
 	// be read with either: tb log takes stepsMu alone and answers at once, even during a
@@ -104,14 +106,77 @@ func (d *Dev) shut(stopAgent bool) error {
 	return nil
 }
 
-// lockOpen takes d's device lock for a command. It fails, without the lock, when the session
-// was closed while the command waited for it (tb close, or its connection dropped).
-func (s *Service) lockOpen(d *Dev) error {
-	d.mu.Lock()
+// queuedNoteAfter is how long a command waits for the one running on its session before it says
+// so (issue #401).
+var queuedNoteAfter = time.Second
+
+// running is the command that holds a session's device lock.
+type running struct {
+	what  string // "tb do inputText: hello"
+	since time.Time
+}
+
+// describe names the command req runs, for a caller waiting for it: "tb do inputText: hello".
+func describe(req daemon.Request) string {
+	what := "tb " + req.Cmd
+	var args map[string]any
+	if json.Unmarshal(req.Args, &args) == nil {
+		var cmds []string
+		switch c := args["commands"].(type) {
+		case string:
+			cmds = []string{c}
+		case []any:
+			for _, x := range c {
+				cmds = append(cmds, fmt.Sprint(x))
+			}
+		}
+		if len(cmds) > 0 {
+			what += " " + strings.Join(cmds, "; ")
+		}
+	}
+	if r := []rune(what); len(r) > 80 {
+		what = string(r[:79]) + "…"
+	}
+	return what
+}
+
+// lockOpen takes d's device lock for the command req. It fails, without the lock, when the
+// session was closed while the command waited for it (tb close, or its connection dropped).
+// Commands run one at a time per session: one that waits for another says so after
+// queuedNoteAfter, on stderr, and again when it starts (issue #401); with no_wait, it fails at
+// once instead, saying what runs.
+func (s *Service) lockOpen(d *Dev, req daemon.Request, send func(daemon.Response)) error {
+	if !d.mu.TryLock() {
+		var a struct {
+			NoWait bool `json:"no_wait"`
+		}
+		json.Unmarshal(req.Args, &a)
+		busy := func() string {
+			if r := d.holder.Load(); r != nil {
+				return fmt.Sprintf("%s (started %s ago)", r.what, time.Since(r.since).Round(time.Second))
+			}
+			return "another command"
+		}
+		if a.NoWait {
+			return fmt.Errorf("%s is running a command: %s; without --no-wait this one waits for it", s.labelOf(d), busy())
+		}
+		var noted atomic.Bool
+		t := time.AfterFunc(queuedNoteAfter, func() {
+			if send != nil {
+				noted.Store(true)
+				send(daemon.Response{Stderr: true, Text: fmt.Sprintf("waiting for the command running on %s: %s\n", s.labelOf(d), busy())})
+			}
+		})
+		d.mu.Lock()
+		if !t.Stop() && noted.Load() && send != nil {
+			send(daemon.Response{Stderr: true, Text: "now running " + describe(req) + "\n"})
+		}
+	}
 	if d.closed {
 		d.mu.Unlock()
 		return fmt.Errorf("the session on %s was closed while this command waited for it", s.labelOf(d))
 	}
+	d.holder.Store(&running{what: describe(req), since: time.Now()})
 	return nil
 }
 
@@ -503,7 +568,7 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	if a.App != "" {
-		if err := s.lockOpen(d); err != nil {
+		if err := s.lockOpen(d, req, send); err != nil {
 			return fail(1, "%v", err)
 		}
 		d.AppID = a.App

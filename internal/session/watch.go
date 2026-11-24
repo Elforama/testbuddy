@@ -51,7 +51,7 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	// A re-read after silence is fresh where the device keeps a node cache (Android): a view
 	// that changes its text with no event stays as it was in that cache (issue #322).
 	read := func(lockFailed string, fresh bool) (*look.Listing, *daemon.Response) {
-		if err := s.lockOpen(d); err != nil {
+		if err := s.lockOpen(d, req, send); err != nil {
 			r := fail(1, lockFailed, err)
 			return nil, &r
 		}

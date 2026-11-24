@@ -201,6 +201,11 @@ already open. A command with `-p` does not use it. With no device named and seve
 simulators connected, a session command is refused and lists them, rather than taking one;
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
 
+Commands on one session run one at a time. A command sent while another runs there waits for
+it, and after a second says so on stderr ("waiting for the command running on a1: tb do ...
+(started 5s ago)"), then again when it starts; with `--no-wait` it fails at once with that
+message instead.
+
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device
 flows. Maestro's names for these (`MAESTRO_FILENAME`, ...) are set too, and `MAESTRO_*`

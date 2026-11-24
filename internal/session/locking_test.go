@@ -93,7 +93,7 @@ func TestCloseWaitsForRunningCommand(t *testing.T) {
 			})
 			// A command that found the session before the close and waited for the device
 			// fails instead of driving the closed connection.
-			if err := s.lockOpen(d); err == nil || !strings.Contains(err.Error(), "was closed") {
+			if err := s.lockOpen(d, daemon.Request{}, nil); err == nil || !strings.Contains(err.Error(), "was closed") {
 				t.Errorf("a command after the close: %v", err)
 				if err == nil {
 					d.mu.Unlock()
@@ -265,7 +265,7 @@ func TestCloseCancelledWhileWaiting(t *testing.T) {
 			t.Errorf("a cancelled close closed the driver %d times", f.closed)
 		}
 	})
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, daemon.Request{}, nil); err != nil {
 		t.Errorf("the session after a cancelled close: %v", err)
 	} else {
 		d.mu.Unlock()

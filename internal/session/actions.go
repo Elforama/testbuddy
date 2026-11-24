@@ -63,7 +63,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if err != nil {
 		return badInput(err)
 	}
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, req, send); err != nil {
 		resp := fail(1, "%v", err)
 		if a.JSON {
 			result.Exit, result.Error = resp.Exit, resp.Text

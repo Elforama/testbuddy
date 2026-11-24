@@ -38,7 +38,7 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, req, send); err != nil {
 		return fail(1, "%v", err)
 	}
 	defer d.mu.Unlock()
@@ -268,7 +268,7 @@ func (s *Service) shot(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, req, send); err != nil {
 		return fail(1, "%v", err)
 	}
 	defer d.mu.Unlock()

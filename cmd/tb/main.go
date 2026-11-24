@@ -67,6 +67,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
 With one device connected, or one session open (except for tb open), -d is optional; with
 several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
@@ -354,7 +355,8 @@ func platformFlag(a *args) (string, error) {
 }
 
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
-	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
+	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag},
+		{[]string{"no-wait"}, boolFlag}}, extra...)
 	a, err := parseArgs(argv, specs...)
 	if err == nil {
 		// A positional argument is the device for tb close (`tb close all`), as for tb open,
@@ -381,6 +383,9 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		return 2
 	}
 	args := map[string]any{"device": a.str("device"), "platform": platform}
+	if a.flag("no-wait") { // fail at once when another command runs on the session (issue #401)
+		args["no_wait"] = true
+	}
 	for _, s := range extra {
 		name := s.names[0]
 		if s.kind != boolFlag {
@@ -428,6 +433,10 @@ func callDaemon(cmd string, args map[string]any) int {
 	raw, _ := json.Marshal(args)
 	cwd, _ := os.Getwd()
 	resp, err := c.Call(daemon.Request{Cmd: cmd, Args: raw, Cwd: cwd}, func(part daemon.Response) {
+		if part.Stderr { // a note (a command queued behind another, issue #401), not output
+			fmt.Fprint(os.Stderr, part.Text)
+			return
+		}
 		fmt.Print(part.Text)
 	})
 	if err != nil {
