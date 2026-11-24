@@ -219,6 +219,9 @@ type Service struct {
 	// the device without connecting to it again) or a new session on the device
 	dropped  map[string]*Dev
 	stopping bool // CloseAll ran: a session that connects now is closed at once
+	// closed: the names of sessions tb close ended, and the serial each was on, so a command
+	// naming one says it was closed instead of "no device matches" (issue #400)
+	closed map[string]string
 
 	// openDrv connects to a device: connect.Open, or a fake driver in tests.
 	openDrv func(context.Context, device.Info) (driver.Driver, error)
@@ -226,7 +229,7 @@ type Service struct {
 
 func New() *Service {
 	return &Service{devs: map[string]*Dev{}, names: map[string]string{}, closing: map[string]*Dev{},
-		dropped: map[string]*Dev{}, openDrv: connect.Open}
+		dropped: map[string]*Dev{}, closed: map[string]string{}, openDrv: connect.Open}
 }
 
 // Register installs the daemon handlers.
@@ -372,12 +375,41 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 	if serial, ok := s.names[a.Device]; ok {
 		name, want = a.Device, serial
 	}
+	closedOn, wasClosed := s.closed[a.Device]
 	s.mu.Unlock()
-	info, err := device.PickOne(device.List(ctx), device.Platform(a.Platform), want)
+	devs := device.List(ctx)
+	info, err := device.PickOne(devs, device.Platform(a.Platform), want)
 	if err != nil {
+		if a.Device != "" && name == "" && !named(devs, a.Device) {
+			// not a device: a session name, maybe, of a session gone (issue #400)
+			if wasClosed {
+				return nil, fmt.Errorf("session %q (on %s) was closed: open it again with tb open -d %s --name %s", a.Device, closedOn, closedOn, a.Device)
+			}
+			var serials []string
+			for _, d := range devs {
+				if d.Platform != device.Web {
+					serials = append(serials, d.Serial)
+				}
+			}
+			list := "no phone or simulator connected"
+			if len(serials) > 0 {
+				list = strings.Join(serials, ", ")
+			}
+			return nil, fmt.Errorf("no session or connected device is named %q. Sessions end with tb close or after 30 minutes idle: open one with tb open -d DEVICE --name %s (devices: %s)", a.Device, a.Device, list)
+		}
 		return nil, err
 	}
 	return s.connect(ctx, info, name)
+}
+
+// named: a device in devs has serial or name want.
+func named(devs []device.Info, want string) bool {
+	for _, d := range devs {
+		if d.Serial == want || strings.EqualFold(d.Name, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // label names the device in messages; the caller holds s.mu (it reads d.Name).
@@ -419,6 +451,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		if name != "" {
 			d.Name = name
 			s.names[name] = info.Serial
+			delete(s.closed, name)
 		}
 		s.mu.Unlock()
 		return d, nil
@@ -469,6 +502,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 	delete(s.dropped, info.Serial) // the new session's close stops the agent
 	if name != "" {
 		s.names[name] = info.Serial
+		delete(s.closed, name)
 	}
 	s.mu.Unlock()
 	go func() { // forget a device whose agent connection drops
@@ -598,7 +632,8 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		if d, err2 := s.resolve(ctx, a.devArgs); err2 == nil {
 			info = d.Info
 		} else {
-			return fail(2, "%v", err)
+			// resolve's answer: for a closed or unknown session name, what to do (issue #400)
+			return fail(2, "%v", err2)
 		}
 	}
 	if a.Headless && info.Platform != device.Web {
@@ -686,6 +721,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 			_, dropped := s.dropped[serial]
 			if !open && !dropped && (a.Platform == "" || serials[serial]) {
 				delete(s.names, name)
+				s.closed[name] = serial
 			}
 		}
 		s.mu.Unlock()
@@ -718,8 +754,18 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		if a.Device == "" {
 			return daemon.Response{OK: true, Text: "no tb session is open: nothing to close\n"}
 		}
-		info, err := device.Pick(device.List(ctx), device.Platform(a.Platform), a.Device)
+		devs := device.List(ctx)
+		info, err := device.Pick(devs, device.Platform(a.Platform), a.Device)
 		if err != nil {
+			s.mu.Lock()
+			on, wasClosed := s.closed[a.Device]
+			s.mu.Unlock()
+			switch { // issue #400: a session's name, not a device's
+			case wasClosed:
+				return fail(2, "session %q (on %s) was closed already: nothing to close", a.Device, on)
+			case !named(devs, a.Device):
+				return fail(2, "no session or connected device is named %q: nothing to close", a.Device)
+			}
 			return fail(2, "%v", err)
 		}
 		// A device named by its name: the session that dropped on its current serial, if any.
@@ -860,6 +906,7 @@ func (s *Service) closeDev(ctx context.Context, d *Dev) (string, error) {
 	}
 	if d.Name != "" && s.names[d.Name] == d.Info.Serial {
 		delete(s.names, d.Name)
+		s.closed[d.Name] = d.Info.Serial
 	}
 	s.mu.Unlock()
 	return label, d.shut(true)

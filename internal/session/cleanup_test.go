@@ -101,7 +101,7 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	}
 	// Closed now: alice names nothing any more (exit 2), and a close by serial finds no
 	// session; neither connects, nor stops the agent again.
-	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); r.OK || r.Exit != 2 || !strings.Contains(r.Text, `no connected device matches "alice"`) {
+	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); r.OK || r.Exit != 2 || !strings.Contains(r.Text, `session "alice" (on emulator-5554) was closed already: nothing to close`) {
 		t.Errorf("second close -d alice = %+v", r)
 	}
 	if r, _ := call(t, s.close, map[string]any{"device": "emulator-5554"}, ""); !r.OK || r.Text != "no tb session is open on Pixel 7 emulator-5554: nothing to close\n" {
