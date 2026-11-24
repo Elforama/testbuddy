@@ -39,7 +39,7 @@ func schema(props map[string]any, required ...string) map[string]any {
 	return s
 }
 
-var devProp = map[string]any{"type": "string", "description": "device name/serial or session name; optional with one device"}
+var devProp = map[string]any{"type": "string", "description": "device name/serial or session name (default: TB_DEVICE); optional with one device connected, needed with several"}
 
 var mcpTools = []mcpTool{
 	{"devices", "List devices and open sessions.", schema(map[string]any{})},

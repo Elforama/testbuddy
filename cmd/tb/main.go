@@ -598,7 +598,8 @@ func cmdHierarchy(argv []string) int {
 	// (issue #124).
 	ctx, cancel := stopContext()
 	defer cancel()
-	info, err := device.PickOne(listDevices(ctx), device.Platform(a.str("platform")), orEnvDevice(a.str("device")))
+	// TB_DEVICE is not read here: it may name a session, which only the daemon knows.
+	info, err := device.PickOne(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -673,8 +674,12 @@ func orEnvDevice(d string) string {
 }
 
 // defaultDevice fills in TB_DEVICE for a session command's device when none is named (issue
-// #396). Commands that take no device (no "device" key) are left alone.
+// #396). Commands that take no device (no "device" key) are left alone, and so is a command
+// with a platform (-p web): it asks for that platform's device, not the pinned one.
 func defaultDevice(args map[string]any) {
+	if p, _ := args["platform"].(string); p != "" {
+		return
+	}
 	if d, ok := args["device"].(string); ok && d == "" {
 		args["device"] = orEnvDevice("")
 	}

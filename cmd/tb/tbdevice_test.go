@@ -27,3 +27,14 @@ func TestTBDeviceIsTheDefaultDevice(t *testing.T) {
 		t.Errorf("no TB_DEVICE: device %v", args["device"])
 	}
 }
+
+// Review of issue #396: a command with a platform (-p web) asks for that platform's device, not
+// the one TB_DEVICE pins.
+func TestTBDeviceIsNotUsedWithAPlatform(t *testing.T) {
+	f := startFakeDaemon(t)
+	t.Setenv("TB_DEVICE", "emulator-5554")
+	agentCall("look", []string{"-p", "web"}, nil)
+	if _, args, _ := f.last(t); args["device"] != "" || args["platform"] != "web" {
+		t.Errorf("tb look -p web with TB_DEVICE: %v", args)
+	}
+}
