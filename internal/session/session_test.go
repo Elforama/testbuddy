@@ -139,7 +139,8 @@ func TestResolveNotOpen(t *testing.T) {
 	if _, err := s.resolve(ctx, devArgs{}); err == nil || !strings.Contains(err.Error(), "no device is connected") {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no connected device matches "bob"`) {
+	// issue #400: a name that is no device may be a session's: the error says so
+	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no session or connected device is named "bob"`) {
 		t.Errorf("err = %v", err)
 	}
 	addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "")
@@ -269,7 +270,8 @@ func TestOpenNameTaken(t *testing.T) {
 // open of a device that is not connected fails with exit 2.
 func TestOpenUnknown(t *testing.T) {
 	resp, _ := call(t, New().open, map[string]any{"device": "Pixel 99"}, "")
-	if resp.Exit != 2 || !strings.Contains(resp.Text, `no connected device matches "Pixel 99"`) {
+	// issue #400: a name that is no device may be a session's, gone: the error says so
+	if resp.Exit != 2 || !strings.Contains(resp.Text, `no session or connected device is named "Pixel 99"`) {
 		t.Errorf("resp %+v", resp)
 	}
 }
