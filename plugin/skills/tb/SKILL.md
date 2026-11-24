@@ -21,7 +21,7 @@ device requirements and what tb installs on devices: [setup.md](setup.md).
 ## First steps
 
 ```bash
-tb devices                  # what tb can drive: Android serials, iOS simulators, chrome
+tb devices                  # what tb can drive, and which are free or in use (by whom)
 ```
 
 - Android: an emulator running, or a phone with USB debugging (`adb devices` lists it).

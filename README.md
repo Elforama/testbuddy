@@ -72,7 +72,7 @@ simulator, or have Google Chrome installed for web flows.
 ## Quick start
 
 ```sh
-tb devices                          # what tb can drive: emulators, simulators, Chrome
+tb devices                          # what tb can drive, and which are free or in use (by whom)
 tb test login.yaml                  # run one flow
 tb test flows/ -p android           # every flow in a folder, on Android only
 tb test flows/ -p web --headless    # web (url:) flows in headless Chrome
