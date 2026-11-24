@@ -200,6 +200,17 @@ an agent can be pinned to its device once: a serial or device name, or the name 
 already open. A command with `-p` does not use it. With no device named and several phones or
 simulators connected, a session command is refused and lists them, rather than taking one;
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
+In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or multi-device flow),
+`TB_DEVICE` names the device tried first (a serial or device name: a session's name is not seen
+there): your own idle session on it gives it back, and when it cannot run a flow or is in use
+(another agent's session, or yours running a command) the flow goes to another. When the run had
+a choice of phones or simulators, it says which one it took and why not the others before its
+first flow there.
+
+Commands on one session run one at a time. A command sent while another runs there waits for
+it, and after a second says so on stderr ("waiting for the command running on a1: tb do ...
+(started 5s ago)"), then again when it starts; with `--no-wait` it fails at once with that
+message instead.
 
 `TB_SESSION_OWNER` makes the sessions a caller opens its own: set it once per agent (any name).
 Another agent (another owner, or a caller with none) is refused on them ("emulator-5750 is

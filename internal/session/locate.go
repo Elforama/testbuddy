@@ -21,7 +21,7 @@ type locatorCandidate struct {
 	Chosen  bool   `json:"chosen"`
 }
 
-func (s *Service) locate(ctx context.Context, req daemon.Request, _ func(daemon.Response)) daemon.Response {
+func (s *Service) locate(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[struct {
 		devArgs
 		Selector string `json:"selector"`
@@ -37,7 +37,7 @@ func (s *Service) locate(ctx context.Context, req daemon.Request, _ func(daemon.
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, req, send); err != nil {
 		return fail(1, "%v", err)
 	}
 	defer d.mu.Unlock()
