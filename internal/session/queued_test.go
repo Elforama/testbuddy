@@ -96,3 +96,12 @@ func TestQueuedNotesAndNoWait(t *testing.T) {
 		t.Errorf("notes: %+v", parts)
 	}
 }
+
+// Review of issue #401: the CLI sends tb do's commands as a YAML list; the note names them
+// without the list's dashes.
+func TestDescribeYAMLList(t *testing.T) {
+	req := daemon.Request{Cmd: "do", Args: []byte(`{"commands":"- launchApp: com.example\n- tapOn: Login\n"}`)}
+	if got := describe(req); got != "tb do launchApp: com.example; tapOn: Login" {
+		t.Errorf("describe: %q", got)
+	}
+}

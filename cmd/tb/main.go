@@ -355,8 +355,11 @@ func platformFlag(a *args) (string, error) {
 }
 
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
-	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag},
-		{[]string{"no-wait"}, boolFlag}}, extra...)
+	specs := []flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}
+	if cmd != "close" && cmd != "devices" && cmd != "log" { // the commands that wait for a session's device
+		specs = append(specs, noWaitFlag)
+	}
+	specs = append(specs, extra...)
 	a, err := parseArgs(argv, specs...)
 	if err == nil {
 		// A positional argument is the device for tb close (`tb close all`), as for tb open,
@@ -383,9 +386,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		return 2
 	}
 	args := map[string]any{"device": a.str("device"), "platform": platform}
-	if a.flag("no-wait") { // fail at once when another command runs on the session (issue #401)
-		args["no_wait"] = true
-	}
+	noWait(a, args)
 	for _, s := range extra {
 		name := s.names[0]
 		if s.kind != boolFlag {
@@ -461,7 +462,8 @@ func callDaemon(cmd string, args map[string]any) int {
 
 func cmdDo(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
-		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag})
+		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag},
+		noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -494,6 +496,7 @@ func cmdDo(argv []string) int {
 	if a.flag("json") {
 		req["json"] = true
 	}
+	noWait(a, req)
 	return callDaemon("do", req)
 }
 
@@ -518,7 +521,7 @@ func toCommandList(parts []string) string {
 
 func cmdWait(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
-		flagSpec{[]string{"gone"}, boolFlag}, flagSpec{[]string{"timeout", "t"}, intFlag})
+		flagSpec{[]string{"gone"}, boolFlag}, flagSpec{[]string{"timeout", "t"}, intFlag}, noWaitFlag)
 	if err != nil || len(a.pos) == 0 {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -538,13 +541,15 @@ func cmdWait(argv []string) int {
 	}
 	timeout := a.num("timeout", 17000)
 	yaml := fmt.Sprintf("- extendedWaitUntil:\n    %s: %s\n    timeout: %d\n", key, sel, timeout)
-	return callDaemon("do", map[string]any{"device": a.str("device"), "platform": a.str("platform"), "commands": yaml})
+	req := map[string]any{"device": a.str("device"), "platform": a.str("platform"), "commands": yaml}
+	noWait(a, req)
+	return callDaemon("do", req)
 }
 
 func cmdSave(argv []string) int {
 	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"app", "a"}, textFlag},
-		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
+		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, saveUsage)
@@ -560,6 +565,7 @@ func cmdSave(argv []string) int {
 		return 2
 	}
 	req := map[string]any{"device": a.str("device"), "app": a.str("app")}
+	noWait(a, req)
 	if len(a.pos) == 1 {
 		req["path"] = a.pos[0]
 	}
@@ -692,5 +698,16 @@ func defaultDevice(args map[string]any) {
 	}
 	if d, ok := args["device"].(string); ok && d == "" {
 		args["device"] = orEnvDevice("")
+	}
+}
+
+// noWaitFlag: --no-wait, for a command that runs on a session: it fails at once when another
+// command runs there, instead of waiting for it (issue #401).
+var noWaitFlag = flagSpec{[]string{"no-wait"}, boolFlag}
+
+// noWait passes --no-wait on to the daemon.
+func noWait(a *args, req map[string]any) {
+	if a.flag("no-wait") {
+		req["no_wait"] = true
 	}
 }
