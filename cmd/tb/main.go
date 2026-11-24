@@ -37,7 +37,7 @@ Run tests:
                                          (tb a11y -h for options; runs in CI too)
 
 Drive a device (for AI agents and people; the device stays connected between calls):
-  tb devices                             list devices
+  tb devices                             list devices, and which are free or in use (and by whom)
   tb open [-d DEVICE] [--name alice] [--app ID]
                                          connect to a device, optionally naming it
   tb open -p web --headless --app URL    open a headless Chrome session

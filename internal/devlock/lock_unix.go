@@ -19,3 +19,17 @@ func lockFile(f *os.File) (held bool, err error) {
 }
 
 func unlockFile(f *os.File) { syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }
+
+// heldElsewhere reports whether another open file holds f's lock, by taking a shared lock
+// without waiting and letting it go at once.
+func heldElsewhere(f *os.File) (bool, error) {
+	err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false, nil
+}

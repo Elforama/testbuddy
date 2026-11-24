@@ -9,7 +9,7 @@ tb drives Android emulators and devices, iOS simulators, and Chrome from the she
 Interactive sessions stay connected between calls through a background daemon.
 
 Explore an app:
-- tb devices                      list devices
+- tb devices                      list devices: free, in use (by whom), or your session
 - tb open --name alice [-d DEVICE] [--app APP_ID]   optional; names a device for multi-device work
 - tb look [-d alice]              screen as one line per element: @ref Kind "label" #id state;
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.

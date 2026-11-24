@@ -491,6 +491,10 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 		open[k] = d.Name
 		foreign[k] = d.foreign(a.Owner)
 	}
+	closing := map[string]bool{} // this daemon's sessions still closing: they hold their device
+	for k := range s.closing {
+		closing[k] = true
+	}
 	s.mu.Unlock()
 	var b strings.Builder
 	type jdev struct {
@@ -499,6 +503,13 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 		Open    bool   `json:"open"`
 		// Others: the session is another agent's (another TB_SESSION_OWNER, issue #399).
 		Others bool `json:"others,omitempty"`
+		// InUse: another tb process holds the device (a tb test run, another daemon's
+		// session), read from its lock (issue #398). Free: whether a tb holds it; left out
+		// where tb cannot tell (browsers, locking off) and for this daemon's own sessions.
+		InUse *devlock.Owner `json:"in_use,omitempty"`
+		Free  *bool          `json:"free,omitempty"`
+		// Closing: this daemon's session on it is closing (its connection dropped).
+		Closing bool `json:"closing,omitempty"`
 	}
 	var out []jdev
 	for _, d := range all {
@@ -515,6 +526,20 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 			if foreign[d.Serial] {
 				jd.Others = true
 				line += " (another agent's)"
+			}
+		} else if closing[d.Serial] {
+			jd.Closing = true
+			line += "  closing (this daemon's session; its connection dropped)"
+		} else if d.Platform != device.Web { // browsers are not locked: each run starts its own
+			switch o, st := devlock.Probe(d.Serial); st {
+			case devlock.Held:
+				jd.InUse = &o
+				jd.Free = new(bool)
+				line += "  in use: " + o.String()
+			case devlock.Free:
+				free := true
+				jd.Free = &free
+				line += "  free"
 			}
 		}
 		out = append(out, jd)
