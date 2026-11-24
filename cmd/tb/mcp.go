@@ -39,7 +39,7 @@ func schema(props map[string]any, required ...string) map[string]any {
 	return s
 }
 
-var devProp = map[string]any{"type": "string", "description": "device name/serial or session name; optional with one device"}
+var devProp = map[string]any{"type": "string", "description": "device name/serial or session name (default: TB_DEVICE); optional with one device connected, needed with several"}
 
 var mcpTools = []mcpTool{
 	{"devices", "List devices and open sessions.", schema(map[string]any{})},
@@ -247,6 +247,7 @@ func mcpReply(ctx context.Context, req mcpRequest) map[string]any {
 func mcpCall(ctx context.Context, name string, args map[string]any) map[string]any {
 	str := func(k string) string { s, _ := args[k].(string); return s }
 	call := func(cmd string, a map[string]any) daemon.Response {
+		defaultDevice(a)
 		if ctx.Err() != nil {
 			return daemon.Response{Exit: 1, Text: cmd + " was cancelled"}
 		}

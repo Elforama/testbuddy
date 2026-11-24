@@ -88,7 +88,9 @@ name, its serial, or a device name that the device list resolves to its serial (
 `-d`, as the only one; several are named, and `-d` asked for). A `tb close` for a device with no session answers so, without
 connecting to it. A command with `-p` and no `-d` uses the one session open on that platform;
 with several open there it asks for `-d` instead of taking the first device the platform
-lists. The daemon's own lock, over its list of devices and their session names, is held only
+lists. With no session open and no `-d` (nor `TB_DEVICE`), a session command takes the
+one phone or simulator connected (Chrome only when there is none); with several, it lists
+them and asks for `-d` (device.PickOne, issue #396). The daemon's own lock, over its list of devices and their session names, is held only
 briefly and never while waiting for a device lock.
 `tb save --preview [path] --json` builds the same YAML as `tb save` and returns it with a
 step count and warnings. The optional path establishes the base directory for relative

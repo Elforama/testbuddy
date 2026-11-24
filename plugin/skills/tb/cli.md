@@ -1,10 +1,10 @@
 # tb command reference
 
 Exit status for every command: **0** ok, **1** a command or flow failed, **2** bad input.
-`-d` takes a session name (from `tb open --name`), a serial/UDID or a device name; with one
-device it is optional. A flag's value is checked before anything runs: a number flag takes a
-number, an on/off flag given a value takes `true` or `false` (`--json=false`), and anything
-else is bad input.
+`-d` takes a session name (from `tb open --name`), a serial/UDID or a device name, and defaults
+to `TB_DEVICE`; with one device connected it is optional, with several tb asks which. A flag's
+value is checked before anything runs: a number flag takes a number, an on/off flag given a
+value takes `true` or `false` (`--json=false`), and anything else is bad input.
 
 ## Run tests
 
@@ -194,6 +194,12 @@ prints the screen and a `similar:` line with near matches.
 | `TB_IOS_PROBE=0` | Do not inject tb's change probe into iOS apps it launches (an app that breaks with it); waits are slower. |
 | `TB_SILENT_MS` | How long a wait hears nothing from the device before it re-reads the screen anyway (default 1500); `0` turns the re-reads off. |
 | `NO_COLOR` | Plain output. |
+
+`-d` defaults to `TB_DEVICE` for the session commands (`look`, `do`, `open`, `close`, ...), so
+an agent can be pinned to its device once: a serial or device name, or the name of a session
+already open. A command with `-p` does not use it. With no device named and several phones or
+simulators connected, a session command is refused and lists them, rather than taking one;
+the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device
