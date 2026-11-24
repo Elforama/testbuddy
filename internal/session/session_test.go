@@ -270,7 +270,8 @@ func TestOpenNameTaken(t *testing.T) {
 // open of a device that is not connected fails with exit 2.
 func TestOpenUnknown(t *testing.T) {
 	resp, _ := call(t, New().open, map[string]any{"device": "Pixel 99"}, "")
-	if resp.Exit != 2 || !strings.Contains(resp.Text, `no connected device matches "Pixel 99"`) {
+	// issue #400: a name that is no device may be a session's, gone: the error says so
+	if resp.Exit != 2 || !strings.Contains(resp.Text, `no session or connected device is named "Pixel 99"`) {
 		t.Errorf("resp %+v", resp)
 	}
 }

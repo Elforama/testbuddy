@@ -297,7 +297,7 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 					serials = append(serials, d.Serial)
 				}
 			}
-			list := "none connected"
+			list := "no phone or simulator connected"
 			if len(serials) > 0 {
 				list = strings.Join(serials, ", ")
 			}
@@ -513,7 +513,8 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		if d, err2 := s.resolve(ctx, a.devArgs); err2 == nil {
 			info = d.Info
 		} else {
-			return fail(2, "%v", err)
+			// resolve's answer: for a closed or unknown session name, what to do (issue #400)
+			return fail(2, "%v", err2)
 		}
 	}
 	if a.Headless && info.Platform != device.Web {
@@ -634,13 +635,17 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		if a.Device == "" {
 			return daemon.Response{OK: true, Text: "no tb session is open: nothing to close\n"}
 		}
-		info, err := device.Pick(device.List(ctx), device.Platform(a.Platform), a.Device)
+		devs := device.List(ctx)
+		info, err := device.Pick(devs, device.Platform(a.Platform), a.Device)
 		if err != nil {
 			s.mu.Lock()
 			on, wasClosed := s.closed[a.Device]
 			s.mu.Unlock()
-			if wasClosed { // issue #400: a session's name, not a device's
+			switch { // issue #400: a session's name, not a device's
+			case wasClosed:
 				return fail(2, "session %q (on %s) was closed already: nothing to close", a.Device, on)
+			case !named(devs, a.Device):
+				return fail(2, "no session or connected device is named %q: nothing to close", a.Device)
 			}
 			return fail(2, "%v", err)
 		}
