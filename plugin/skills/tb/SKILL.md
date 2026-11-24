@@ -138,8 +138,9 @@ Full format: [flows.md](flows.md).
 The full list: [gotchas.md](gotchas.md). The ones that bite most:
 
 1. **One tb per device.** A `tb test` run or an open session locks its device; another run is
-   refused at once, saying who holds it. `tb test --wait-for-device 5m` waits; your own
-   session frees it with `tb close -d <device>`. Stop other UI test tools before tb runs.
+   refused at once, saying who holds it. `tb test --wait-for-device 5m` waits; your own idle
+   session hands its device to your `tb test` / `tb replay` run by itself. Stop other UI test
+   tools before tb runs.
 2. **The installed app must match the flows.** Most "element not found" failures on a real
    app are a different build (renamed labels, removed buttons). Check the printed screen.
 3. **`clearState` signs users out** and wipes app data; on a signed-in device omit it.

@@ -24,9 +24,11 @@ happens and what to do.
   ends; a session (`tb open`, `do`, `look`) locks its device until `tb close`. A second
   runner is refused at once with who holds the device: `device emulator-5554 is in use by tb
   test flows/ (pid 4242, since 10:31:07, in /path)`. Use another device (with several
-  connected, `tb test` picks a free one), wait (`tb test --wait-for-device 5m`), or, if it is
-  your own session, `tb close -d <device>`. Locks die with their process. Browsers are not
-  locked. `TB_NO_DEVICE_LOCK=1` turns locking off.
+  connected, `tb test` picks a free one), or wait (`tb test --wait-for-device 5m`). Your own
+  session (the same daemon, `TB_HOME`) gives its device to your `tb test` / `tb replay` run when
+  no command is running in it (`tb do`, `tb watch`), and the next `tb look` or `tb do` opens it
+  again: no `tb close` needed in between. Locks die with their process. Browsers are not locked.
+  `TB_NO_DEVICE_LOCK=1` turns locking off.
 - In one daemon, a device open as session "a" is not opened again under another name: use
   `-d a`, or close it first.
 - **One UI automation client per Android device.** Another UI test tool's on-device server

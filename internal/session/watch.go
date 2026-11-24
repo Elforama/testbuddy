@@ -35,6 +35,8 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	d.watching.Add(1) // running between its reads too: not given up to a tb test (yield)
+	defer d.watching.Add(-1)
 	timeout := time.Duration(a.Timeout) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 30 * time.Second
