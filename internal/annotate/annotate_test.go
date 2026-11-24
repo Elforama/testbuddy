@@ -123,9 +123,9 @@ func TestBurnWithFFmpeg(t *testing.T) {
 		t.Skipf("ffmpeg cannot make a test video: %v %s", err, out)
 	}
 	before, _ := os.Stat(path)
-	err = Burn(context.Background(), path,
-		[]Caption{{0, time.Second, "tapOn: \"Save\""}, {time.Second, 2 * time.Second, "assertVisible: \"Saved\""}},
-		[]Touch{{300 * time.Millisecond, "tap", [][2]float64{{0.5, 0.5}}}, {time.Second, "swipe", [][2]float64{{0.5, 0.8}, {0.5, 0.2}}}})
+	err = Burn(context.Background(), path, Drawing{
+		Caps:    []Caption{{0, time.Second, "tapOn: \"Save\""}, {time.Second, 2 * time.Second, "assertVisible: \"Saved\""}},
+		Touches: []Touch{{At: 300 * time.Millisecond, Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}, {At: time.Second, Kind: "swipe", Pts: [][2]float64{{0.5, 0.8}, {0.5, 0.2}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestBurnWithFFmpeg(t *testing.T) {
 	if after.ModTime().Equal(before.ModTime()) && after.Size() == before.Size() {
 		t.Error("the video was not rewritten")
 	}
-	w, h, err := videoSize(context.Background(), dir, ffmpeg, path)
+	w, h, _, err := videoInfo(context.Background(), dir, ffmpeg, path)
 	if err != nil || w != 360 || h != 640+bandHeight(360, 640) {
 		t.Errorf("size %dx%d %v, want 360x%d (the band below)", w, h, err, 640+bandHeight(360, 640))
 	}
@@ -152,7 +152,7 @@ func TestBurnWithoutFFmpeg(t *testing.T) {
 	FFmpegPath = func() (string, error) { return "", exec.ErrNotFound }
 	path := filepath.Join(t.TempDir(), "recording.mp4")
 	os.WriteFile(path, []byte("video"), 0o644)
-	if err := Burn(context.Background(), path, []Caption{{0, time.Second, "x"}}, nil); err == nil || !strings.Contains(err.Error(), "ffmpeg") {
+	if err := Burn(context.Background(), path, Drawing{Caps: []Caption{{0, time.Second, "x"}}}); err == nil || !strings.Contains(err.Error(), "ffmpeg") {
 		t.Errorf("err %v", err)
 	}
 	if b, _ := os.ReadFile(path); string(b) != "video" {
@@ -175,7 +175,7 @@ func TestBurnSteadiesASparseVideo(t *testing.T) {
 		"-vf", "select='not(mod(n,25))'", "-fps_mode", "vfr", "-pix_fmt", "yuv420p", path).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg cannot make a sparse video: %v %s", err, out)
 	}
-	if err := Burn(context.Background(), path, []Caption{{0, time.Second, "a"}, {time.Second, 3 * time.Second, "b"}}, nil); err != nil {
+	if err := Burn(context.Background(), path, Drawing{Caps: []Caption{{0, time.Second, "a"}, {time.Second, 3 * time.Second, "b"}}}); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-i", path, "-map", "0:v", "-f", "null", "-").CombinedOutput()

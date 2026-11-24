@@ -77,6 +77,10 @@ type Options struct {
 	// lasts at least a second, and the video shows each step's text and where each
 	// touch went. Meant for recordings only.
 	Annotate bool
+	// AnnotateEvents, with Annotate, gives the events sent to tb for the device in role while
+	// [start, end] was recorded (`tb mark`, the event endpoint), for the video's event log
+	// (annotate.go). nil = none.
+	AnnotateEvents func(role string, start, end time.Time) []AnnotateEvent
 	// AnnotateStep is how long, with Annotate, each step that acts on the app lasts at least
 	// (annotate.go): 0 = 1 s, negative = no holds (captions and touches only).
 	AnnotateStep time.Duration
@@ -133,7 +137,7 @@ type Runner struct {
 	annotateWait func(context.Context, time.Duration) // annotate mode's hold (annotate.go); nil = sleep; tests replace it
 	// annotateBurn draws annotate mode's captions and touches on a video (annotate.go); nil =
 	// annotate.Burn; tests replace it
-	annotateBurn func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
+	annotateBurn func(ctx context.Context, path string, d annotate.Drawing) error
 	// annotateChanges lists when the video's picture changes (annotate.go); nil =
 	// annotate.Changes; tests replace it
 	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)

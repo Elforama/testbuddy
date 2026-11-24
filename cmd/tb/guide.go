@@ -45,6 +45,7 @@ Run tests:
 - tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
 - tb replay f.yaml -d D --record --annotate  a video a person can follow (for a PR): captions, touches, no rush
+- tb mark "event {k: v}"  while a --annotate run records: show the event in the video (the app can POST $TB_EVENTS_URL)
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 - tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
                                   regex text ("Sign in?"), optional assertions, flows that assert nothing
