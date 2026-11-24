@@ -22,6 +22,7 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/legacy"
 	"github.com/elforama/testbuddy/internal/look"
+	marks "github.com/elforama/testbuddy/internal/mark"
 	"github.com/elforama/testbuddy/internal/orchestrate"
 	"github.com/elforama/testbuddy/internal/report"
 	"github.com/elforama/testbuddy/internal/workspace"
@@ -55,6 +56,12 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
                              or seconds: 2; 0 for no holds), and the video shows a ring
                              where each touch went and, in a band added below the recording,
                              each step's text (placed with ffmpeg); not for ordinary runs
+  --events-port N            with --annotate: take events for the videos on this port of
+                             127.0.0.1 (default 7357; 0 for none). Each event sent while a
+                             flow records shows in a band below the step's text, with its
+                             time: "tb mark TEXT", or POST /event from the app (an Android
+                             device reaches it on its own localhost; the URL is also in
+                             $TB_EVENTS_URL and the flows' ${TB_EVENTS_URL})
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -80,6 +87,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
 		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, optTimeFlag},
+		flagSpec{[]string{"events-port"}, intFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -111,6 +119,10 @@ func cmdTest(argv []string) int {
 func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	if a.flag("annotate") && !a.flag("record") {
 		fmt.Fprintln(os.Stderr, "--annotate is for recordings: use it with --record")
+		return 2
+	}
+	if a.str("events-port") != "" && !a.flag("annotate") {
+		fmt.Fprintln(os.Stderr, "--events-port is for annotated recordings: use it with --record --annotate")
 		return 2
 	}
 	var annotateStep time.Duration // 0: the engine's default (1 s)
@@ -267,6 +279,16 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 
+	// Events (--annotate): the endpoint that takes events for the videos' event log (package mark)
+	events, eventsURL := serveEvents(a, con)
+	if events != nil {
+		defer events.close()
+		os.Setenv(marks.EnvURL, eventsURL)
+		if !seenEnv[marks.EnvURL] { // -e TB_EVENTS_URL=... wins (a proxy in front, say)
+			baseEnv = append(baseEnv, flow.KV{Key: marks.EnvURL, Value: eventsURL})
+		}
+	}
+
 	// Jobs
 	var jobs []*orchestrate.Job
 	for i, f := range plan.Flows {
@@ -321,6 +343,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	defer timelines.closeAll()
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
+			events.reach(ctx, d)
 			if a.flag("keep-animations") {
 				return
 			}
@@ -350,7 +373,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep,
+				AnnotateEvents: events.forJob(ds)}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))

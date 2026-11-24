@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,8 +136,8 @@ func TestAnnotateCaptionsAndTouchesTheRecording(t *testing.T) {
 	var burned []string
 	var caps []annotate.Caption
 	var touches []annotate.Touch
-	r.annotateBurn = func(_ context.Context, path string, c []annotate.Caption, ts []annotate.Touch) error {
-		burned, caps, touches = append(burned, path), c, ts
+	r.annotateBurn = func(_ context.Context, path string, d annotate.Drawing) error {
+		burned, caps, touches = append(burned, path), d.Caps, d.Touches
 		return nil
 	}
 	res := r.RunFlow(context.Background(), fl)
@@ -161,6 +162,92 @@ func TestAnnotateCaptionsAndTouchesTheRecording(t *testing.T) {
 	}
 }
 
+// The events sent to tb while the flow ran (tb mark, the event endpoint) reach the video, in
+// times from its start, for the device's role; those from before the video are left out.
+func TestAnnotateDrawsTheEventsSentDuringTheRun(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	dir := t.TempDir()
+	fl, err := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var askedRole string
+	var asked [2]time.Time
+	events := func(role string, start, end time.Time) []AnnotateEvent {
+		askedRole, asked = role, [2]time.Time{start, end}
+		return []AnnotateEvent{
+			{At: start.Add(-time.Second), Text: "before the video"},
+			{At: start.Add(10 * time.Millisecond), Text: "screen_view"},
+			{At: start.Add(12 * time.Millisecond), Text: "button_tap"},
+		}
+	}
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Annotate: true,
+		Role: "alice", AnnotateEvents: events})
+	r.annotateWait = func(context.Context, time.Duration) {}
+	var got []annotate.Event
+	r.annotateBurn = func(_ context.Context, _ string, d annotate.Drawing) error {
+		got = d.Events
+		return nil
+	}
+	res := r.RunFlow(context.Background(), fl)
+	if res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	v := res.Videos[0]
+	if askedRole != "alice" || !asked[0].Equal(v.Start) || !asked[1].Equal(v.End) {
+		t.Errorf("asked for %q %v, want alice and the video's stretch", askedRole, asked)
+	}
+	if len(got) != 2 || got[0] != (annotate.Event{At: 10 * time.Millisecond, Text: "screen_view"}) ||
+		got[1] != (annotate.Event{At: 12 * time.Millisecond, Text: "button_tap"}) {
+		t.Errorf("events %+v", got)
+	}
+}
+
+// A video ffmpeg cannot draw the events on still gets its captions and touches (found in
+// review: one failure lost them all).
+func TestAnnotateDrawsCaptionsWhenTheEventsFail(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	dir := t.TempDir()
+	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	events := func(_ string, start, _ time.Time) []AnnotateEvent {
+		return []AnnotateEvent{{At: start.Add(10 * time.Millisecond), Text: "screen_view"}}
+	}
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Annotate: true,
+		AnnotateEvents: events})
+	r.annotateWait = func(context.Context, time.Duration) {}
+	var calls []annotate.Drawing
+	r.annotateBurn = func(ctx context.Context, _ string, d annotate.Drawing) error {
+		calls = append(calls, d)
+		if len(d.Events) > 0 {
+			return errors.New("Too many open files")
+		}
+		// found in review: the retry shared the first burn's deadline, used up when that one
+		// timed out
+		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) < stopTimeout-time.Minute {
+			t.Errorf("the retry has %v left", time.Until(dl))
+		}
+		return nil
+	}
+	if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	if len(calls) != 2 || len(calls[1].Events) != 0 || len(calls[1].Caps) == 0 || len(calls[1].Touches) != 1 {
+		t.Errorf("burns %+v, want a second one with the captions and touches only", calls)
+	}
+}
+
+// Events move with the captions and touches when the video runs off tb's clock.
+func TestShiftEventsKeepsThoseInTheVideo(t *testing.T) {
+	start := time.Now()
+	v := Video{Start: start, End: start.Add(5 * time.Second)}
+	got := shiftEvents(v, []annotate.Event{{At: 100 * time.Millisecond, Text: "a"}, {At: 2 * time.Second, Text: "b"}}, -300*time.Millisecond)
+	if len(got) != 1 || got[0] != (annotate.Event{At: 1700 * time.Millisecond, Text: "b"}) {
+		t.Errorf("%+v", got)
+	}
+}
+
 // Without --annotate the recording is left as the device made it.
 func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 	f := &fakeDriver{settled: true}
@@ -168,7 +255,7 @@ func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 	dir := t.TempDir()
 	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
 	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true})
-	r.annotateBurn = func(context.Context, string, []annotate.Caption, []annotate.Touch) error {
+	r.annotateBurn = func(context.Context, string, annotate.Drawing) error {
 		t.Error("burned without --annotate")
 		return nil
 	}

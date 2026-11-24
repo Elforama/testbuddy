@@ -33,6 +33,8 @@ Run tests:
   tb test <flows or folders> [options]   run flows (tb test -h for options)
   tb check <flows...> [--lint]           check flow syntax without a device; --lint also
                                          lists fragile steps (tb check -h for options)
+  tb mark [-d DEVICE] <text>...         show an event in a running tb test --annotate's
+                                         videos (tracking calls, webhooks; tb mark -h)
   tb a11y [paths] [--changed]            check app code for UI tb cannot detect or tap
                                          (tb a11y -h for options; runs in CI too)
 
@@ -81,6 +83,8 @@ func main() {
 	switch cmd {
 	case "test":
 		code = cmdTest(rest)
+	case "mark":
+		code = cmdMark(rest)
 	case "check", "check-syntax":
 		code = cmdCheck(rest)
 	case "a11y", "accessibility":

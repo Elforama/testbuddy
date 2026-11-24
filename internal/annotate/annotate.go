@@ -16,6 +16,7 @@ package annotate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -70,10 +71,21 @@ const (
 	swipeShown = 800 * time.Millisecond  // and stays in all
 )
 
-// Burn draws caps and touches onto the video at path, in place. The captions are also
-// written beside it (the video's name with .srt). On an error the video is left as it was.
-func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) error {
-	if len(caps) == 0 && len(touches) == 0 {
+// Drawing is what Burn draws on a video: the steps' captions, the touches, and the events sent
+// to tb while the flow ran (events.go).
+type Drawing struct {
+	Caps    []Caption
+	Touches []Touch
+	Events  []Event
+}
+
+func (d Drawing) empty() bool { return len(d.Caps) == 0 && len(d.Touches) == 0 && len(d.Events) == 0 }
+
+// Burn draws d onto the video at path, in place. The captions are also written beside it (the
+// video's name with .srt), and the events (with .events.json). On an error the video is left as
+// it was.
+func Burn(ctx context.Context, path string, d Drawing) error {
+	if d.empty() {
 		return nil
 	}
 	ffmpeg, err := FFmpegPath()
@@ -90,13 +102,13 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 	}
 	defer os.RemoveAll(tmp)
 
-	w, h, err := videoSize(ctx, tmp, ffmpeg, abs)
+	w, h, length, err := videoInfo(ctx, tmp, ffmpeg, abs)
 	if err != nil {
 		return err
 	}
-	if len(caps) > 0 {
-		os.WriteFile(strings.TrimSuffix(abs, filepath.Ext(abs))+".srt", []byte(SRT(caps)), 0o644)
-	}
+	events := append([]Event(nil), d.Events...)
+	log := layoutEvents(events, length)
+	caps, touches := heldNotes(d.Caps, d.Touches, log.holds)
 	inputs := []string{"-i", abs}
 	if len(touches) > 0 {
 		if err := writeRing(filepath.Join(tmp, "ring.png"), ringSize(w, h)); err != nil {
@@ -115,10 +127,25 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 			inputs = append(inputs, "-i", name)
 		}
 	}
+	eband := 0
+	if log.rows > 0 && len(log.states) > 0 {
+		px := eventSize(w, h)
+		eband = eventBandHeight(log.rows, px)
+		// the whole log is one input, a slideshow of its states (one input for each would
+		// reach the open file limit in a long run of a chatty app)
+		if err := writeLog(ctx, tmp, log, w, eband, px); err != nil {
+			return err
+		}
+		inputs = append(inputs, "-f", "concat", "-safe", "0", "-i", "events.ffconcat")
+	}
+	g := graph(frame{w: w, h: h, band: band, eventBand: eband, caps: caps, touches: touches, states: log.states, holds: log.holds})
 	out := filepath.Join(tmp, "out.mp4")
 	args := func(codec ...string) []string {
 		a := append([]string{"-hide_banner", "-loglevel", "error", "-y"}, inputs...)
-		a = append(a, "-filter_complex", Graph(w, h, band, caps, touches), "-map", "[v]", "-map", "0:a?")
+		a = append(a, "-filter_complex", g, "-map", "[v]")
+		if len(log.holds) == 0 {
+			a = append(a, "-map", "0:a?") // a held video would run ahead of its sound
+		}
 		a = append(a, codec...)
 		return append(a, "-pix_fmt", "yuv420p", "-movflags", "+faststart", out)
 	}
@@ -132,22 +159,83 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 	if st, err := os.Stat(out); err != nil || st.Size() == 0 {
 		return errors.New("ffmpeg wrote no video")
 	}
-	return os.Rename(out, abs)
+	if err := os.Rename(out, abs); err != nil {
+		return err
+	}
+	// beside the video only once it shows them
+	base := strings.TrimSuffix(abs, filepath.Ext(abs))
+	if len(caps) > 0 {
+		os.WriteFile(base+".srt", []byte(SRT(caps)), 0o644)
+	}
+	if len(events) > 0 {
+		os.WriteFile(base+".events.json", eventsJSON(events, log.shown), 0o644)
+	}
+	return nil
 }
+
+// heldNotes moves the captions and touches to their times in the video as drawn, the holds
+// included: a caption that spans a hold stays up through it.
+func heldNotes(caps []Caption, touches []Touch, holds []hold) ([]Caption, []Touch) {
+	if len(holds) == 0 {
+		return caps, touches
+	}
+	var c2 []Caption
+	for _, c := range caps {
+		c.Start, c.End = later(c.Start, holds), later(c.End, holds)
+		c2 = append(c2, c)
+	}
+	var t2 []Touch
+	for _, t := range touches {
+		t.At = later(t.At, holds)
+		t2 = append(t2, t)
+	}
+	return c2, t2
+}
+
+// eventsJSON lists the events (sorted, as layoutEvents left them) with their times: in the run
+// (at, seconds from the video's start) and in the video as drawn (shown, from the layout).
+func eventsJSON(events []Event, shown []time.Duration) []byte {
+	type row struct {
+		At    float64 `json:"at"`
+		Shown float64 `json:"shown"`
+		Text  string  `json:"text"`
+	}
+	rows := []row{}
+	for i, e := range events {
+		s := e.At
+		if i < len(shown) {
+			s = shown[i]
+		}
+		rows = append(rows, row{At: round3(e.At), Shown: round3(s), Text: e.Text})
+	}
+	b, _ := json.MarshalIndent(rows, "", "  ")
+	return append(b, '\n')
+}
+
+func round3(d time.Duration) float64 { return math.Round(d.Seconds()*1000) / 1000 }
 
 var sizeRE = regexp.MustCompile(`Video: .*?, (\d{2,5})x(\d{2,5})`)
 
-// videoSize reads the video's width and height from ffmpeg's description of it (ffprobe
-// may not be there when TB_FFMPEG names ffmpeg alone).
-func videoSize(ctx context.Context, dir, ffmpeg, path string) (int, int, error) {
+var durationRE = regexp.MustCompile(`Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)`)
+
+// videoInfo reads the video's width, height and length (0 when ffmpeg does not say) from
+// ffmpeg's description of it (ffprobe may not be there when TB_FFMPEG names ffmpeg alone).
+func videoInfo(ctx context.Context, dir, ffmpeg, path string) (int, int, time.Duration, error) {
 	out, _ := runFFmpeg(ctx, dir, ffmpeg, []string{"-hide_banner", "-i", path}) // exits 1: no output named
 	m := sizeRE.FindStringSubmatch(string(out))
 	if m == nil {
-		return 0, 0, fmt.Errorf("ffmpeg did not give the video's size: %s", strings.TrimSpace(string(out)))
+		return 0, 0, 0, fmt.Errorf("ffmpeg did not give the video's size: %s", strings.TrimSpace(string(out)))
 	}
 	w, _ := strconv.Atoi(m[1])
 	h, _ := strconv.Atoi(m[2])
-	return w, h, nil
+	var length time.Duration
+	if d := durationRE.FindStringSubmatch(string(out)); d != nil {
+		hh, _ := strconv.Atoi(d[1])
+		mm, _ := strconv.Atoi(d[2])
+		ss, _ := strconv.ParseFloat(d[3], 64)
+		length = time.Duration((float64(hh*3600+mm*60) + ss) * float64(time.Second))
+	}
+	return w, h, length, nil
 }
 
 // SRT writes caps as SubRip subtitles.
@@ -191,7 +279,28 @@ const outFPS = 30
 // band pixels high added below with each caption's image (the inputs after the ring, in
 // order) in it while its step runs. Its output is [v].
 func Graph(w, h, band int, caps []Caption, touches []Touch) string {
-	g := []string{fmt.Sprintf("[0:v]fps=%d,format=yuv420p[b]", outFPS)}
+	return graph(frame{w: w, h: h, band: band, caps: caps, touches: touches})
+}
+
+// frame is what graph draws: on a w×h video, held at holds, the touches, the captions in a band
+// band pixels high below it, and the event log's states in a band eventBand high below that.
+type frame struct {
+	w, h, band, eventBand int
+	caps                  []Caption
+	touches               []Touch
+	states                []logState
+	holds                 []hold
+}
+
+// graph is the filter graph for f. Its inputs are the video, the ring (when there are
+// touches), each caption's image, then the event log's slideshow (writeLog); its output is [v].
+func graph(f frame) string {
+	base := ""
+	if len(f.holds) > 0 {
+		// the holds cut by frame number, counted from the video's first frame
+		base = "setpts=PTS-STARTPTS,"
+	}
+	g := []string{fmt.Sprintf("[0:v]%sfps=%d,format=yuv420p[b]", base, outFPS)}
 	cur := "b"
 	next := 0
 	step := func(filter string) {
@@ -200,23 +309,56 @@ func Graph(w, h, band int, caps []Caption, touches []Touch) string {
 		g = append(g, fmt.Sprintf("%s[%s]", filter, out))
 		cur = out
 	}
+	if len(f.holds) > 0 {
+		// cut the video at each hold, make each part's last frame last the hold, and join them
+		var parts, segs []string
+		for i := 0; i <= len(f.holds); i++ {
+			parts = append(parts, fmt.Sprintf("[p%d]", i))
+			segs = append(segs, fmt.Sprintf("[q%d]", i))
+		}
+		g = append(g, fmt.Sprintf("[%s]split=%d%s", cur, len(parts), strings.Join(parts, "")))
+		// cut by frame number (a time would be rounded to the stream's timebase, and a part one
+		// frame long could come out empty), before the hold's frame, and hold for a whole
+		// number of frames: the video runs exactly as long as the layout says
+		from := 0
+		for i, hd := range f.holds {
+			at := frames(hd.At)
+			cut := fmt.Sprintf("trim=end_frame=%d", at)
+			if i > 0 {
+				cut = fmt.Sprintf("trim=start_frame=%d:end_frame=%d", from, at)
+			}
+			g = append(g, fmt.Sprintf("%s%s,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=%d%s", parts[i], cut, frames(hd.Dur), segs[i]))
+			from = at
+		}
+		g = append(g, fmt.Sprintf("%strim=start_frame=%d,setpts=PTS-STARTPTS%s", parts[len(f.holds)], from, segs[len(f.holds)]))
+		step(fmt.Sprintf("%sconcat=n=%d:v=1:a=0", strings.Join(segs, ""), len(segs)))
+	}
 	input := 1
-	if len(touches) > 0 {
+	if len(f.touches) > 0 {
 		var outs []string
-		for i := range touches {
+		for i := range f.touches {
 			outs = append(outs, fmt.Sprintf("[r%d]", i))
 		}
-		g = append(g, "[1:v]split="+strconv.Itoa(len(touches))+strings.Join(outs, ""))
-		for i, t := range touches {
+		g = append(g, "[1:v]split="+strconv.Itoa(len(f.touches))+strings.Join(outs, ""))
+		for i, t := range f.touches {
 			step(fmt.Sprintf("[%s][r%d]overlay=%s:shortest=0:eof_action=pass", cur, i, overlayAt(t)))
 		}
 		input = 2
 	}
-	if band > 0 && len(caps) > 0 {
-		step(fmt.Sprintf("[%s]pad=%d:%d:0:0:color=0x%s", cur, w, h+band, bandColor))
-		for i, c := range caps {
-			step(fmt.Sprintf("[%s][%d:v]overlay=x=0:y=%d:enable='between(t,%s,%s)'", cur, input+i, h, secs(c.Start), secs(c.End)))
+	band := 0
+	if f.band > 0 && len(f.caps) > 0 {
+		band = f.band
+		step(fmt.Sprintf("[%s]pad=%d:%d:0:0:color=0x%s", cur, f.w, f.h+band, bandColor))
+		for i, c := range f.caps {
+			step(fmt.Sprintf("[%s][%d:v]overlay=x=0:y=%d:enable='between(t,%s,%s)'", cur, input+i, f.h, secs(c.Start), secs(c.End)))
 		}
+		input += len(f.caps)
+	}
+	if f.eventBand > 0 && len(f.states) > 0 {
+		// the log's slideshow (writeLog) over the band: each state's image until the next's
+		step(fmt.Sprintf("[%s]pad=%d:%d:0:0:color=0x%s", cur, f.w, f.h+band+f.eventBand, eventBandColor))
+		g = append(g, fmt.Sprintf("[%d:v]setpts=PTS-STARTPTS,format=rgba[ev]", input))
+		step(fmt.Sprintf("[%s][ev]overlay=x=0:y=%d:eof_action=pass", cur, f.h+band))
 	}
 	g[len(g)-1] = strings.TrimSuffix(g[len(g)-1], "["+cur+"]") + "[v]"
 	return strings.Join(g, ";")
