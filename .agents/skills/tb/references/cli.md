@@ -80,8 +80,8 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
-| `tb close [-d alice \| all] [-p ios]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
-| `tb release [-d DEVICE \| all] [-p ios]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
+| `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
+| `tb release [-d DEVICE \| all] [-p ios] [--force]` | Free devices for other test tools (other agents' sessions, by `TB_SESSION_OWNER`, only with `--force`): stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
@@ -211,6 +211,13 @@ Commands on one session run one at a time. A command sent while another runs the
 it, and after a second says so on stderr ("waiting for the command running on a1: tb do ...
 (started 5s ago)"), then again when it starts; with `--no-wait` it fails at once with that
 message instead.
+
+`TB_SESSION_OWNER` makes the sessions a caller opens its own: set it once per agent (any name).
+Another agent (another owner, or a caller with none) is refused on them ("emulator-5750 is
+session "alice" of another agent: use another device"), a command with no `-d` does not use
+them, `tb close all` leaves them (unless `--force`), `tb test` does not take their device back,
+and `tb devices` marks them "(another agent's)". Sessions opened with no owner are anyone's, as
+before.
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device

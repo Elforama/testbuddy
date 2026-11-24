@@ -25,7 +25,7 @@ func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	f.show(loginScreen()...)
 	s := New()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return f, nil }
-	d, err := s.connect(context.Background(), f.info, "alice")
+	d, err := s.connect(context.Background(), f.info, "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestYieldKeepsAWatchedOrClosingSession(t *testing.T) {
 	f.show(loginScreen()...)
 	s := New()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return f, nil }
-	d, err := s.connect(context.Background(), f.info, "")
+	d, err := s.connect(context.Background(), f.info, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

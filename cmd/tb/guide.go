@@ -29,6 +29,7 @@ Explore an app:
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
+- TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
   (not with -p; with several devices connected and none named, tb asks which)
 - tb close -d alice               releases the device (tb test/replay take it from your own idle session)

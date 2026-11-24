@@ -59,14 +59,16 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
-  tb close [-d alice | all] [-p ios]     disconnect a device (and stop tb's agent on it)
-  tb release [-d DEVICE | all] [-p ios]  free devices for other test tools: stop tb's agents
+  tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
+  tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
+                                         (other agents' sessions only with --force)
   tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
   tb mcp                                 serve the same as MCP tools over stdio
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
 A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
 With one device connected, or one session open (except for tb open), -d is optional; with
 several, tb asks which.
@@ -109,7 +111,7 @@ func main() {
 		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, textFlag}, {[]string{"app", "a"}, textFlag},
 			{[]string{"headless"}, boolFlag}})
 	case "close":
-		code = agentCall("close", rest, nil)
+		code = agentCall("close", rest, []flagSpec{{[]string{"force"}, boolFlag}})
 	case "release":
 		code = cmdRelease(rest)
 	case "look":
@@ -425,6 +427,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 
 func callDaemon(cmd string, args map[string]any) int {
 	defaultDevice(args)
+	withOwner(args)
 	c, err := daemon.Connect()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -698,6 +701,15 @@ func defaultDevice(args map[string]any) {
 	}
 	if d, ok := args["device"].(string); ok && d == "" {
 		args["device"] = orEnvDevice("")
+	}
+}
+
+// withOwner sends the caller's TB_SESSION_OWNER with a daemon command: a session it opens is
+// that owner's, and another owner's sessions are refused to it (issue #399). Unset, nothing is
+// sent, and sessions are anyone's, as before.
+func withOwner(args map[string]any) {
+	if o := strings.TrimSpace(os.Getenv("TB_SESSION_OWNER")); o != "" && args != nil {
+		args["owner"] = o
 	}
 }
 

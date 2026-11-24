@@ -29,7 +29,7 @@ func a1Busy(t *testing.T) (s *Service, unblock, done chan struct{}) {
 	f.show(loginScreen()...)
 	s = New()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return f, nil }
-	if _, err := s.connect(context.Background(), f.info, "a1"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "a1", ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.CloseAll(context.Background()) })

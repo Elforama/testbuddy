@@ -43,6 +43,7 @@ type Dev struct {
 	mu        sync.Mutex // the device lock: one command at a time per device
 	Info      device.Info
 	Name      string // alias, e.g. "alice"; guarded by Service.mu
+	owner     string // who opened the session (TB_SESSION_OWNER), "" = anyone (issue #399)
 	Drv       driver.Driver
 	runner    *engine.Runner
 	refs      *look.Refs
@@ -310,6 +311,11 @@ func (s *Service) CloseAll(ctx context.Context) {
 type devArgs struct {
 	Device   string `json:"device"`
 	Platform string `json:"platform"`
+	// Owner is the caller's TB_SESSION_OWNER: a session opened with one is that owner's, and
+	// another owner (or a caller with none) is refused on it (issue #399). "" = no owner.
+	Owner string `json:"owner,omitempty"`
+	// Force: tb close all closes every owner's sessions, not only the caller's.
+	Force bool `json:"force,omitempty"`
 }
 
 func fail(exit int, format string, args ...any) daemon.Response {
@@ -331,12 +337,20 @@ func (s *Service) openDev(a devArgs) (*Dev, error) {
 	if a.Device != "" {
 		for _, d := range s.devs {
 			if d.matches(a) {
+				if a.denies(d) {
+					return nil, errForeign(d)
+				}
 				return d, nil
 			}
 		}
 		return nil, nil
 	}
-	found := onPlatform(s.devs, a.Platform)
+	var found []*Dev // another owner's sessions are not the caller's "one session open"
+	for _, d := range onPlatform(s.devs, a.Platform) {
+		if !d.foreign(a.Owner) {
+			found = append(found, d)
+		}
+	}
 	if len(found) > 1 {
 		var names []string
 		for _, d := range found {
@@ -364,6 +378,7 @@ func onPlatform(m map[string]*Dev, platform string) []*Dev {
 
 // resolve finds (and connects, if needed) the device a command is for.
 func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
+	a.Force = false // force is tb close's alone: no other command gets past another owner (issue #399)
 	s.mu.Lock()
 	if d, err := s.openDev(a); d != nil || err != nil {
 		s.mu.Unlock()
@@ -374,6 +389,11 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 	name, want := "", a.Device
 	if serial, ok := s.names[a.Device]; ok {
 		name, want = a.Device, serial
+		if d := s.dropped[serial]; d != nil && d.Name == name && a.denies(d) {
+			err := errForeign(d)
+			s.mu.Unlock()
+			return nil, err
+		}
 	}
 	closedOn, wasClosed := s.closed[a.Device]
 	s.mu.Unlock()
@@ -399,7 +419,7 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 		}
 		return nil, err
 	}
-	return s.connect(ctx, info, name)
+	return s.connect(ctx, info, name, a.Owner)
 }
 
 // named: a device in devs has serial or name want.
@@ -420,6 +440,26 @@ func (d *Dev) label() string {
 	return d.Info.Name + " " + d.Info.Serial
 }
 
+// foreign: d is a session another owner opened (issue #399): a caller with another owner, or
+// with none, is not let in. A session opened with no owner is anyone's, as before.
+func (d *Dev) foreign(owner string) bool { return d.owner != "" && d.owner != owner }
+
+// foreignError is the refusal for a session of another owner.
+type foreignError struct{ msg string }
+
+func (e *foreignError) Error() string { return e.msg }
+
+// errForeign is the refusal for a session of another owner; the caller holds s.mu.
+func errForeign(d *Dev) error {
+	if d.Name != "" {
+		return &foreignError{fmt.Sprintf("%s is session %q of another agent: use another device", d.Info.Serial, d.Name)}
+	}
+	return &foreignError{fmt.Sprintf("%s has a session of another agent: use another device", d.Info.Serial)}
+}
+
+// denies: a refuses the caller on session d (another owner's), unless forced (tb close -f).
+func (a devArgs) denies(d *Dev) bool { return d.foreign(a.Owner) && !a.Force }
+
 // labelOf is label for a caller that does not hold s.mu.
 func (s *Service) labelOf(d *Dev) string {
 	s.mu.Lock()
@@ -434,9 +474,30 @@ func (s *Service) nameOf(d *Dev) string {
 	return d.Name
 }
 
-func (s *Service) connect(ctx context.Context, info device.Info, name string) (*Dev, error) {
+func (s *Service) connect(ctx context.Context, info device.Info, name, owner string) (*Dev, error) {
 	s.mu.Lock()
+	if d := s.dropped[info.Serial]; d != nil && d.foreign(owner) {
+		// another owner's session whose connection dropped (its device lent to that owner's
+		// tb test): it reconnects by its name; nobody else takes the device over meanwhile
+		err := errForeign(d)
+		s.mu.Unlock()
+		return nil, err
+	}
+	if name != "" {
+		if serial, ok := s.names[name]; ok {
+			if d := s.dropped[serial]; d != nil && d.Name == name && d.foreign(owner) {
+				err := errForeign(d) // the name is another owner's dropped session's
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
+	}
 	if d, ok := s.devs[info.Serial]; ok {
+		if d.foreign(owner) {
+			err := errForeign(d)
+			s.mu.Unlock()
+			return nil, err
+		}
 		if info.Headless && !d.Info.Headless {
 			s.mu.Unlock()
 			return nil, fmt.Errorf("the browser session is already open; close it before opening it headless")
@@ -486,7 +547,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 	}
 	// Subscribe before anything else, so a drop that comes at once is not missed.
 	ev, stopEvents := drv.Events()
-	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs(), lock: lock}
+	d := &Dev{Info: info, Name: name, owner: owner, Drv: drv, refs: look.NewRefs(), lock: lock}
 	d.runner = engine.New(drv, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts")})
 	markDialogs(d)
 	s.mu.Lock()
@@ -549,11 +610,14 @@ func decode[T any](req daemon.Request) (T, error) {
 }
 
 func (s *Service) devices(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
+	a, _ := decode[devArgs](req)
 	all := device.List(ctx)
 	s.mu.Lock()
-	open := map[string]string{} // serial -> session name
+	open := map[string]string{}  // serial -> session name
+	foreign := map[string]bool{} // serial -> another owner's session (issue #399)
 	for k, d := range s.devs {
 		open[k] = d.Name
+		foreign[k] = d.foreign(a.Owner)
 	}
 	closing := map[string]bool{} // this daemon's sessions still closing: they hold their device
 	for k := range s.closing {
@@ -565,6 +629,8 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 		device.Info
 		Session string `json:"session,omitempty"`
 		Open    bool   `json:"open"`
+		// Others: the session is another agent's (another TB_SESSION_OWNER, issue #399).
+		Others bool `json:"others,omitempty"`
 		// InUse: another tb process holds the device (a tb test run, another daemon's
 		// session), read from its lock (issue #398). Free: whether a tb holds it; left out
 		// where tb cannot tell (browsers, locking off) and for this daemon's own sessions.
@@ -584,6 +650,10 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 				line += "  session: " + name
 			} else {
 				line += "  connected"
+			}
+			if foreign[d.Serial] {
+				jd.Others = true
+				line += " (another agent's)"
 			}
 		} else if closing[d.Serial] {
 			jd.Closing = true
@@ -652,7 +722,7 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 	}
 	s.mu.Unlock()
 	t0 := time.Now()
-	d, err := s.connect(ctx, info, a.Name)
+	d, err := s.connect(ctx, info, a.Name, a.Owner)
 	if err != nil {
 		return fail(1, "%v", err)
 	}
@@ -689,8 +759,13 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		s.mu.Lock()
 		var devs []*Dev
 		serials := map[string]bool{} // the devices closed
+		left := 0                    // another owner's sessions, not closed (issue #399)
 		for _, m := range []map[string]*Dev{s.devs, s.dropped} {
 			for _, d := range onPlatform(m, a.Platform) {
+				if a.denies(d) {
+					left++
+					continue
+				}
 				devs = append(devs, d)
 				serials[d.Info.Serial] = true
 			}
@@ -737,6 +812,9 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 				text += "  " + n + "\n"
 			}
 		}
+		if left > 0 {
+			text += fmt.Sprintf("  left %d session(s) of other agents open (tb close all --force closes them too)\n", left)
+		}
 		return daemon.Response{OK: true, Text: text}
 	}
 	// Find the session without connecting: a device with no session is not connected to only
@@ -771,6 +849,11 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		// A device named by its name: the session that dropped on its current serial, if any.
 		s.mu.Lock()
 		d = s.dropped[info.Serial]
+		if d != nil && a.denies(d) {
+			err := errForeign(d)
+			s.mu.Unlock()
+			return fail(2, "%v", err)
+		}
 		s.mu.Unlock()
 		if d == nil {
 			return daemon.Response{OK: true, Text: fmt.Sprintf("no tb session is open on %s %s: nothing to close\n", info.Name, info.Serial)}
@@ -792,6 +875,7 @@ var errCloseCancelled = errors.New("tb close was cancelled")
 // YieldArgs names the device a `tb test` or `tb replay` run of this daemon's caller wants.
 type YieldArgs struct {
 	Serial string `json:"serial"`
+	Owner  string `json:"owner,omitempty"` // the caller's TB_SESSION_OWNER (issue #399)
 }
 
 // Yielded is yield's answer: whether this daemon gave the device up, and if not, whether one
@@ -830,7 +914,7 @@ func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemo
 		}
 	}
 	s.mu.Unlock()
-	if d == nil {
+	if d == nil || d.foreign(a.Owner) { // another owner's session is not the caller's to take (issue #399)
 		return answer(Yielded{})
 	}
 	if d.watching.Load() > 0 || !d.mu.TryLock() {
@@ -860,7 +944,12 @@ func (s *Service) yield(ctx context.Context, req daemon.Request, send func(daemo
 // caller holds s.mu.
 func (s *Service) droppedDev(a devArgs) (*Dev, error) {
 	if a.Device == "" {
-		found := onPlatform(s.dropped, a.Platform)
+		var found []*Dev // another owner's are not the caller's (issue #399)
+		for _, d := range onPlatform(s.dropped, a.Platform) {
+			if !d.foreign(a.Owner) {
+				found = append(found, d)
+			}
+		}
 		if len(found) > 1 {
 			var names []string
 			for _, d := range found {
@@ -881,6 +970,9 @@ func (s *Service) droppedDev(a devArgs) (*Dev, error) {
 	d := s.dropped[serial]
 	if d == nil || (a.Platform != "" && a.Platform != string(d.Info.Platform)) {
 		return nil, nil
+	}
+	if a.denies(d) {
+		return nil, errForeign(d)
 	}
 	return d, nil
 }

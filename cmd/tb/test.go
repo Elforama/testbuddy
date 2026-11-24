@@ -989,7 +989,7 @@ func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Recla
 	cl.SetDeadline(time.Now().Add(reclaimWait))
 	stop := context.AfterFunc(ctx, func() { cl.SetDeadline(time.Now()) })
 	defer stop()
-	args, _ := json.Marshal(session.YieldArgs{Serial: serial})
+	args, _ := json.Marshal(session.YieldArgs{Serial: serial, Owner: strings.TrimSpace(os.Getenv("TB_SESSION_OWNER"))})
 	resp, err := cl.Call(daemon.Request{Cmd: "yield", Args: args}, nil)
 	var y session.Yielded
 	if err != nil || !resp.OK || json.Unmarshal(resp.JSON, &y) != nil {

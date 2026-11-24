@@ -335,7 +335,7 @@ func TestSessionLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
-	_, err = s.connect(context.Background(), info, "alice")
+	_, err = s.connect(context.Background(), info, "alice", "")
 	if err == nil || !strings.Contains(err.Error(), "Pixel (emulator-5554) is in use by tb test flows/ (pid ") {
 		t.Fatalf("connect to a held device: %v", err)
 	}
@@ -377,11 +377,11 @@ func TestSessionOneNamePerDevice(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel", device.Android)
 	addDev(s, f, "alice")
 	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
-	if _, err := s.connect(context.Background(), info, "bob"); err == nil || !strings.Contains(err.Error(), `is already open as session "alice"`) {
+	if _, err := s.connect(context.Background(), info, "bob", ""); err == nil || !strings.Contains(err.Error(), `is already open as session "alice"`) {
 		t.Errorf("bob over alice: %v", err)
 	}
 	for _, name := range []string{"alice", ""} {
-		if d, err := s.connect(context.Background(), info, name); err != nil || d.Name != "alice" {
+		if d, err := s.connect(context.Background(), info, name, ""); err != nil || d.Name != "alice" {
 			t.Errorf("name %q: %v, %v", name, d, err)
 		}
 	}
