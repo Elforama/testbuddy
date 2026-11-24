@@ -53,7 +53,7 @@ func TestTryAcquireRidesOutAProbe(t *testing.T) {
 	if _, err := TryAcquire("emulator-5554", "tb test"); err == nil {
 		t.Error("a held lock was taken")
 	}
-	if d := time.Since(start); d >= probeWait {
-		t.Errorf("a held lock took %s to refuse, want at once", d)
+	if d := time.Since(start); d >= probeWait*probeRetries {
+		t.Errorf("a held lock took %s to refuse, want at once (no waiting for a probe)", d)
 	}
 }

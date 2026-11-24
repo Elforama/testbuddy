@@ -117,6 +117,9 @@ func TryAcquire(serial, what string) (*Lock, error) {
 		return nil, err
 	}
 	held, err := lockFile(f)
+	if held && err == nil {
+		held, err = lockFile(f) // once more at once: a probe may have just let go of it
+	}
 	for i := 0; held && err == nil && i < probeRetries && probing(serial); i++ {
 		// a tb devices probing the lock holds it shared for an instant (Probe, which marks
 		// it): try again before telling the caller someone has it. A lock really held is
@@ -135,6 +138,7 @@ func TryAcquire(serial, what string) (*Lock, error) {
 	if wd, err := os.Getwd(); err == nil {
 		me.Dir = wd
 	}
+	os.Remove(probeMark(serial)) // a mark left by a probe that was killed: no probe holds it now
 	b, _ := json.Marshal(me)
 	f.Truncate(0)
 	f.WriteAt(b, 0)
