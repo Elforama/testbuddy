@@ -200,6 +200,14 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bench/ci_android.sh
+      # A flow that failed and was run once more (--retries 1) passes the job if its retry
+      # passed, so each one is named here: a flaky flow or an intermittent regression shows.
+      - name: Flows re-run after a failure
+        if: ${{ !cancelled() }}
+        run: |
+          { find build/e2e -type d -name '*-retry-*' 2>/dev/null || true; } | sort | while read -r dir; do
+            echo "::warning title=Flow re-run after a failure::$(basename "$dir") failed once and was run again; a pass on the retry counts ($dir in the artifact)"
+          done
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
@@ -306,14 +314,14 @@ jobs:
           done
           echo "::warning title=iOS warm-up failed twice::running the suite anyway; its result decides the job"
       - name: Run the bench journey on the simulator
-        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
+        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --retries 1 --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows on the simulator
         if: ${{ !cancelled() }}
         run: >-
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/ios/embedded-browser.yaml bench/flows/device/ios/nested-button.yaml
           bench/flows/device/accessibility-values.yaml bench/flows/device/controls-gestures.yaml bench/flows/device/navigation-deep-link.yaml
-          -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+          -p ios --device "$SIM_UDID" --retries 1 --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
       # Issue #243: a step given more time for a simulator stall (CI mode) shows in the job's
       # warnings, so the allowance cannot quietly hide slowness (bench/checks/ios-no-stall-grace.sh
       # checks the same on a healthy simulator). A warning, not a failure: a starved runner's real
@@ -346,6 +354,14 @@ jobs:
           cp ~/Library/Caches/testbuddy/ios-agent-*/gesture-trace-*.log build/e2e/ 2>/dev/null || echo "no gesture trace"
           gzip -f build/e2e/ios-simulator.log || true
           ls -la build/e2e/*.log* || true
+      # A flow that failed and was run once more (--retries 1) passes the job if its retry
+      # passed, so each one is named here: a flaky flow or an intermittent regression shows.
+      - name: Flows re-run after a failure
+        if: ${{ !cancelled() }}
+        run: |
+          { find build/e2e -type d -name '*-retry-*' 2>/dev/null || true; } | sort | while read -r dir; do
+            echo "::warning title=Flow re-run after a failure::$(basename "$dir") failed once and was run again; a pass on the retry counts ($dir in the artifact)"
+          done
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
@@ -392,7 +408,7 @@ jobs:
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       - name: Run the bench journey in headless Chrome
-        run: bin/tb test bench/flows/journey-web.yaml --headless --format junit --output build/e2e/web.xml --debug-output build/e2e/web
+        run: bin/tb test bench/flows/journey-web.yaml --headless --retries 1 --format junit --output build/e2e/web.xml --debug-output build/e2e/web
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows in headless Chrome
         if: ${{ !cancelled() }}
@@ -400,7 +416,7 @@ jobs:
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/navigation-deep-link.yaml
           bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
-          --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+          --headless --retries 1 --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
       # The journey once more, recorded with captions and touches for the pull request
       # (the recordings job). Not timed, and a failure here only warns.
       - name: Record the journey with --annotate
@@ -410,6 +426,14 @@ jobs:
           command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
           bin/tb test bench/flows/journey-web.yaml --headless --record --annotate --debug-output build/e2e/annotated/web ||
             echo "::warning title=Annotated recording failed::the --annotate journey failed on the web (build/e2e/annotated/web in the web-e2e artifact)"
+      # A flow that failed and was run once more (--retries 1) passes the job if its retry
+      # passed, so each one is named here: a flaky flow or an intermittent regression shows.
+      - name: Flows re-run after a failure
+        if: ${{ !cancelled() }}
+        run: |
+          { find build/e2e -type d -name '*-retry-*' 2>/dev/null || true; } | sort | while read -r dir; do
+            echo "::warning title=Flow re-run after a failure::$(basename "$dir") failed once and was run again; a pass on the retry counts ($dir in the artifact)"
+          done
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}

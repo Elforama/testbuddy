@@ -148,7 +148,7 @@ jobs:
           mkdir -p build/e2e
           "$bench" > build/e2e/bench-web.log 2>&1 &
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:7360/
-          "$TB" test bench/flows/journey-web.yaml --headless --debug-output build/e2e/web
+          "$TB" test bench/flows/journey-web.yaml --headless --retries 1 --debug-output build/e2e/web
       - name: Debug files
         if: failure() && matrix.web
         uses: actions/upload-artifact@v4

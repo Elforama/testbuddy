@@ -25,7 +25,9 @@ Rules for every scenario:
 The Flutter edition runs [regression flows](flutter/flows/regressions). The account-list
 case uses the transitions screen. The Tab and permission cases use the **Keyboard** and
 **Permissions** screens. The other cases open from **Regression scenarios**. Android CI
-builds the Flutter app from this repository and runs its applicable flows without retries.
+builds the Flutter app from this repository and runs its applicable flows, re-running a failed
+flow once, as for every CI suite: a retried flow shows `(retry 1)` in the log, and the job warns with
+its name. The commands below keep `--retries 0`, to reproduce a failure locally.
 
 | Case | What the flow asserts |
 |---|---|
