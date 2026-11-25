@@ -22,7 +22,7 @@ type console struct {
 	prefix   bool
 	color    bool
 	start    time.Time
-	skipped  int
+	retries  int
 	fromHint bool
 }
 
@@ -120,8 +120,8 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		if errors.As(r.Err, &nf) && nf.Screen != nil {
 			c.printScreen(nf.Screen, nf.Query)
 		}
-		if n := len(r.Steps); c.fromHint && n > 0 && len(r.Job.Flow.Config.Devices) == 0 && !r.Job.Flow.Config.Web() && r.Steps[n-1].Status == engine.Failed {
-			c.printf("  failed at step %d: to run this flow from there, pass --from %d\n", c.skipped+n, c.skipped+n)
+		if n := len(r.Steps); c.fromHint && r.Job.Attempt >= c.retries && n > 0 && len(r.Job.Flow.Config.Devices) == 0 && !r.Job.Flow.Config.Web() && r.Steps[n-1].Status == engine.Failed {
+			c.printf("  failed at step %d: to run this flow from there, pass --from %d\n", n, n)
 		}
 		c.printf("  debug: %s (log.txt: what tb did, step by step)\n", debugDir)
 	case engine.Skipped:

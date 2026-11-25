@@ -48,6 +48,7 @@ type ReporterFunc func(Event)
 func (f ReporterFunc) Event(e Event) { f(e) }
 
 type Options struct {
+	FromStep        int
 	Env             []flow.KV
 	LookupTimeout   time.Duration
 	OptionalTimeout time.Duration
@@ -325,11 +326,20 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 		d.SetWebViewDevTools(r.appID)
 		defer d.SetWebViewDevTools("")
 	}
-	if err == nil && len(f.Config.OnFlowStart) > 0 {
+	if err == nil && len(f.Config.OnFlowStart) > 0 && r.opts.FromStep <= 1 {
 		err = r.runList(ctx, f.Config.OnFlowStart, f, nil)
 	}
+	cmds := f.Commands
+	if n := r.opts.FromStep; err == nil && n > 1 && n <= len(cmds) {
+		for _, c := range cmds[:n-1] {
+			desc := r.describe(c)
+			r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: desc + " (before --from)", Status: Skipped})
+			res.Steps = append(res.Steps, StepResult{Desc: desc, Status: Skipped})
+		}
+		cmds = cmds[n-1:]
+	}
 	if err == nil {
-		err = r.runList(ctx, f.Commands, f, &res.Steps)
+		err = r.runList(ctx, cmds, f, &res.Steps)
 	}
 	if len(f.Config.OnFlowComplete) > 0 && ctx.Err() == nil {
 		if cerr := r.runList(ctx, f.Config.OnFlowComplete, f, nil); err == nil {

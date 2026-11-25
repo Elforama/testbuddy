@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,5 +126,57 @@ func TestFlowEndNamesNoStepOnReplay(t *testing.T) {
 	con.flowEnd(r, "/d")
 	if !strings.Contains(out.String(), "failed at step 2: to run this flow from there, pass --from 2") {
 		t.Errorf("tb test does not name step 2:\n%s", out.String())
+	}
+}
+
+func TestTestFromNumbersStepsAsTheFlowDoes(t *testing.T) {
+	app := withFakePhone(t)
+	app.screen = "details"
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", `appId: com.example.app
+---
+- launchApp
+- assertVisible: Home
+- tapOn: Next
+- assertVisible: Details
+- tapOn: {id: back}
+- assertVisible: Home
+`)
+	report := filepath.Join(dir, "report.html")
+	var code int
+	out, errOut := capture(t, func() {
+		code = cmdTest([]string{flow, "--from", "4", "--format", "html-detailed", "--output", report, "--debug-output", filepath.Join(dir, "debug")})
+	})
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	b, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{"<tr><td>1</td><td>skipped</td>", "<tr><td>3</td><td>skipped</td>", "<tr><td>4</td><td>passed</td><td>Assert that &#34;Details&#34; is visible", "<tr><td>6</td><td>passed</td>"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the report has no %q:\n%s", want, html)
+		}
+	}
+	if !strings.Contains(out, "(before --from)") {
+		t.Errorf("the console does not show the steps it skipped:\n%s", out)
+	}
+}
+
+func TestFlowEndNamesTheStepOnlyOnTheLastAttempt(t *testing.T) {
+	con, out := plainConsole(false, false)
+	con.fromHint, con.retries = true, 1
+	r := result("Login", engine.Failed, errors.New("not found"), time.Second)
+	r.Steps = []engine.StepResult{{Status: engine.Passed}, {Status: engine.Failed}}
+	con.flowEnd(r, "/d")
+	if strings.Contains(out.String(), "--from") {
+		t.Errorf("an attempt that will be retried names a step:\n%s", out.String())
+	}
+	r.Job.Attempt = 1
+	con.flowEnd(r, "/d")
+	if !strings.Contains(out.String(), "failed at step 2: to run this flow from there, pass --from 2") {
+		t.Errorf("the last attempt does not name its step:\n%s", out.String())
 	}
 }

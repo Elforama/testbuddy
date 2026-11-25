@@ -68,7 +68,8 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --retries N                re-run a failed flow up to N times (on another device if free)
   --from N                   one flow, on a phone: start at its Nth step, on the screen the
                              device is on now (onFlowStart and the steps before N do not
-                             run); a failed run says the step to pass
+                             run: the reports list them as skipped); a failed run says the
+                             step to pass
   --keep-animations          do not turn Android animations off during the run
   --keep-agents              leave tb's agent running on each device after the run (the next
                              run starts faster; other test tools cannot use the device until
@@ -141,8 +142,6 @@ func startFrom(plan *workspace.Plan, n int) error {
 	if n < 1 || n > len(f.Commands) {
 		return fmt.Errorf("%s has steps 1 to %d", filepath.Base(f.Path), len(f.Commands))
 	}
-	f.Commands = f.Commands[n-1:]
-	f.Config.OnFlowStart = nil
 	return nil
 }
 
@@ -314,9 +313,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 	con.fromHint = !replay
-	if n := a.num("from", 0); n > 1 {
-		con.skipped = n - 1
-	}
+	con.retries = a.num("retries", 0)
 
 	events, eventsURL := serveEvents(a, con)
 	if events != nil {
@@ -406,7 +403,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			label := orchestrate.DeviceLabel(ds)
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
-			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
+			return engine.Options{FromStep: a.num("from", 0), Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
 				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep,
 				AnnotateEvents: events.forJob(ds)}
 		},
