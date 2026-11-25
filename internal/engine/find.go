@@ -112,7 +112,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	start, reads := time.Now(), 0
 	final := false
 	away := r.awayWatch()
-	replaced := &replacedWatch{r: r, seen: r.seen, was: r.seenTarget(sel)}
+	replaced := &replacedWatch{seen: r.seen, was: r.seenTarget(sel)}
 	for {
 		reads++
 		s, err = r.readUntil(ctx, deadline)

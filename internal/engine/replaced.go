@@ -79,7 +79,6 @@ func inPlaceOf(was *ui.Node, s *ui.Screen) *ui.Node {
 }
 
 type replacedWatch struct {
-	r      *Runner
 	seen   *ui.Screen
 	was    *ui.Node
 	now    *ui.Node
