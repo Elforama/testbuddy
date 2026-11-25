@@ -1,0 +1,144 @@
+1
+00:00:01,858 --> 00:01:11,391
+Launch app "dev.testbuddy.bench"
+
+2
+00:01:11,391 --> 00:01:12,630
+Tap on id: scenario_journey
+
+3
+00:01:12,630 --> 00:01:15,127
+Tap on id: login
+
+4
+00:01:15,127 --> 00:01:15,151
+Assert that "Enter a username and password" is visible
+
+5
+00:01:15,151 --> 00:01:17,128
+Tap on id: username
+
+6
+00:01:17,128 --> 00:01:18,129
+Input text buddy
+
+7
+00:01:18,129 --> 00:01:19,351
+Tap on id: password
+
+8
+00:01:19,351 --> 00:01:20,356
+Input text secret
+
+9
+00:01:20,356 --> 00:01:21,480
+Tap on id: login
+
+10
+00:01:21,480 --> 00:01:22,029
+Assert that "Welcome, buddy" is visible
+
+11
+00:01:22,029 --> 00:01:23,666
+Tap on "Item 3"
+
+12
+00:01:23,666 --> 00:01:23,693
+Assert that "Item 3 details" is visible
+
+13
+00:01:23,693 --> 00:01:23,718
+Assert that "4.8 stars" is visible
+
+14
+00:01:23,718 --> 00:01:24,926
+Tap on id: add_to_cart
+
+15
+00:01:24,926 --> 00:01:26,095
+Tap on id: add_to_cart
+
+16
+00:01:26,095 --> 00:01:26,122
+Assert that "In cart: 2" is visible
+
+17
+00:01:26,122 --> 00:01:27,255
+Tap on id: back
+
+18
+00:01:27,255 --> 00:01:27,369
+Assert that "Cart: 2" is visible
+
+19
+00:01:27,369 --> 00:01:30,837
+Scroll DOWN until "Item 30" is visible
+
+20
+00:01:30,837 --> 00:01:32,014
+Tap on "Item 30"
+
+21
+00:01:32,014 --> 00:01:32,042
+Assert that "Item 30 details" is visible
+
+22
+00:01:32,042 --> 00:01:33,288
+Tap on id: back
+
+23
+00:01:33,288 --> 00:01:35,173
+Scroll DOWN until id: load_more is visible
+
+24
+00:01:35,173 --> 00:01:36,357
+Tap on id: load_more
+
+25
+00:01:36,357 --> 00:01:38,071
+Scroll DOWN until "Item 45" is visible
+
+26
+00:01:38,071 --> 00:01:39,275
+Tap on id: open_live
+
+27
+00:01:39,275 --> 00:01:39,313
+Assert that "Tapped 0" is visible
+
+28
+00:01:39,313 --> 00:01:40,593
+Tap on id: tap_me
+
+29
+00:01:40,593 --> 00:01:41,780
+Tap on id: tap_me
+
+30
+00:01:41,780 --> 00:01:42,948
+Tap on id: tap_me
+
+31
+00:01:42,948 --> 00:01:42,983
+Assert that "Tapped 3" is visible
+
+32
+00:01:42,983 --> 00:01:44,160
+Tap on id: notify_switch
+
+33
+00:01:44,160 --> 00:01:44,199
+Assert that "Notifications on" is visible
+
+34
+00:01:44,199 --> 00:01:45,358
+Tap on id: back
+
+35
+00:01:45,358 --> 00:01:45,480
+Assert that "Cart: 2" is visible
+
+36
+00:01:45,480 --> 00:01:45,719
+Tap on id: logout
+
