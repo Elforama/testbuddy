@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"math"
 	"math/rand"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/font/sfnt"
 )
 
 func dms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -153,9 +156,12 @@ func TestEventLogHoldsWhereFFmpegCan(t *testing.T) {
 	if len(l.holds) != 0 {
 		t.Errorf("holds %+v in the last frame", l.holds)
 	}
+	if l.tail <= 0 {
+		t.Errorf("a burst in the last frame does not hold the end")
+	}
 	for _, s := range l.states {
-		if s.Paused {
-			t.Errorf("a paused state %+v with no hold", s)
+		if s.Paused && s.Start < 5*time.Second {
+			t.Errorf("a paused state %+v before the held end", s)
 		}
 	}
 }
@@ -407,9 +413,9 @@ func TestBurnManyHoldsDoNotDrift(t *testing.T) {
 	if err := Burn(context.Background(), path, Drawing{Events: evs}); err != nil {
 		t.Fatal(err)
 	}
-	want := 360 + frames(held)
+	want := 360 + frames(held) + frames(l.tail)
 	if got := frameCount(t, ffmpeg, path); got < want-1 || got > want+1 {
-		t.Errorf("%d frames, want %d: 12 s and the layout's %d holds, %s", got, want, len(l.holds), held)
+		t.Errorf("%d frames, want %d: 12 s, the layout's %d holds, %s, and its end held %s", got, want, len(l.holds), held, l.tail)
 	}
 }
 
@@ -589,5 +595,319 @@ func TestIssue413EarlyBurstGetsRowsNotALongHold(t *testing.T) {
 	}
 	if l.rows != eventRowsMax || held > 5*eventRead {
 		t.Errorf("issue #413 review: 10 events from before the video get %d rows and hold its first frame %s", l.rows, held)
+	}
+}
+
+func sameImage(a, b image.Image) bool {
+	if a.Bounds() != b.Bounds() {
+		return false
+	}
+	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
+		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
+			r1, g1, b1, a1 := a.At(x, y).RGBA()
+			r2, g2, b2, a2 := b.At(x, y).RGBA()
+			if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func eventImage(text string) image.Image {
+	return logImage(logState{Rows: []eventRow{{at: dms(1000), text: text}}}, 720, 60, 1, 24)
+}
+
+const unassigned = "͸"
+
+func TestIssue412EventTextIsNotDrawnAsEmptyBoxes(t *testing.T) {
+	for _, c := range []struct{ text, odd string }{
+		{"paid ✓", "✓"},
+		{"购物车", "购"},
+		{"カート", "カ"},
+		{"장바구니", "장"},
+		{"مرحبا", "م"},
+		{"שלום", "ש"},
+		{"done 🎉", "🎉"},
+	} {
+		boxed := strings.Replace(c.text, c.odd, unassigned, 1)
+		if sameImage(eventImage(c.text), eventImage(boxed)) {
+			t.Errorf("issue #412: %q draws %q as the empty box of a character with no glyph", c.text, c.odd)
+		}
+	}
+}
+
+func TestIssue412ControlCharactersAreNotDrawn(t *testing.T) {
+	for _, c := range []struct{ text, clean string }{
+		{"\x1b[31mred\x1b[0m", "red"},
+		{"a\x07b\x00c", "abc"},
+		{"family 👨‍👩", "family 👨👩"},
+		{"tab\there", "tab here"},
+	} {
+		if !sameImage(eventImage(c.text), eventImage(c.clean)) {
+			t.Errorf("issue #412: %q is not drawn as %q", c.text, c.clean)
+		}
+	}
+}
+
+func TestIssue412CaptionsToo(t *testing.T) {
+	cap := func(s string) image.Image { return captionImage(s, 720, 80, 28) }
+	if sameImage(cap("tapOn: 购物车"), cap("tapOn: "+unassigned+"物车")) {
+		t.Errorf("issue #412: a caption draws 购 as an empty box")
+	}
+	if !sameImage(cap("tapOn: \x1b[1mBuy\x1b[0m"), cap("tapOn: Buy")) {
+		t.Errorf("issue #412: a caption draws ANSI codes")
+	}
+}
+
+func TestIssue412NoFontForItSaysWhich(t *testing.T) {
+	old := fontDirs
+	fontDirs = func() []string { return nil }
+	fallback.Lock()
+	fallback.cover, fallback.missing = nil, nil
+	fallback.Unlock()
+	t.Cleanup(func() {
+		fontDirs = old
+		fallback.Lock()
+		fallback.cover, fallback.missing = nil, nil
+		fallback.Unlock()
+	})
+	face := newTextFace(monoFont, 24)
+	if face == nil {
+		t.Fatal("no face")
+	}
+	defer face.Close()
+	if text := face.show("done 🎉 ok"); text != "done [U+1F389] ok" {
+		t.Errorf("issue #412: with no font for it, the emoji is drawn as %q", text)
+	}
+}
+
+func TestIssue412RightToLeftReadsRightToLeft(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"שלום", "םולש"},
+		{"paid שלום ok", "paid םולש ok"},
+		{"(שלום)", "(םולש)"},
+		{"مرحبا", "ﺎﺒﺣﺮﻣ"},
+		{"لا", "ﻻ"},
+		{"بلا", "ﻼﺑ"},
+		{"order 42", "order 42"},
+		{"שלום 42 עולם", "םלוע 42 םולש"},
+		{"مرحبا 2025", "2025 \uFE8E\uFE92\uFEA3\uFEAE\uFEE3"},
+		{"שלום: abc", "םולש: abc"},
+		{"پیام", "\uFEE1\uFE8E\uFBFF\uFB58"},
+		{"لَا", "\uFEFB\u064E"},
+		{"ب\u200Cب", "\uFE8F\uFE8F"},
+		{"שלום 1,234 עולם", "םלוע 1,234 םולש"},
+		{"שלום 1.5 עולם", "םלוע 1.5 םולש"},
+		{"שעה 12:30 היום", "םויה 12:30 העש"},
+		{"ת 25/11/2026 ת", "ת 25/11/2026 ת"},
+		{"מחיר $5 בלבד", "דבלב $5 ריחמ"},
+		{"שלום 50% עולם", "םלוע 50% םולש"},
+		{"تم 1,234", "1,234 \uFEE2\uFE97"},
+		{"شـكـر", "\uFEAE\u0640\uFEDC\u0640\uFEB7"},
+		{"שלום (עולם) abc", "(םלוע) םולש abc"},
+		{"abc (שלום) def", "abc (םולש) def"},
+	} {
+		if got := visual(c.in); got != c.want {
+			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestIssue412LongRightToLeftKeepsItsStart(t *testing.T) {
+	tail := strings.Repeat(" עולם ומלואו", 12)
+	a, b := "שלום"+tail, "תודה"+tail
+	if sameImage(eventImage(a), eventImage(b)) {
+		t.Errorf("issue #412: a long right-to-left event loses its first word when cut to fit")
+	}
+	cap := func(s string) image.Image { return captionImage(s, 720, 80, 28) }
+	if sameImage(cap(a), cap(b)) {
+		t.Errorf("issue #412: a long right-to-left caption loses its first word when wrapped")
+	}
+}
+
+func TestIssue412FallbackFontIsUsed(t *testing.T) {
+	var buf sfnt.Buffer
+	found := false
+	for _, p := range fontFiles() {
+		for _, f := range parseFonts(p) {
+			if outlined(f, &buf, '购') {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Skip("no font on this computer has 购")
+	}
+	findFallbacks(context.Background(), monoFont, "购")
+	face := newTextFace(monoFont, 24)
+	defer face.Close()
+	if got := face.show("购"); got != "购" || face.pick['购'] == 0 {
+		t.Errorf("issue #412: 购 is drawn as %q, from face %d, with a font for it on this computer", got, face.pick['购'])
+	}
+}
+
+func TestIssue412EscapeSequences(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"\x1b[31mred\x1b[0m", "red"},
+		{"\x1b(B\x1b[mx", "x"},
+		{"\x1b7save\x1b8", "save"},
+		{"\x1bPq data \x1b\\after", "after"},
+		{"\x1b]8;;http://x\x07link\x1b]8;;\x07", "link"},
+		{"\x1b]0;title rest", "0;title rest"},
+		{"red\x1b[31", "red"},
+		{"\u009b31mx", "x"},
+		{"\x1b[38;2;255;0;0mrgb", "rgb"},
+	} {
+		if got := cleanText(c.in); got != c.want {
+			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestIssue412JoinedFormWithNoFontFallsBackToTheLetter(t *testing.T) {
+	face := newTextFace(monoFont, 24)
+	defer face.Close()
+	face.pick['م'] = 0
+	face.pick['ا'] = 0
+	face.pick['ل'] = 0
+	fallback.Lock()
+	saved := map[rune]*sfnt.Font{}
+	for _, r := range []rune{0xFEE3, 0xFEE1, 0xFEFB} {
+		saved[r] = fallback.cover[r]
+		delete(fallback.cover, r)
+	}
+	fallback.Unlock()
+	t.Cleanup(func() {
+		fallback.Lock()
+		for r, f := range saved {
+			if f != nil {
+				fallback.cover[r] = f
+			}
+		}
+		fallback.Unlock()
+	})
+	if got := face.show("م"); got != "م" {
+		t.Errorf("issue #412: a joined form no font has is drawn as %q, want the plain letter", got)
+	}
+	if got := face.show("لا"); got != "ال" {
+		t.Errorf("issue #412: lam-alef with no font for the ligature is drawn as %q", got)
+	}
+}
+
+func bandHasText(t *testing.T, ffmpeg, path string, at time.Duration, y, w, h int) bool {
+	t.Helper()
+	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", fmt.Sprintf("%.3f", at.Seconds()), "-i", path,
+		"-vf", fmt.Sprintf("crop=%d:%d:0:%d", w, h, y), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-").Output()
+	if err != nil || len(out) == 0 {
+		return false
+	}
+	lo, hi := out[0], out[0]
+	for _, b := range out {
+		lo, hi = min(lo, b), max(hi, b)
+	}
+	return int(hi)-int(lo) > 60
+}
+
+func TestIssue411EventAsTheVideoEndsIsShownForItsTime(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recording.mp4")
+	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:size=240x360:rate=30:duration=9.333",
+		"-pix_fmt", "yuv420p", path).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg cannot make a test video: %v %s", err, out)
+	}
+	evs := []Event{{dms(2000), "cart opened"}, {dms(9330), "purchase done"}}
+	if err := Burn(context.Background(), path, Drawing{Events: evs}); err != nil {
+		t.Fatal(err)
+	}
+	_, h, length, err := videoInfo(context.Background(), dir, ffmpeg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := dms(9330) + eventShown - oneFrame; length < want {
+		t.Errorf("issue #411: the video is %s long, so an event at 9.330 s is up for %s, not %s", length, length-dms(9330), eventShown)
+	}
+	band := eventBandHeight(1, eventSize(240, 360))
+	if h != 360+band {
+		t.Fatalf("height %d, want %d", h, 360+band)
+	}
+	if !bandHasText(t, ffmpeg, path, dms(2500), 360, 240, band) {
+		t.Fatal("the first event is not drawn: the check itself is wrong")
+	}
+	if !bandHasText(t, ffmpeg, path, dms(9330)+eventRead, 360, 240, band) {
+		t.Errorf("issue #411: \"purchase done\" is not in the video %s after it arrived", eventRead)
+	}
+}
+
+func TestIssue411EventOfTheLastTapIsUpForItsTwoSeconds(t *testing.T) {
+	length := 9 * time.Second
+	l := layoutEvents([]Event{{length - dms(500), "purchase done"}}, length)
+	if got := length + l.tail - (length - dms(500)); got < eventShown {
+		t.Errorf("issue #411: the last tap's event is up for %s in the video, want %s", got, eventShown)
+	}
+	if l := layoutEvents([]Event{{dms(1000), "early"}}, length); l.tail != 0 {
+		t.Errorf("an event well before the end holds the end for %s", l.tail)
+	}
+}
+
+func TestIssue411BurstInTheLastFrameIsReadable(t *testing.T) {
+	length := dms(9333)
+	var evs []Event
+	for i := 0; i < 9; i++ {
+		evs = append(evs, Event{dms(9300 + 4*i), fmt.Sprintf("e%d", i)})
+	}
+	l := layoutEvents(evs, length)
+	end := length + l.tail
+	for _, h := range l.holds {
+		end += h.Dur
+	}
+	for i, at := range l.shown {
+		var gone time.Duration
+		for _, s := range l.states {
+			for _, r := range s.Rows {
+				if r.text == evs[i].Text {
+					gone = max(gone, r.gone)
+				}
+			}
+		}
+		if up := min(gone, end) - at; up < eventRead {
+			t.Errorf("issue #411: %s is up for %s in the video, want at least %s", evs[i].Text, up, eventRead)
+		}
+	}
+	var paused bool
+	for _, s := range l.states {
+		if s.Start >= length && s.Paused {
+			paused = true
+		}
+	}
+	if !paused {
+		t.Errorf("the held end is not marked paused for events")
+	}
+}
+
+func TestIssue411VideoWithLongerSound(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recording.mp4")
+	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:size=240x360:rate=30:duration=9.333",
+		"-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", path).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg cannot make a test video: %v %s", err, out)
+	}
+	if err := Burn(context.Background(), path, Drawing{Events: []Event{{dms(2000), "cart opened"}, {dms(9330), "purchase done"}}}); err != nil {
+		t.Fatal(err)
+	}
+	band := eventBandHeight(1, eventSize(240, 360))
+	if !bandHasText(t, ffmpeg, path, dms(9330)+eventRead, 360, 240, band) {
+		t.Errorf("issue #411: with 12 s of sound, \"purchase done\" is not in the video %s after it arrived", eventRead)
 	}
 }

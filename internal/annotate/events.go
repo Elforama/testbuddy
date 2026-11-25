@@ -51,6 +51,7 @@ type eventLog struct {
 	holds  []hold
 	states []logState
 	shown  []time.Duration
+	tail   time.Duration
 }
 
 const oneFrame = time.Second / outFPS
@@ -98,7 +99,9 @@ func layoutEvents(events []Event, length time.Duration) eventLog {
 			oldest := up[0]
 			at := wholeFrames(base)
 			canHold := length <= 0 || at < length-oneFrame
-			if need := oldest.shown + eventRead; need > t && canHold {
+			if need := oldest.shown + eventRead; need > t && !canHold {
+				t = need
+			} else if need > t {
 				if dur := wholeFrames(need - (at + extra)); dur > 0 {
 					if k := len(log.holds); k > 0 && log.holds[k-1].At == at {
 						log.holds[k-1].Dur += dur
@@ -125,7 +128,18 @@ func layoutEvents(events []Event, length time.Duration) eventLog {
 		all = append(all, r)
 		log.shown = append(log.shown, t)
 	}
-	log.states = logStates(all, log.holds)
+	paused := log.holds
+	if length > 0 {
+		var last time.Duration
+		for _, r := range all {
+			last = max(last, r.gone)
+		}
+		log.tail = wholeFrames(last - (length + extra))
+		if log.tail > 0 {
+			paused = append(append([]hold(nil), log.holds...), hold{At: length, Dur: log.tail})
+		}
+	}
+	log.states = logStates(all, paused)
 	return log
 }
 
@@ -264,6 +278,15 @@ func logImage(s logState, w, band, rows, px int) image.Image {
 		return img
 	}
 	defer face.Close()
+	var texts []string
+	for _, r := range s.Rows {
+		texts = append(texts, oneLine(r.text))
+	}
+	findFallbacks(context.Background(), monoFont, texts...)
+	tf := newTextFace(monoFont, px)
+	if tf != nil {
+		defer tf.Close()
+	}
 	rowH := eventRowHeight(px)
 	top := (band - rows*rowH) / 2
 	margin := px
@@ -296,9 +319,9 @@ func logImage(s logState, w, band, rows, px int) image.Image {
 		if i == 0 {
 			room -= pausedW
 		}
-		d = &font.Drawer{Dst: img, Src: textCol, Face: face, Dot: fixed.Point26_6{X: x, Y: base}}
-		if room > 0 {
-			d.DrawString(fitText(face, oneLine(r.text), room))
+		if room > 0 && tf != nil {
+			d = &font.Drawer{Dst: img, Src: textCol, Face: tf, Dot: fixed.Point26_6{X: x, Y: base}}
+			d.DrawString(tf.show(fitText(tf.measure, oneLine(r.text), room)))
 		}
 	}
 	if s.Paused {

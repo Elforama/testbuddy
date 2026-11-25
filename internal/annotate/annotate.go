@@ -83,6 +83,18 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 		return err
 	}
 	events := append([]Event(nil), d.Events...)
+	var texts []string
+	for _, c := range d.Caps {
+		texts = append(texts, cleanText(c.Text))
+	}
+	for _, e := range events {
+		texts = append(texts, cleanText(e.Text))
+	}
+	findFallbacks(ctx, monoFont, texts...)
+	findFallbacks(ctx, mediumFont, texts...)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log := layoutEvents(events, length)
 	caps, touches := heldNotes(d.Caps, d.Touches, log.holds)
 	inputs := []string{"-i", abs}
@@ -96,6 +108,9 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 	if len(caps) > 0 {
 		band = bandHeight(w, h)
 		for i, c := range caps {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			name := fmt.Sprintf("caption-%03d.png", i)
 			if err := writePNG(filepath.Join(tmp, name), captionImage(c.Text, w, band, captionSize(w, h))); err != nil {
 				return err
@@ -112,7 +127,7 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 		}
 		inputs = append(inputs, "-f", "concat", "-safe", "0", "-i", "events.ffconcat")
 	}
-	g := graph(frame{w: w, h: h, band: band, eventBand: eband, caps: caps, touches: touches, states: log.states, holds: log.holds})
+	g := graph(frame{w: w, h: h, band: band, eventBand: eband, caps: caps, touches: touches, states: log.states, holds: log.holds, tail: log.tail})
 	out := filepath.Join(tmp, "out.mp4")
 	args := func(codec ...string) []string {
 		a := append([]string{"-hide_banner", "-loglevel", "error", "-y"}, inputs...)
@@ -203,7 +218,39 @@ func videoInfo(ctx context.Context, dir, ffmpeg, path string) (int, int, time.Du
 		ss, _ := strconv.ParseFloat(d[3], 64)
 		length = time.Duration((float64(hh*3600+mm*60) + ss) * float64(time.Second))
 	}
+	if strings.Contains(string(out), "Audio:") {
+		if d := videoEnd(ctx, dir, ffmpeg, path); d > 0 {
+			length = d
+		}
+	}
 	return w, h, length, nil
+}
+
+func videoEnd(ctx context.Context, dir, ffmpeg, path string) time.Duration {
+	out, err := runFFmpeg(ctx, dir, ffmpeg, []string{"-hide_banner", "-loglevel", "error", "-i", path, "-map", "0:v:0", "-c", "copy", "-f", "framemd5", "-"})
+	if err != nil {
+		return 0
+	}
+	var num, den, end int64
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "#tb 0:") {
+			fmt.Sscanf(strings.TrimSpace(line[6:]), "%d/%d", &num, &den)
+			continue
+		}
+		f := strings.Split(line, ",")
+		if len(f) < 4 || strings.HasPrefix(line, "#") {
+			continue
+		}
+		pts, err1 := strconv.ParseInt(strings.TrimSpace(f[2]), 10, 64)
+		dur, err2 := strconv.ParseInt(strings.TrimSpace(f[3]), 10, 64)
+		if err1 == nil && err2 == nil {
+			end = max(end, pts+dur)
+		}
+	}
+	if num <= 0 || den <= 0 || end <= 0 {
+		return 0
+	}
+	return time.Duration(float64(end) * float64(num) / float64(den) * float64(time.Second))
 }
 
 func SRT(caps []Caption) string {
@@ -228,6 +275,7 @@ func srtTime(d time.Duration) string {
 }
 
 func oneLine(s string) string {
+	s = cleanText(s)
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > 120 {
 		s = string(r[:119]) + "…"
@@ -247,6 +295,7 @@ type frame struct {
 	touches               []Touch
 	states                []logState
 	holds                 []hold
+	tail                  time.Duration
 }
 
 func graph(f frame) string {
@@ -282,6 +331,9 @@ func graph(f frame) string {
 		}
 		g = append(g, fmt.Sprintf("%strim=start_frame=%d,setpts=PTS-STARTPTS%s", parts[len(f.holds)], from, segs[len(f.holds)]))
 		step(fmt.Sprintf("%sconcat=n=%d:v=1:a=0", strings.Join(segs, ""), len(segs)))
+	}
+	if n := frames(f.tail); n > 0 {
+		step(fmt.Sprintf("[%s]tpad=stop_mode=clone:stop=%d", cur, n))
 	}
 	input := 1
 	if len(f.touches) > 0 {

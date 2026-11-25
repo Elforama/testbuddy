@@ -323,7 +323,11 @@ the step's text, one row per event with its time, the newest highlighted, each u
 a burst gets a row per event, as many as the run's busiest moment needs (up to 6). A bigger
 burst holds the video's frame, marked "paused for events", until each event has been up a
 second, so none goes by unread; the video then runs longer than the run, and the rows keep
-the real times. A held video has no sound (screen recordings rarely have any). The events are
+the real times. Events near the end hold the last frame, marked "paused for events", until each has been up
+its 2 s. Text in scripts the built-in font lacks (CJK, Arabic, Hebrew, symbols) is drawn with a font
+of the computer's that has it, or as `[U+8D2D]` if none does; emoji usually come out that way,
+since colour emoji fonts have no outlines to draw.
+A held video has no sound (screen recordings rarely have any). The events are
 also written beside the video as `recording.events.json`.
 
 A few things to know when sending from an app: an Android app's debug build must allow
