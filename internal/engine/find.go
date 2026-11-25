@@ -112,7 +112,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	start, reads := time.Now(), 0
 	final := false
 	away := r.awayWatch()
-	replaced := &replacedWatch{was: r.seenTarget(sel)}
+	replaced := &replacedWatch{r: r, seen: r.seen, was: r.seenTarget(sel)}
 	for {
 		reads++
 		s, err = r.readUntil(ctx, deadline)
@@ -143,7 +143,12 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			}
 			return n, s, waited, nil
 		}
-		if replaced.see(s) && time.Now().Before(deadline) {
+		if replaced.see(s) && time.Now().Before(deadline) && !replaced.reread {
+			replaced.reread = true
+			r.invalidate()
+			continue
+		}
+		if replaced.reread && replaced.see(s) && time.Now().Before(deadline) {
 			msg := replaced.message(sel)
 			r.tracef("not found: %s, after %s and %d reads: %s", sel.Describe(), since(start), reads, msg)
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: msg}, Screen: s, Query: sel.Text}

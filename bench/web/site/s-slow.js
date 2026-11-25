@@ -111,7 +111,7 @@
         search.textContent = 'Search';
         let i = 0;
         const next = () => { search.textContent = 'Search for ' + hints[i++ % hints.length]; };
-        first = setTimeout(() => { next(); every = setInterval(next, 3000); }, 4000);
+        first = setTimeout(() => { next(); every = setInterval(next, 3000); }, 6000);
       },
       leave: stop,
     };

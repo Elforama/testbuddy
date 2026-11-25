@@ -179,7 +179,7 @@ struct RelabelView: View {
             Spacer()
         }
         .task {
-            guard (try? await Task.sleep(for: .milliseconds(4000))) != nil else { return }
+            guard (try? await Task.sleep(for: .milliseconds(6000))) != nil else { return }
             var shown = 0
             while !Task.isCancelled {
                 label = "Search for \(Self.hints[shown % Self.hints.count])"

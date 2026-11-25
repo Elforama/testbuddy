@@ -185,7 +185,7 @@ class RelabelActivity : ScenarioActivity() {
     }
 
     companion object {
-        const val FIRST_MS = 4000L
+        const val FIRST_MS = 6000L
         const val EVERY_MS = 3000L
         val HINTS = listOf("Roof Repair", "House Cleaner", "Plumber")
     }

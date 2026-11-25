@@ -56,43 +56,72 @@ func TestIssue421InPlaceOf(t *testing.T) {
 	}
 }
 
+func parseCmds(t *testing.T, src string) []*flow.Command {
+	t.Helper()
+	cmds, err := flow.ParseCommands("", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmds
+}
+
 func TestIssue421ReplacedInPlaceFailsAfterTheGrace(t *testing.T) {
 	old := replacedGrace
 	replacedGrace = 150 * time.Millisecond
 	t.Cleanup(func() { replacedGrace = old })
 	seen := screenOf(t, btn("Search", "", 100), btn("Ask", "", 300))
+	now := []*ui.Node{btn("Search for, Roof Repair", "", 100), btn("Ask", "", 300)}
 	cases := []struct {
-		name     string
-		seen     *ui.Screen
-		cmds     int
-		fast     bool
-		inMsgFor string
+		name string
+		seen *ui.Screen
+		now  []*ui.Node
+		cmds string
+		fast bool
 	}{
-		{"seen in the last look", seen, 1, true, `"Search" (in your last look) is gone; at its place now:  "Search for, Roof Repair"`},
-		{"no last look (a flow)", nil, 1, false, ""},
-		{"a later command of the same do", seen, 2, false, ""},
+		{"a tap on a label seen in the last look", seen, now, `- tapOn: "Search"`, true},
+		{"no last look (a flow)", nil, now, `- tapOn: "Search"`, false},
+		{"a later command of the same do", seen, now, "- tapOn: \"Ask\"\n- tapOn: \"Search\"", false},
+		{"an assertion waits its time", seen, now, `- assertVisible: "Search"`, false},
+		{"a tap inside a runFlow", seen, now, "- runFlow:\n    commands:\n      - tapOn: \"Search\"", false},
+		{"a passing label (Saving…)", seen, []*ui.Node{btn("Searching…", "", 100), btn("Ask", "", 300)}, `- tapOn: "Search"`, false},
+		{"the last look was another screen", screenOf(t, btn("Search", "", 100), btn("Ask", "", 300), btn("Home", "", 500), btn("Inbox", "", 700)),
+			[]*ui.Node{btn("Settings", "", 100), btn("Wi-Fi", "", 300), btn("Bluetooth", "", 500)}, `- tapOn: "Search"`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := &fakeDriver{screen: static(btn("Search for, Roof Repair", "", 100), btn("Ask", "", 300))}
+			f := &fakeDriver{screen: static(c.now...)}
 			r := New(f, Options{LookupTimeout: 1500 * time.Millisecond, OptionalTimeout: 100 * time.Millisecond})
 			r.SetSeen(c.seen)
-			cmds := []*flow.Command{tapCmd(t, "Search")}
-			if c.cmds == 2 {
-				cmds = []*flow.Command{tapCmd(t, "Ask"), tapCmd(t, "Search")}
-			}
 			start := time.Now()
-			err := r.RunCommands(context.Background(), cmds, "app", nil)
+			err := r.RunCommands(context.Background(), parseCmds(t, c.cmds), "app", nil)
 			took := time.Since(start)
 			if err == nil {
-				t.Fatal("the tap passed")
+				t.Fatal("the step passed")
 			}
-			if c.fast && (took > time.Second || !contains(err.Error(), c.inMsgFor)) {
+			if c.fast && (took > time.Second || !contains(err.Error(), `"Search" (in your last look) is gone; at its place now: "Search for, Roof Repair"`)) {
 				t.Errorf("took %s, err %v", took, err)
 			}
 			if !c.fast && (took < 1400*time.Millisecond || contains(err.Error(), "in your last look")) {
 				t.Errorf("took %s, err %v: want the full lookup time", took, err)
 			}
 		})
+	}
+}
+
+func TestIssue421AFreshReadComesBeforeFailing(t *testing.T) {
+	old := replacedGrace
+	replacedGrace = 300 * time.Millisecond
+	t.Cleanup(func() { replacedGrace = old })
+	start := time.Now()
+	f := &fakeDriver{screen: func() []*ui.Node {
+		if time.Since(start) < 250*time.Millisecond {
+			return []*ui.Node{btn("Search for, Roof Repair", "", 100), btn("Ask", "", 300)}
+		}
+		return []*ui.Node{btn("Search", "", 100), btn("Ask", "", 300)}
+	}}
+	r := New(f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: 100 * time.Millisecond})
+	r.SetSeen(screenOf(t, btn("Search", "", 100), btn("Ask", "", 300)))
+	if err := r.RunCommands(context.Background(), parseCmds(t, `- tapOn: "Search"`), "app", nil); err != nil {
+		t.Errorf("the label came back silently before the grace ended, but the tap failed: %v", err)
 	}
 }

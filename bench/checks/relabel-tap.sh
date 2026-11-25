@@ -27,15 +27,15 @@ else
   finish
 fi
 
-sleep 6
+sleep 8
 start=$(date +%s)
 out=$("$TB" do -d "$DEV" 'tapOn: "Search"' 2>&1)
 code=$?
 took=$(($(date +%s) - start))
-if [ "$code" -ne 0 ] && grep -q '"Search" (in your last look) is gone; at its place now: .*Search for' <<<"$out" && [ "$took" -le 8 ]; then
+if [ "$code" -ne 0 ] && grep -q '"Search" (in your last look) is gone; at its place now: .*Search for' <<<"$out" && [ "$took" -le 10 ]; then
   pass "tapOn \"Search\" after the label changed: failed in ${took}s, naming the new label"
 else
-  fail "tapOn \"Search\" after the label changed: exit $code in ${took}s (want a failure within 8 s naming the new label):"
+  fail "tapOn \"Search\" after the label changed: exit $code in ${took}s (want a failure within 10 s naming the new label):"
   sed 's/^/      /' <<<"$out"
 fi
 

@@ -424,7 +424,7 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
 	defer func() { r.seen = nil }()
 	for i, c := range cmds {
-		if i > 0 {
+		if i > 0 || !tapsByLookup(c.Name) {
 			r.seen = nil
 		}
 		start := time.Now()
