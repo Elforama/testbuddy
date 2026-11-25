@@ -90,10 +90,42 @@ func TestOpenNeedsAPlatformOrADevice(t *testing.T) {
 	if res["isError"] != true || !strings.Contains(res["content"].([]map[string]any)[0]["text"].(string), "say which platform") {
 		t.Errorf("MCP open with nothing named: %v", res)
 	}
-	for _, c := range []struct{ platform, device, env string }{{"ios", "", ""}, {"", "alice", ""}, {"", "", "emulator-5554"}} {
+	for _, c := range []struct{ platform, device, env, app string }{{"ios", "", "", ""}, {"", "alice", "", ""}, {"", "", "emulator-5554", ""}, {"", "", "", "https://example.com"}} {
 		t.Setenv("TB_DEVICE", c.env)
-		if err := explicitDevice(c.platform, c.device); err != nil {
-			t.Errorf("explicitDevice(%q, %q) with TB_DEVICE=%q: %v", c.platform, c.device, c.env, err)
+		if err := explicitDevice(c.platform, c.device, c.app); err != nil {
+			t.Errorf("explicitDevice(%q, %q, %q) with TB_DEVICE=%q: %v", c.platform, c.device, c.app, c.env, err)
 		}
+	}
+}
+
+func TestTestOfWebFlowsNeedsNoPlatform(t *testing.T) {
+	t.Setenv("TB_DEVICE", "")
+	withFakePhone(t)
+	flow := writeFlow(t, t.TempDir(), "web.yaml", "url: https://example.com\n---\n- assertVisible: Home\n")
+	_, errOut := capture(t, func() { cmdTest([]string{flow, "--debug-output", t.TempDir()}) })
+	if strings.Contains(errOut, noPlatform) {
+		t.Errorf("a web flow, which names its platform with url:, was refused:\n%s", errOut)
+	}
+}
+
+func TestTestTBDeviceNamesASession(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	t.Setenv("TB_HOME", t.TempDir())
+	apps := withFakePhones(t)
+	old := sessionDevice
+	sessionDevice = func(ctx context.Context, name string) string {
+		if name == "alice" {
+			return "emulator-5750"
+		}
+		return ""
+	}
+	t.Cleanup(func() { sessionDevice = old })
+	t.Setenv("TB_DEVICE", "alice")
+	flow := writeFlow(t, t.TempDir(), "pass.yaml", passingFlow)
+	var code int
+	out, errOut := capture(t, func() { code = cmdTest([]string{flow, "--debug-output", t.TempDir()}) })
+	if code != 0 || len(apps["emulator-5750"].launched) != 1 {
+		t.Errorf("exit %d, launched on alice's device %v; want the run on the session's device\n%s%s", code, apps["emulator-5750"].launched, out, errOut)
 	}
 }

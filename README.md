@@ -71,7 +71,8 @@ simulator, or have Google Chrome installed for web flows. With no phone running,
 starts one of the platform asked for: with `-p android` the first Android emulator (AVD) it
 finds, with `-p ios` (on a Mac) a shut-down iPhone simulator of the newest iOS. It says which, waits for the boot, and leaves
 it running (not on CI, where devices are set up on purpose). `tb test` and `tb open` need the
-platform: `-p android`, `ios` or `web`, unless a device is named (`-d`, `--device`, `TB_DEVICE`).
+platform: `-p android`, `ios` or `web`, unless a device is named (`-d`, `--device`, `TB_DEVICE`)
+or the flows name it (`url:` for the web, `devices:` roles); `tb open --app` with a URL is web.
 
 ## Quick start
 

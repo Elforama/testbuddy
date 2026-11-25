@@ -7,8 +7,9 @@ connected, and with several tb asks which. A flag's
 value is checked before anything runs: a number flag takes a number, an on/off flag given a
 value takes `true` or `false` (`--json=false`), and anything else is bad input.
 `tb test` and `tb open` need the platform, `-p android|ios|web`, unless a device is named (`-d`,
-`--device`, `TB_DEVICE`); tb does not pick one for you. A `TB_DEVICE` that names no connected
-device does not count.
+`--device`, `TB_DEVICE`) or the flows name it (`url:` for the web, `devices:` roles; for `tb open`,
+an `--app` URL); tb does not pick one for you. A `TB_DEVICE` that names neither a connected device
+nor an open session does not count.
 
 ## Run tests
 
@@ -22,7 +23,7 @@ Not with `--device`, shards, a multi-device flow, or on CI (`CI` / `TB_CI` set).
 | Option | Meaning |
 |---|---|
 | `-e, --env KEY=VALUE` | Set a variable (repeatable). A flow's own `env:` is applied after it, so write overridable defaults there as `KEY: ${KEY \|\| 'default'}`. |
-| `-p, --platform android\|ios\|web` | The platform to run on: required unless a device is named (`--device`, a connected `TB_DEVICE`) or every flow names its `devices:` roles. |
+| `-p, --platform android\|ios\|web` | The platform to run on: required unless a device is named (`--device`, a connected `TB_DEVICE` or a session's name) or every flow names its platform (`url:`, `devices:` roles). |
 | `--device a,b` (alias `--udid`) | Devices to use (serial, UDID or name). |
 | `--device role=DEVICE` | Pin a multi-device flow's role (repeatable): `--device alice="iPhone 17"`. |
 | `--config FILE` | Workspace config (default: `config.yaml` in the folder). |
@@ -213,7 +214,8 @@ simulators connected, a session command is refused and lists them, rather than t
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
 In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or multi-device flow),
 `TB_DEVICE` names the device tried first and, with no `-p`, the platform (a serial or device
-name of a connected device: a session's name, or a device not connected, gets the run refused):
+name of a connected device, or a session's name for the device it has open; anything else gets
+the run refused):
 your own idle session on it gives it back, and when it cannot run a flow or is in use (another
 agent's session, or yours running a command) the flow goes to another of the same platform. When the run had
 a choice of phones or simulators, it says which one it took and why not the others before its

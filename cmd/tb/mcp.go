@@ -253,7 +253,7 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		if headless {
 			params["headless"] = true
 		}
-		if err := explicitDevice(str("platform"), str("device")); err != nil {
+		if err := explicitDevice(str("platform"), str("device"), str("app")); err != nil {
 			resp = daemon.Response{Exit: 2, Text: err.Error()}
 			break
 		}
