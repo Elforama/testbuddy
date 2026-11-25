@@ -2,12 +2,12 @@ package annotate
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -22,19 +22,90 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-var ansiRE = regexp.MustCompile("\x1b(\\[[0-?]*[ -/]*[@-~]|\\][^\x07\x1b]*(\x07|\x1b\\\\)?|[@-Z\\\\-_])")
+func stripEscapes(s string) string {
+	rs := []rune(s)
+	var b strings.Builder
+	stringEnd := func(i int) int {
+		for j := i; j < len(rs); j++ {
+			if rs[j] == 0x07 || rs[j] == 0x9C {
+				return j + 1
+			}
+			if rs[j] == 0x1b && j+1 < len(rs) && rs[j+1] == '\\' {
+				return j + 2
+			}
+		}
+		return -1
+	}
+	csiEnd := func(i int) int {
+		j := i
+		for j < len(rs) && rs[j] >= 0x30 && rs[j] <= 0x3F {
+			j++
+		}
+		for j < len(rs) && rs[j] >= 0x20 && rs[j] <= 0x2F {
+			j++
+		}
+		if j < len(rs) && rs[j] >= 0x40 && rs[j] <= 0x7E {
+			return j + 1
+		}
+		return j
+	}
+	for i := 0; i < len(rs); {
+		r := rs[i]
+		switch {
+		case r == 0x9B:
+			i = csiEnd(i + 1)
+			continue
+		case r == 0x9D || r == 0x90 || r == 0x98 || r == 0x9E || r == 0x9F:
+			if e := stringEnd(i + 1); e > 0 {
+				i = e
+			} else {
+				i++
+			}
+			continue
+		case r != 0x1b:
+			b.WriteRune(r)
+			i++
+			continue
+		}
+		if i+1 >= len(rs) {
+			break
+		}
+		switch c := rs[i+1]; {
+		case c == '[':
+			i = csiEnd(i + 2)
+		case c == ']' || c == 'P' || c == 'X' || c == '^' || c == '_':
+			if e := stringEnd(i + 2); e > 0 {
+				i = e
+			} else {
+				i += 2
+			}
+		case c >= 0x20 && c <= 0x2F:
+			j := i + 1
+			for j < len(rs) && rs[j] >= 0x20 && rs[j] <= 0x2F {
+				j++
+			}
+			i = min(j+1, len(rs))
+		case c >= 0x30 && c <= 0x7E:
+			i += 2
+		default:
+			i++
+		}
+	}
+	return b.String()
+}
 
 func cleanText(s string) string {
-	s = ansiRE.ReplaceAllString(s, "")
 	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f':
 			return ' '
+		case r == zwnj:
+			return r
 		case unicode.Is(unicode.Cc, r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Variation_Selector, r):
 			return -1
 		}
 		return r
-	}, s)
+	}, stripEscapes(s))
 }
 
 var (
@@ -43,14 +114,20 @@ var (
 )
 
 var fontDirs = func() []string {
+	under := func(root string, parts ...string) string {
+		if root == "" {
+			return ""
+		}
+		return filepath.Join(append([]string{root}, parts...)...)
+	}
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return []string{"/System/Library/Fonts", "/Library/Fonts", filepath.Join(home, "Library", "Fonts")}
+		return []string{"/System/Library/Fonts", "/Library/Fonts", under(home, "Library", "Fonts")}
 	case "windows":
-		return []string{filepath.Join(os.Getenv("WINDIR"), "Fonts"), filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "Windows", "Fonts")}
+		return []string{under(os.Getenv("WINDIR"), "Fonts"), under(os.Getenv("LOCALAPPDATA"), "Microsoft", "Windows", "Fonts")}
 	}
-	return []string{"/usr/share/fonts", "/usr/local/share/fonts", filepath.Join(home, ".local", "share", "fonts"), filepath.Join(home, ".fonts")}
+	return []string{"/usr/share/fonts", "/usr/local/share/fonts", under(home, ".local", "share", "fonts"), under(home, ".fonts")}
 }
 
 const maxFontFile = 100 << 20
@@ -76,7 +153,7 @@ func outlined(f *sfnt.Font, buf *sfnt.Buffer, r rune) bool {
 func fontFiles() []string {
 	var files []string
 	for _, dir := range fontDirs() {
-		if dir == "" {
+		if dir == "" || !filepath.IsAbs(dir) {
 			continue
 		}
 		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -128,7 +205,25 @@ func parseFonts(p string) []*sfnt.Font {
 	return []*sfnt.Font{f}
 }
 
-func findFallbacks(base *sfnt.Font, texts ...string) {
+func drawnRunes(text string) []rune {
+	var out []rune
+	for _, r := range text {
+		out = append(out, r)
+		if f, ok := arabicForms[r]; ok {
+			for _, x := range f {
+				if x != 0 {
+					out = append(out, x)
+				}
+			}
+		}
+		if l, ok := lamAlef[r]; ok {
+			out = append(out, l[0], l[1])
+		}
+	}
+	return out
+}
+
+func findFallbacks(ctx context.Context, base *sfnt.Font, texts ...string) {
 	if base == nil {
 		return
 	}
@@ -140,8 +235,8 @@ func findFallbacks(base *sfnt.Font, texts ...string) {
 	}
 	want := map[rune]bool{}
 	for _, t := range texts {
-		for _, r := range t {
-			if fallback.cover[r] == nil && !fallback.missing[r] && !outlined(base, &buf, r) {
+		for _, r := range drawnRunes(t) {
+			if r != zwnj && fallback.cover[r] == nil && !fallback.missing[r] && !outlined(base, &buf, r) {
 				want[r] = true
 			}
 		}
@@ -150,6 +245,9 @@ func findFallbacks(base *sfnt.Font, texts ...string) {
 		return
 	}
 	for _, p := range fontFiles() {
+		if ctx.Err() != nil {
+			return
+		}
 		for _, f := range parseFonts(p) {
 			for r := range want {
 				if outlined(f, &buf, r) {
@@ -168,49 +266,67 @@ func findFallbacks(base *sfnt.Font, texts ...string) {
 }
 
 type textFace struct {
+	base  *sfnt.Font
+	opts  *opentype.FaceOptions
 	faces []font.Face
+	index map[*sfnt.Font]int
 	pick  map[rune]int
+	buf   sfnt.Buffer
 }
 
-func newTextFace(base *sfnt.Font, px int, text string) (font.Face, string) {
-	findFallbacks(base, text)
+func newTextFace(base *sfnt.Font, px int) *textFace {
+	if base == nil {
+		return nil
+	}
 	opts := &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull}
 	bf, err := opentype.NewFace(base, opts)
 	if err != nil {
-		return nil, text
+		return nil
 	}
-	tf := &textFace{faces: []font.Face{bf}, pick: map[rune]int{}}
-	index := map[*sfnt.Font]int{}
-	var buf sfnt.Buffer
-	var b strings.Builder
-	fallback.Lock()
-	defer fallback.Unlock()
-	for _, r := range text {
-		if _, ok := tf.pick[r]; ok || outlined(base, &buf, r) {
-			b.WriteRune(r)
-			continue
-		}
-		f := fallback.cover[r]
-		if f == nil {
-			fmt.Fprintf(&b, "[U+%04X]", r)
-			continue
-		}
-		i, ok := index[f]
-		if !ok {
-			face, err := opentype.NewFace(f, opts)
-			if err != nil {
-				fmt.Fprintf(&b, "[U+%04X]", r)
-				continue
-			}
-			i = len(tf.faces)
-			tf.faces = append(tf.faces, face)
-			index[f] = i
-		}
-		tf.pick[r] = i
-		b.WriteRune(r)
-	}
-	return tf, b.String()
+	return &textFace{base: base, opts: opts, faces: []font.Face{bf}, index: map[*sfnt.Font]int{}, pick: map[rune]int{}}
 }
+
+func (f *textFace) has(r rune) bool {
+	if _, ok := f.pick[r]; ok {
+		return true
+	}
+	if outlined(f.base, &f.buf, r) {
+		f.pick[r] = 0
+		return true
+	}
+	fallback.Lock()
+	fb := fallback.cover[r]
+	fallback.Unlock()
+	if fb == nil {
+		return false
+	}
+	i, ok := f.index[fb]
+	if !ok {
+		face, err := opentype.NewFace(fb, f.opts)
+		if err != nil {
+			return false
+		}
+		i = len(f.faces)
+		f.faces = append(f.faces, face)
+		f.index[fb] = i
+	}
+	f.pick[r] = i
+	return true
+}
+
+func (f *textFace) show(s string) string {
+	var b strings.Builder
+	for _, r := range visual(s) {
+		if f.has(r) {
+			b.WriteRune(r)
+		} else {
+			fmt.Fprintf(&b, "[U+%04X]", r)
+		}
+	}
+	return b.String()
+}
+
+func (f *textFace) measure(s string) fixed.Int26_6 { return font.MeasureString(f, f.show(s)) }
 
 func (f *textFace) face(r rune) font.Face { return f.faces[f.pick[r]] }
 

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/font/sfnt"
 )
 
 func dms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -642,12 +644,12 @@ func TestIssue412NoFontForItSaysWhich(t *testing.T) {
 		fallback.cover, fallback.missing = nil, nil
 		fallback.Unlock()
 	})
-	face, text := newTextFace(monoFont, 24, "done 🎉 ok")
+	face := newTextFace(monoFont, 24)
 	if face == nil {
 		t.Fatal("no face")
 	}
 	defer face.Close()
-	if text != "done [U+1F389] ok" {
+	if text := face.show("done 🎉 ok"); text != "done [U+1F389] ok" {
 		t.Errorf("issue #412: with no font for it, the emoji is drawn as %q", text)
 	}
 }
@@ -661,8 +663,68 @@ func TestIssue412RightToLeftReadsRightToLeft(t *testing.T) {
 		{"لا", "ﻻ"},
 		{"بلا", "ﻼﺑ"},
 		{"order 42", "order 42"},
+		{"שלום 42 עולם", "םלוע 42 םולש"},
+		{"مرحبا 2025", "2025 \uFE8E\uFE92\uFEA3\uFEAE\uFEE3"},
+		{"שלום: abc", "םולש: abc"},
+		{"پیام", "\uFEE1\uFE8E\uFBFF\uFB58"},
+		{"لَا", "\uFEFB\u064E"},
+		{"ب\u200Cب", "\uFE8F\uFE8F"},
 	} {
 		if got := visual(c.in); got != c.want {
+			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestIssue412LongRightToLeftKeepsItsStart(t *testing.T) {
+	tail := strings.Repeat(" עולם ומלואו", 12)
+	a, b := "שלום"+tail, "תודה"+tail
+	if sameImage(eventImage(a), eventImage(b)) {
+		t.Errorf("issue #412: a long right-to-left event loses its first word when cut to fit")
+	}
+	cap := func(s string) image.Image { return captionImage(s, 720, 80, 28) }
+	if sameImage(cap(a), cap(b)) {
+		t.Errorf("issue #412: a long right-to-left caption loses its first word when wrapped")
+	}
+}
+
+func TestIssue412FallbackFontIsUsed(t *testing.T) {
+	var buf sfnt.Buffer
+	found := false
+	for _, p := range fontFiles() {
+		for _, f := range parseFonts(p) {
+			if outlined(f, &buf, '购') {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Skip("no font on this computer has 购")
+	}
+	findFallbacks(context.Background(), monoFont, "购")
+	face := newTextFace(monoFont, 24)
+	defer face.Close()
+	if got := face.show("购"); got != "购" || face.pick['购'] == 0 {
+		t.Errorf("issue #412: 购 is drawn as %q, from face %d, with a font for it on this computer", got, face.pick['购'])
+	}
+}
+
+func TestIssue412EscapeSequences(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"\x1b[31mred\x1b[0m", "red"},
+		{"\x1b(B\x1b[mx", "x"},
+		{"\x1b7save\x1b8", "save"},
+		{"\x1bPq data \x1b\\after", "after"},
+		{"\x1b]8;;http://x\x07link\x1b]8;;\x07", "link"},
+		{"\x1b]0;title rest", "0;title rest"},
+		{"red\x1b[31", "red"},
+		{"\u009b31mx", "x"},
+		{"\x1b[38;2;255;0;0mrgb", "rgb"},
+	} {
+		if got := cleanText(c.in); got != c.want {
 			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
 		}
 	}

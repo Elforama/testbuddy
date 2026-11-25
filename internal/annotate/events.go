@@ -260,6 +260,15 @@ func logImage(s logState, w, band, rows, px int) image.Image {
 		return img
 	}
 	defer face.Close()
+	var texts []string
+	for _, r := range s.Rows {
+		texts = append(texts, oneLine(r.text))
+	}
+	findFallbacks(context.Background(), monoFont, texts...)
+	tf := newTextFace(monoFont, px)
+	if tf != nil {
+		defer tf.Close()
+	}
 	rowH := eventRowHeight(px)
 	top := (band - rows*rowH) / 2
 	margin := px
@@ -292,12 +301,9 @@ func logImage(s logState, w, band, rows, px int) image.Image {
 		if i == 0 {
 			room -= pausedW
 		}
-		if room > 0 && monoFont != nil {
-			if tf, text := newTextFace(monoFont, px, visual(oneLine(r.text))); tf != nil {
-				d = &font.Drawer{Dst: img, Src: textCol, Face: tf, Dot: fixed.Point26_6{X: x, Y: base}}
-				d.DrawString(fitText(tf, text, room))
-				tf.Close()
-			}
+		if room > 0 && tf != nil {
+			d = &font.Drawer{Dst: img, Src: textCol, Face: tf, Dot: fixed.Point26_6{X: x, Y: base}}
+			d.DrawString(tf.show(fitText(tf.measure, oneLine(r.text), room)))
 		}
 	}
 	if s.Paused {

@@ -85,13 +85,13 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 	events := append([]Event(nil), d.Events...)
 	var texts []string
 	for _, c := range d.Caps {
-		texts = append(texts, visual(cleanText(c.Text)))
+		texts = append(texts, cleanText(c.Text))
 	}
 	for _, e := range events {
-		texts = append(texts, visual(cleanText(e.Text)))
+		texts = append(texts, cleanText(e.Text))
 	}
-	findFallbacks(monoFont, texts...)
-	findFallbacks(mediumFont, texts...)
+	findFallbacks(ctx, monoFont, texts...)
+	findFallbacks(ctx, mediumFont, texts...)
 	log := layoutEvents(events, length)
 	caps, touches := heldNotes(d.Caps, d.Touches, log.holds)
 	inputs := []string{"-i", abs}
