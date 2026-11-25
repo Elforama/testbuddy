@@ -73,7 +73,11 @@ func layoutEvents(events []Event, length time.Duration) eventLog {
 		return eventLog{}
 	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At < events[j].At })
-	n := min(busiest(events), eventRowsMax)
+	drawn := make([]Event, len(events))
+	for i, e := range events {
+		drawn[i] = Event{At: max(e.At, oneFrame), Text: e.Text}
+	}
+	n := min(busiest(drawn), eventRowsMax)
 	var (
 		log   eventLog
 		up    []*eventRow

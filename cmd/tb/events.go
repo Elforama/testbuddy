@@ -22,7 +22,12 @@ type runEvents struct {
 
 	mu       sync.Mutex
 	reversed map[string]bool
+	lastEnd  map[string]time.Time
+	shown    map[int]bool
+	videos   int
 }
+
+const betweenFlows = 30 * time.Second
 
 var reverseADB = func(ctx context.Context, serial string, port int, remove bool) error {
 	p := "tcp:" + strconv.Itoa(port)
@@ -72,18 +77,52 @@ func (e *runEvents) reach(ctx context.Context, d device.Info) {
 	e.mu.Unlock()
 }
 
-func (e *runEvents) forJob(ds map[string]device.Info) func(role string, start, end time.Time) []engine.AnnotateEvent {
+func (e *runEvents) forJob(ds map[string]device.Info) func(role string, since, start, end time.Time) []engine.AnnotateEvent {
 	if e == nil {
 		return nil
 	}
-	return func(role string, start, end time.Time) []engine.AnnotateEvent {
+	return func(role string, since, start, end time.Time) []engine.AnnotateEvent {
 		d := ds[role]
+		key := d.Serial
+		if key == "" {
+			key = "role:" + role
+		}
+		e.mu.Lock()
+		if e.lastEnd == nil {
+			e.lastEnd, e.shown = map[string]time.Time{}, map[int]bool{}
+		}
+		from := since
+		if prev, ok := e.lastEnd[key]; ok && since.Sub(prev) <= betweenFlows {
+			from = prev.Add(time.Nanosecond)
+		}
+		if from.After(start) {
+			from = start
+		}
+		if end.After(e.lastEnd[key]) {
+			e.lastEnd[key] = end
+		}
+		e.videos++
+		e.mu.Unlock()
+		evs := e.hub.Between(from, end, d.Serial, d.Name, role)
 		var out []engine.AnnotateEvent
-		for _, ev := range e.hub.Between(start, end, d.Serial, d.Name, role) {
+		e.mu.Lock()
+		for _, ev := range evs {
+			e.shown[ev.Seq] = true
 			out = append(out, engine.AnnotateEvent{At: ev.At, Text: ev.Text})
 		}
+		e.mu.Unlock()
 		return out
 	}
+}
+
+func (e *runEvents) unshown() (n int, videos int) {
+	if e == nil {
+		return 0, 0
+	}
+	kept, _ := e.hub.Count()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return kept - len(e.shown), e.videos
 }
 
 func (e *runEvents) close() {
@@ -91,6 +130,11 @@ func (e *runEvents) close() {
 		return
 	}
 	e.srv.Close()
+	if n, videos := e.unshown(); n > 0 && videos == 0 {
+		fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came, but no video was recorded to show them\n", n)
+	} else if n > 0 {
+		fmt.Fprintf(os.Stderr, "--annotate: %d event(s) are in no video: sent while no flow of their device ran, or for a device that recorded none\n", n)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for serial := range e.reversed {

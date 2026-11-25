@@ -316,7 +316,9 @@ Android device reaches the endpoint on its own `localhost` (tb sets up `adb reve
 simulator and a web page (CORS is allowed) on the computer's; the URL is in
 `$TB_EVENTS_URL`, and in the flows' `${TB_EVENTS_URL}` to pass to the app at launch. An event
 can name its `device` (serial, name or role; or `?device=`, or `tb mark -d`); one that names
-none goes to every device recording at the time. Each video shows its events in a band below
+none goes to every device recording at the time. An event sent after its flow began but
+before the video started, or between two flows on a device, shows at the video's first frame
+with its time before 0; when the run ends, tb says how many events are in no video. Each video shows its events in a band below
 the step's text, one row per event with its time, the newest highlighted, each up for 2 s:
 a burst gets a row per event, as many as the run's busiest moment needs (up to 6). A bigger
 burst holds the video's frame, marked "paused for events", until each event has been up a

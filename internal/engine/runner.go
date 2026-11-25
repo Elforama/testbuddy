@@ -60,13 +60,14 @@ type Options struct {
 	Timeline        *timeline.Recorder
 	Record          bool
 	Annotate        bool
-	AnnotateEvents  func(role string, start, end time.Time) []AnnotateEvent
+	AnnotateEvents  func(role string, since, start, end time.Time) []AnnotateEvent
 	AnnotateStep    time.Duration
 	StallFloor      time.Duration
 	AwayGrace       time.Duration
 }
 
 type Runner struct {
+	flowBegan  time.Time
 	scrollStop func(*ui.Screen) string
 	Drv        driver.Driver
 	opts       Options
@@ -288,6 +289,7 @@ type StepResult struct {
 
 func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	start := time.Now()
+	r.flowBegan = start
 	res = FlowResult{Name: f.Name(), File: f.Path}
 	r.js = nil
 	r.envStack = nil
@@ -344,6 +346,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 }
 
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
+	r.flowBegan = time.Now()
 	r.envStack = nil
 	r.copied = nil
 	r.hinted, r.hints = nil, nil

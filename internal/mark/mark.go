@@ -34,6 +34,7 @@ type Event struct {
 	At     time.Time
 	Text   string
 	Device string
+	Seq    int
 }
 
 type Hub struct {
@@ -70,7 +71,7 @@ func (h *Hub) AddEvents(evs []Event) int {
 			h.dropped++
 			continue
 		}
-		h.events = append(h.events, Event{At: at, Text: t, Device: e.Device})
+		h.events = append(h.events, Event{At: at, Text: t, Device: e.Device, Seq: len(h.events)})
 		n++
 	}
 	return n

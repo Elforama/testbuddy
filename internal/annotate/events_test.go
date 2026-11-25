@@ -573,6 +573,31 @@ func TestTouchRingLastsThroughAHold(t *testing.T) {
 	}
 }
 
+func TestIssue413EarlyEventShowsAtTheFirstFrame(t *testing.T) {
+	l := layoutEvents([]Event{{-dms(350), "launch"}, {dms(1000), "tap"}}, 5*time.Second)
+	if got := upAt(l, oneFrame); len(got) != 1 || got[0] != "launch" {
+		t.Errorf("issue #413: at the first frame %v, want the event sent before the video", got)
+	}
+	if got := eventTime(-dms(350)); got != "-0.35s" {
+		t.Errorf("issue #413: its time reads %q", got)
+	}
+}
+
+func TestIssue413EarlyBurstGetsRowsNotALongHold(t *testing.T) {
+	var evs []Event
+	for i := 10; i >= 1; i-- {
+		evs = append(evs, Event{-time.Duration(i) * time.Second, fmt.Sprintf("e%d", i)})
+	}
+	l := layoutEvents(evs, 5*time.Second)
+	var held time.Duration
+	for _, h := range l.holds {
+		held += h.Dur
+	}
+	if l.rows != eventRowsMax || held > 5*eventRead {
+		t.Errorf("issue #413 review: 10 events from before the video get %d rows and hold its first frame %s", l.rows, held)
+	}
+}
+
 func sameImage(a, b image.Image) bool {
 	if a.Bounds() != b.Bounds() {
 		return false
