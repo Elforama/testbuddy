@@ -292,9 +292,12 @@ func logImage(s logState, w, band, rows, px int) image.Image {
 		if i == 0 {
 			room -= pausedW
 		}
-		d = &font.Drawer{Dst: img, Src: textCol, Face: face, Dot: fixed.Point26_6{X: x, Y: base}}
-		if room > 0 {
-			d.DrawString(fitText(face, oneLine(r.text), room))
+		if room > 0 && monoFont != nil {
+			if tf, text := newTextFace(monoFont, px, visual(oneLine(r.text))); tf != nil {
+				d = &font.Drawer{Dst: img, Src: textCol, Face: tf, Dot: fixed.Point26_6{X: x, Y: base}}
+				d.DrawString(fitText(tf, text, room))
+				tf.Close()
+			}
 		}
 	}
 	if s.Paused {

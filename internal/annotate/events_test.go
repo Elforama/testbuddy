@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"math"
 	"math/rand"
 	"os"
@@ -564,5 +565,105 @@ func TestTouchRingLastsThroughAHold(t *testing.T) {
 		[]hold{{At: dms(2200), Dur: time.Second}})
 	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,0.500,1.100)'") {
 		t.Errorf("ring shown %s, want 0.5 s to 1.1 s", overlayAt(touches[0]))
+	}
+}
+
+func sameImage(a, b image.Image) bool {
+	if a.Bounds() != b.Bounds() {
+		return false
+	}
+	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
+		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
+			r1, g1, b1, a1 := a.At(x, y).RGBA()
+			r2, g2, b2, a2 := b.At(x, y).RGBA()
+			if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func eventImage(text string) image.Image {
+	return logImage(logState{Rows: []eventRow{{at: dms(1000), text: text}}}, 720, 60, 1, 24)
+}
+
+const unassigned = "͸"
+
+func TestIssue412EventTextIsNotDrawnAsEmptyBoxes(t *testing.T) {
+	for _, c := range []struct{ text, odd string }{
+		{"paid ✓", "✓"},
+		{"购物车", "购"},
+		{"カート", "カ"},
+		{"장바구니", "장"},
+		{"مرحبا", "م"},
+		{"שלום", "ש"},
+		{"done 🎉", "🎉"},
+	} {
+		boxed := strings.Replace(c.text, c.odd, unassigned, 1)
+		if sameImage(eventImage(c.text), eventImage(boxed)) {
+			t.Errorf("issue #412: %q draws %q as the empty box of a character with no glyph", c.text, c.odd)
+		}
+	}
+}
+
+func TestIssue412ControlCharactersAreNotDrawn(t *testing.T) {
+	for _, c := range []struct{ text, clean string }{
+		{"\x1b[31mred\x1b[0m", "red"},
+		{"a\x07b\x00c", "abc"},
+		{"family 👨‍👩", "family 👨👩"},
+		{"tab\there", "tab here"},
+	} {
+		if !sameImage(eventImage(c.text), eventImage(c.clean)) {
+			t.Errorf("issue #412: %q is not drawn as %q", c.text, c.clean)
+		}
+	}
+}
+
+func TestIssue412CaptionsToo(t *testing.T) {
+	cap := func(s string) image.Image { return captionImage(s, 720, 80, 28) }
+	if sameImage(cap("tapOn: 购物车"), cap("tapOn: "+unassigned+"物车")) {
+		t.Errorf("issue #412: a caption draws 购 as an empty box")
+	}
+	if !sameImage(cap("tapOn: \x1b[1mBuy\x1b[0m"), cap("tapOn: Buy")) {
+		t.Errorf("issue #412: a caption draws ANSI codes")
+	}
+}
+
+func TestIssue412NoFontForItSaysWhich(t *testing.T) {
+	old := fontDirs
+	fontDirs = func() []string { return nil }
+	fallback.Lock()
+	fallback.cover, fallback.missing = nil, nil
+	fallback.Unlock()
+	t.Cleanup(func() {
+		fontDirs = old
+		fallback.Lock()
+		fallback.cover, fallback.missing = nil, nil
+		fallback.Unlock()
+	})
+	face, text := newTextFace(monoFont, 24, "done 🎉 ok")
+	if face == nil {
+		t.Fatal("no face")
+	}
+	defer face.Close()
+	if text != "done [U+1F389] ok" {
+		t.Errorf("issue #412: with no font for it, the emoji is drawn as %q", text)
+	}
+}
+
+func TestIssue412RightToLeftReadsRightToLeft(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"שלום", "םולש"},
+		{"paid שלום ok", "paid םולש ok"},
+		{"(שלום)", "(םולש)"},
+		{"مرحبا", "ﺎﺒﺣﺮﻣ"},
+		{"لا", "ﻻ"},
+		{"بلا", "ﻼﺑ"},
+		{"order 42", "order 42"},
+	} {
+		if got := visual(c.in); got != c.want {
+			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
+		}
 	}
 }

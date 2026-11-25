@@ -45,7 +45,10 @@ var fontFace = func() func(px int) font.Face {
 func captionImage(text string, w, band, px int) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, w, band))
 	draw.Draw(img, img.Bounds(), &image.Uniform{bandRGB}, image.Point{}, draw.Src)
-	face := fontFace(px)
+	if mediumFont == nil {
+		return img
+	}
+	face, text := newTextFace(mediumFont, px, visual(strings.Join(strings.Fields(cleanText(text)), " ")))
 	if face == nil {
 		return img
 	}

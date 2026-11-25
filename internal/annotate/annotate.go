@@ -83,6 +83,15 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 		return err
 	}
 	events := append([]Event(nil), d.Events...)
+	var texts []string
+	for _, c := range d.Caps {
+		texts = append(texts, visual(cleanText(c.Text)))
+	}
+	for _, e := range events {
+		texts = append(texts, visual(cleanText(e.Text)))
+	}
+	findFallbacks(monoFont, texts...)
+	findFallbacks(mediumFont, texts...)
 	log := layoutEvents(events, length)
 	caps, touches := heldNotes(d.Caps, d.Touches, log.holds)
 	inputs := []string{"-i", abs}
@@ -228,6 +237,7 @@ func srtTime(d time.Duration) string {
 }
 
 func oneLine(s string) string {
+	s = cleanText(s)
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > 120 {
 		s = string(r[:119]) + "…"
