@@ -62,7 +62,7 @@ func TestTestPlatformComesFromTheNamedDevice(t *testing.T) {
 		t.Errorf("exit %d, launched on 5594 %v: TB_DEVICE's device was busy, so the run should take the other Android device\n%s%s", code, apps["emulator-5594"].launched, out, errOut)
 	}
 	_, errOut = capture(t, func() { code = cmdTest([]string{flow, "--device", "role=emulator-5594"}) })
-	if code != 2 || !strings.Contains(errOut, noPlatform) {
+	if code != 2 || !strings.Contains(errOut, noPlatform) || strings.Contains(errOut, "names no connected device") {
 		t.Errorf("a role pin alone named the device of an ordinary flow: exit %d, %q", code, errOut)
 	}
 }

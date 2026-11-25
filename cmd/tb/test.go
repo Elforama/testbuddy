@@ -35,10 +35,11 @@ const testUsage = `Usage: tb test <flow files or folders> [options]
 Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Options:
   -e, --env KEY=VALUE        set a variable (repeatable)
   -p, --platform android|ios|web  the platform to run on: required unless a device is named
-                             (--device, TB_DEVICE) or every flow names its devices: roles
+                             (--device, a connected TB_DEVICE) or every flow names its devices: roles
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
-                             (TB_DEVICE: the device a run of one device at a time tries first)
+                             (TB_DEVICE: the device a run of one device at a time tries first; the
+                             run keeps to its platform)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
@@ -157,7 +158,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	deviceArgs := a.list("device")
 	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
-	preferred := ""
+	preferred, envMissed := "", false
 	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
 		if d, err := device.Pick(devs, "", env); err == nil {
 			preferred = d.Serial
@@ -169,6 +170,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 				}
 			}
 			devs = preferFirst(same, d.Serial)
+		} else {
+			envMissed = true
 		}
 	}
 	rolePins := map[string]string{}
@@ -186,8 +189,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		want = append(want, w)
 	}
 	if platform == "" && len(want) == 0 && !onlyMultiDevice(plan) {
-		if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); env != "" {
-			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device; ", env)
+		if envMissed {
+			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device; ", strings.TrimSpace(os.Getenv("TB_DEVICE")))
 		}
 		fmt.Fprintln(os.Stderr, noPlatform)
 		return 2
