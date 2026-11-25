@@ -468,3 +468,19 @@ type frameClockDriver struct {
 func (d *frameClockDriver) VideoStarted(context.Context, string) (time.Time, bool) {
 	return d.first, d.ok
 }
+
+func TestIssue413MultiDeviceFlowHasItsStart(t *testing.T) {
+	dir := t.TempDir()
+	fl, err := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(&fakeDriver{settled: true}, Options{ArtifactsDir: dir})
+	before := time.Now()
+	if err := r.Begin(fl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if r.flowBegan.Before(before) {
+		t.Errorf("issue #413 review: a multi-device flow's start is %v, so its videos take every event since the run began", r.flowBegan)
+	}
+}

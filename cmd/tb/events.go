@@ -92,7 +92,7 @@ func (e *runEvents) forJob(ds map[string]device.Info) func(role string, since, s
 			e.lastEnd, e.shown = map[string]time.Time{}, map[int]bool{}
 		}
 		from := since
-		if prev, ok := e.lastEnd[key]; ok && prev.Before(since) && since.Sub(prev) <= betweenFlows {
+		if prev, ok := e.lastEnd[key]; ok && since.Sub(prev) <= betweenFlows {
 			from = prev.Add(time.Nanosecond)
 		}
 		if from.After(start) {

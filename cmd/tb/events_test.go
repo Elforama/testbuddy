@@ -186,3 +186,22 @@ func TestIssue413DevicesRecordingTogetherKeepTheirOwnEvents(t *testing.T) {
 		t.Errorf("asked again out of order, B's video shows %q", got)
 	}
 }
+
+func TestIssue413SecondVideoOfAFlowDoesNotRepeatTheFirst(t *testing.T) {
+	hub := marks.NewHub()
+	e := &runEvents{hub: hub}
+	get := e.forJob(map[string]device.Info{"": {Serial: "SIM-1"}})
+	tick := func() time.Time { time.Sleep(15 * time.Millisecond); return time.Now() }
+	flow := tick()
+	start1 := tick()
+	hub.Add("", "in part 1")
+	end1 := tick()
+	hub.Add("", "in part 2")
+	end2 := tick()
+	if got := eventTexts(get("", flow, start1, end1)); got != "in part 1" {
+		t.Errorf("part 1 shows %q", got)
+	}
+	if got := eventTexts(get("", flow, end1, end2)); got != "in part 2" {
+		t.Errorf("issue #413 review: part 2 shows %q, want only its own events", got)
+	}
+}

@@ -346,6 +346,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 }
 
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
+	r.flowBegan = time.Now()
 	r.envStack = nil
 	r.copied = nil
 	r.hinted, r.hints = nil, nil
