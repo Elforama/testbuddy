@@ -22,6 +22,9 @@ type runEvents struct {
 
 	mu       sync.Mutex
 	reversed map[string]bool
+	opened   time.Time
+	shown    map[string]time.Time
+	lastEnd  time.Time
 }
 
 var reverseADB = func(ctx context.Context, serial string, port int, remove bool) error {
@@ -54,7 +57,7 @@ func serveEvents(a *args, con *console) (*runEvents, string) {
 			con.printf("  another tb run is taking events too: tb mark sends there unless given --url %s\n", srv.URL)
 		}
 	}
-	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}}, srv.URL
+	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}, opened: time.Now()}, srv.URL
 }
 
 func (e *runEvents) reach(ctx context.Context, d device.Info) {
@@ -78,12 +81,37 @@ func (e *runEvents) forJob(ds map[string]device.Info) func(role string, start, e
 	}
 	return func(role string, start, end time.Time) []engine.AnnotateEvent {
 		d := ds[role]
+		e.mu.Lock()
+		from := e.opened
+		if last, ok := e.shown[role]; ok {
+			from = last.Add(time.Nanosecond)
+		}
+		if e.shown == nil {
+			e.shown = map[string]time.Time{}
+		}
+		if end.After(e.shown[role]) {
+			e.shown[role] = end
+		}
+		if end.After(e.lastEnd) {
+			e.lastEnd = end
+		}
+		e.mu.Unlock()
 		var out []engine.AnnotateEvent
-		for _, ev := range e.hub.Between(start, end, d.Serial, d.Name, role) {
+		for _, ev := range e.hub.Between(from, end, d.Serial, d.Name, role) {
 			out = append(out, engine.AnnotateEvent{At: ev.At, Text: ev.Text})
 		}
 		return out
 	}
+}
+
+func (e *runEvents) unshown() int {
+	if e == nil {
+		return 0
+	}
+	e.mu.Lock()
+	after := e.lastEnd
+	e.mu.Unlock()
+	return e.hub.After(after)
 }
 
 func (e *runEvents) close() {
@@ -91,6 +119,16 @@ func (e *runEvents) close() {
 		return
 	}
 	e.srv.Close()
+	if n := e.unshown(); n > 0 {
+		e.mu.Lock()
+		none := e.lastEnd.IsZero()
+		e.mu.Unlock()
+		if none {
+			fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came, but no video was recorded to show them\n", n)
+		} else {
+			fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came after the last video ended and are in no video\n", n)
+		}
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for serial := range e.reversed {

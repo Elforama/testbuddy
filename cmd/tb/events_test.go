@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/engine"
 	marks "github.com/elforama/testbuddy/internal/mark"
 )
 
@@ -120,5 +121,42 @@ func TestEventsPortNeedsAnnotate(t *testing.T) {
 	os.WriteFile(f, []byte("appId: app\n---\n- launchApp\n"), 0o644)
 	if code := cmdTest([]string{f, "--record", "--events-port", "8000"}); code != 2 {
 		t.Errorf("exit %d, want 2", code)
+	}
+}
+
+func TestIssue413EventsBeforeTheRecordingStartsAreShown(t *testing.T) {
+	hub := marks.NewHub()
+	e := &runEvents{hub: hub}
+	ds := map[string]device.Info{"": {Serial: "SIM-1", Name: "iPhone"}}
+	get := e.forJob(ds)
+	texts := func(evs []engine.AnnotateEvent) string {
+		var s []string
+		for _, ev := range evs {
+			s = append(s, ev.Text)
+		}
+		return strings.Join(s, ",")
+	}
+	hub.Add("", "launch", "sign_in")
+	time.Sleep(20 * time.Millisecond)
+	start1 := time.Now()
+	hub.Add("", "screen_view")
+	time.Sleep(20 * time.Millisecond)
+	end1 := time.Now()
+	time.Sleep(10 * time.Millisecond)
+	hub.Add("", "between")
+	time.Sleep(20 * time.Millisecond)
+	start2 := time.Now()
+	time.Sleep(10 * time.Millisecond)
+	end2 := time.Now()
+	if got := texts(get("", start1, end1)); got != "launch,sign_in,screen_view" {
+		t.Errorf("issue #413: the first video shows %q, want the events sent before it started too", got)
+	}
+	if got := texts(get("", start2, end2)); got != "between" {
+		t.Errorf("issue #413: the second video shows %q, want the event sent between the flows", got)
+	}
+	time.Sleep(10 * time.Millisecond)
+	hub.Add("", "too late")
+	if n := e.unshown(); n != 1 {
+		t.Errorf("issue #413: %d events reported as in no video, want 1 (the one after the last video)", n)
 	}
 }

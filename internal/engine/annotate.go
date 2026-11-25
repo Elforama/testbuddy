@@ -160,7 +160,7 @@ func videoEvents(evs []AnnotateEvent, start, end time.Time) []annotate.Event {
 	var out []annotate.Event
 	for _, e := range evs {
 		at := e.At.Sub(start)
-		if at < 0 || at > length || e.Text == "" {
+		if at > length || e.Text == "" {
 			continue
 		}
 		out = append(out, annotate.Event{At: at, Text: e.Text})
@@ -173,7 +173,7 @@ func shiftEvents(v Video, events []annotate.Event, shift time.Duration) []annota
 	var out []annotate.Event
 	for _, e := range events {
 		e.At += shift
-		if e.At >= 0 && e.At <= length {
+		if e.At <= length {
 			out = append(out, e)
 		}
 	}

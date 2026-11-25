@@ -183,8 +183,9 @@ func TestAnnotateDrawsTheEventsSentDuringTheRun(t *testing.T) {
 	if askedRole != "alice" || !asked[0].Equal(v.Start) || !asked[1].Equal(v.End) {
 		t.Errorf("asked for %q %v, want alice and the video's stretch", askedRole, asked)
 	}
-	if len(got) != 2 || got[0] != (annotate.Event{At: 10 * time.Millisecond, Text: "screen_view"}) ||
-		got[1] != (annotate.Event{At: 12 * time.Millisecond, Text: "button_tap"}) {
+	if len(got) != 3 || got[0] != (annotate.Event{At: -time.Second, Text: "before the video"}) ||
+		got[1] != (annotate.Event{At: 10 * time.Millisecond, Text: "screen_view"}) ||
+		got[2] != (annotate.Event{At: 12 * time.Millisecond, Text: "button_tap"}) {
 		t.Errorf("events %+v", got)
 	}
 }
@@ -251,11 +252,11 @@ func TestAnnotateCapsTheEventsAVideoDraws(t *testing.T) {
 	}
 }
 
-func TestShiftEventsKeepsThoseInTheVideo(t *testing.T) {
+func TestShiftEventsKeepsThoseUpToTheVideosEnd(t *testing.T) {
 	start := time.Now()
 	v := Video{Start: start, End: start.Add(5 * time.Second)}
 	got := shiftEvents(v, []annotate.Event{{At: 100 * time.Millisecond, Text: "a"}, {At: 2 * time.Second, Text: "b"}}, -300*time.Millisecond)
-	if len(got) != 1 || got[0] != (annotate.Event{At: 1700 * time.Millisecond, Text: "b"}) {
+	if len(got) != 2 || got[0] != (annotate.Event{At: -200 * time.Millisecond, Text: "a"}) || got[1] != (annotate.Event{At: 1700 * time.Millisecond, Text: "b"}) {
 		t.Errorf("%+v", got)
 	}
 }

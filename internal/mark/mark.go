@@ -89,6 +89,18 @@ func (h *Hub) Between(start, end time.Time, names ...string) []Event {
 	return out
 }
 
+func (h *Hub) After(t time.Time) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, e := range h.events {
+		if e.At.After(t) {
+			n++
+		}
+	}
+	return n
+}
+
 func (h *Hub) Count() (kept, dropped int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

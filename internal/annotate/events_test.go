@@ -566,3 +566,13 @@ func TestTouchRingLastsThroughAHold(t *testing.T) {
 		t.Errorf("ring shown %s, want 0.5 s to 1.1 s", overlayAt(touches[0]))
 	}
 }
+
+func TestIssue413EarlyEventShowsAtTheFirstFrame(t *testing.T) {
+	l := layoutEvents([]Event{{-dms(350), "launch"}, {dms(1000), "tap"}}, 5*time.Second)
+	if got := upAt(l, oneFrame); len(got) != 1 || got[0] != "launch" {
+		t.Errorf("issue #413: at the first frame %v, want the event sent before the video", got)
+	}
+	if got := eventTime(-dms(350)); got != "-0.35s" {
+		t.Errorf("issue #413: its time reads %q", got)
+	}
+}
