@@ -321,7 +321,8 @@ the step's text, one row per event with its time, the newest highlighted, each u
 a burst gets a row per event, as many as the run's busiest moment needs (up to 6). A bigger
 burst holds the video's frame, marked "paused for events", until each event has been up a
 second, so none goes by unread; the video then runs longer than the run, and the rows keep
-the real times. An event near the end holds the last frame until it has been up its 2 s.
+the real times. Events near the end hold the last frame, marked "paused for events", until each has been up
+its 2 s.
 A held video has no sound (screen recordings rarely have any). The events are
 also written beside the video as `recording.events.json`.
 

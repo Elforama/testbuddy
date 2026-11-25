@@ -203,7 +203,39 @@ func videoInfo(ctx context.Context, dir, ffmpeg, path string) (int, int, time.Du
 		ss, _ := strconv.ParseFloat(d[3], 64)
 		length = time.Duration((float64(hh*3600+mm*60) + ss) * float64(time.Second))
 	}
+	if strings.Contains(string(out), "Audio:") {
+		if d := videoEnd(ctx, dir, ffmpeg, path); d > 0 {
+			length = d
+		}
+	}
 	return w, h, length, nil
+}
+
+func videoEnd(ctx context.Context, dir, ffmpeg, path string) time.Duration {
+	out, err := runFFmpeg(ctx, dir, ffmpeg, []string{"-hide_banner", "-loglevel", "error", "-i", path, "-map", "0:v:0", "-c", "copy", "-f", "framemd5", "-"})
+	if err != nil {
+		return 0
+	}
+	var num, den, end int64
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "#tb 0:") {
+			fmt.Sscanf(strings.TrimSpace(line[6:]), "%d/%d", &num, &den)
+			continue
+		}
+		f := strings.Split(line, ",")
+		if len(f) < 4 || strings.HasPrefix(line, "#") {
+			continue
+		}
+		pts, err1 := strconv.ParseInt(strings.TrimSpace(f[2]), 10, 64)
+		dur, err2 := strconv.ParseInt(strings.TrimSpace(f[3]), 10, 64)
+		if err1 == nil && err2 == nil {
+			end = max(end, pts+dur)
+		}
+	}
+	if num <= 0 || den <= 0 || end <= 0 {
+		return 0
+	}
+	return time.Duration(end * num * int64(time.Second) / den)
 }
 
 func SRT(caps []Caption) string {
