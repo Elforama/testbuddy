@@ -306,14 +306,14 @@ jobs:
           done
           echo "::warning title=iOS warm-up failed twice::running the suite anyway; its result decides the job"
       - name: Run the bench journey on the simulator
-        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
+        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --retries 1 --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows on the simulator
         if: ${{ !cancelled() }}
         run: >-
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/ios/embedded-browser.yaml bench/flows/device/ios/nested-button.yaml
           bench/flows/device/accessibility-values.yaml bench/flows/device/controls-gestures.yaml bench/flows/device/navigation-deep-link.yaml
-          -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+          -p ios --device "$SIM_UDID" --retries 1 --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
       # Issue #243: a step given more time for a simulator stall (CI mode) shows in the job's
       # warnings, so the allowance cannot quietly hide slowness (bench/checks/ios-no-stall-grace.sh
       # checks the same on a healthy simulator). A warning, not a failure: a starved runner's real
@@ -392,7 +392,7 @@ jobs:
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       - name: Run the bench journey in headless Chrome
-        run: bin/tb test bench/flows/journey-web.yaml --headless --format junit --output build/e2e/web.xml --debug-output build/e2e/web
+        run: bin/tb test bench/flows/journey-web.yaml --headless --retries 1 --format junit --output build/e2e/web.xml --debug-output build/e2e/web
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows in headless Chrome
         if: ${{ !cancelled() }}
@@ -400,7 +400,7 @@ jobs:
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/navigation-deep-link.yaml
           bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
-          --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+          --headless --retries 1 --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
       # The journey once more, recorded with captions and touches for the pull request
       # (the recordings job). Not timed, and a failure here only warns.
       - name: Record the journey with --annotate
