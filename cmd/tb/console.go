@@ -16,12 +16,14 @@ import (
 )
 
 type console struct {
-	mu     sync.Mutex
-	w      io.Writer
-	quiet  bool
-	prefix bool
-	color  bool
-	start  time.Time
+	mu       sync.Mutex
+	w        io.Writer
+	quiet    bool
+	prefix   bool
+	color    bool
+	start    time.Time
+	skipped  int
+	fromHint bool
 }
 
 func newConsole(w io.Writer, quiet, prefix bool) *console {
@@ -117,6 +119,9 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		var nf *engine.NotFound
 		if errors.As(r.Err, &nf) && nf.Screen != nil {
 			c.printScreen(nf.Screen, nf.Query)
+		}
+		if n := len(r.Steps); c.fromHint && n > 0 && len(r.Job.Flow.Config.Devices) == 0 && !r.Job.Flow.Config.Web() && r.Steps[n-1].Status == engine.Failed {
+			c.printf("  failed at step %d: to run this flow from there, pass --from %d\n", c.skipped+n, c.skipped+n)
 		}
 		c.printf("  debug: %s (log.txt: what tb did, step by step)\n", debugDir)
 	case engine.Skipped:

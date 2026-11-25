@@ -17,3 +17,5 @@ agents/ios/.build/
 
 # CI end-to-end reports (tb test --output / --debug-output)
 /build/
+# a stray `go build ./cmd/tb` at the top level
+/tb

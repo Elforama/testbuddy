@@ -225,6 +225,7 @@ tb test flows/ -e PASSWORD=secret --include-tags smoke
 tb test flows/ --format junit --output report.xml
 tb test flows/ --shard-split 3            # three devices pull flows from one queue
 tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
+tb test flows/login.yaml --from 12        # start at step 12, on the screen the device is on now
 tb test flows/ --json                     # machine-readable results
 tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
 tb test flows/ --record                   # record each flow's screen, start to finish, into the reports

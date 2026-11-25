@@ -66,6 +66,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
                              $TB_EVENTS_URL and the flows' ${TB_EVENTS_URL})
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
+  --from N                   one flow, on a phone: start at its Nth step, on the screen the
+                             device is on now (onFlowStart and the steps before N do not
+                             run); a failed run says the step to pass
   --keep-animations          do not turn Android animations off during the run
   --keep-agents              leave tb's agent running on each device after the run (the next
                              run starts faster; other test tools cannot use the device until
@@ -87,7 +90,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"format"}, textFlag}, flagSpec{[]string{"output"}, textFlag},
 		flagSpec{[]string{"test-suite-name"}, textFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
-		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
+		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"from"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
 		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, optTimeFlag},
 		flagSpec{[]string{"events-port"}, intFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
@@ -115,7 +118,32 @@ func cmdTest(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	if a.str("from") != "" {
+		if err := startFrom(plan, a.num("from", 0)); err != nil {
+			fmt.Fprintf(os.Stderr, "--from: %v\n", err)
+			return 2
+		}
+	}
 	return runTest(argv, a, plan, false)
+}
+
+func startFrom(plan *workspace.Plan, n int) error {
+	if len(plan.Flows) != 1 {
+		return fmt.Errorf("name one flow, not %d", len(plan.Flows))
+	}
+	f := plan.Flows[0]
+	if len(f.Config.Devices) > 0 {
+		return fmt.Errorf("not for a flow of several devices")
+	}
+	if f.Config.Web() {
+		return fmt.Errorf("not for a web flow: each run opens a new browser")
+	}
+	if n < 1 || n > len(f.Commands) {
+		return fmt.Errorf("%s has steps 1 to %d", filepath.Base(f.Path), len(f.Commands))
+	}
+	f.Commands = f.Commands[n-1:]
+	f.Config.OnFlowStart = nil
+	return nil
 }
 
 func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
@@ -285,6 +313,10 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
+	con.fromHint = !replay
+	if n := a.num("from", 0); n > 1 {
+		con.skipped = n - 1
+	}
 
 	events, eventsURL := serveEvents(a, con)
 	if events != nil {
