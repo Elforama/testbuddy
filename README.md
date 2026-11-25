@@ -68,8 +68,8 @@ Or from inside Claude Code: `/plugin marketplace add Elforama/testbuddy`, then
 
 **Devices.** Start an Android emulator (or plug in a phone with USB debugging), boot an iOS
 simulator, or have Google Chrome installed for web flows. With no phone running, `tb test`
-starts one for flows that need it: the first Android emulator (AVD) it finds, else (on a Mac)
-a shut-down iPhone simulator of the newest iOS. It says which, waits for the boot, and leaves
+starts one of the platform asked for: with `-p android` the first Android emulator (AVD) it
+finds, with `-p ios` (on a Mac) a shut-down iPhone simulator of the newest iOS. It says which, waits for the boot, and leaves
 it running (not on CI, where devices are set up on purpose). `tb test` and `tb open` need the
 platform: `-p android`, `ios` or `web`, unless a device is named (`-d`, `--device`, `TB_DEVICE`).
 

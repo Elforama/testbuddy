@@ -71,7 +71,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
 tb test and tb open need -p android|ios|web unless a device is named (-d, --device, TB_DEVICE).
 TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
 A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
-With one device connected, or one session open (except for tb open), -d is optional; with
+With one device connected, or one session open, the session commands need no -d; with
 several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.

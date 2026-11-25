@@ -2,25 +2,27 @@
 
 Exit status for every command: **0** ok, **1** a command or flow failed, **2** bad input.
 `-d` takes a session name (from `tb open --name`), a serial/UDID or a device name, and defaults
-to `TB_DEVICE`; with one device connected it is optional, with several tb asks which. A flag's
+to `TB_DEVICE`; for the session commands (`look`, `do`, ...) it is optional with one device
+connected, and with several tb asks which. A flag's
 value is checked before anything runs: a number flag takes a number, an on/off flag given a
 value takes `true` or `false` (`--json=false`), and anything else is bad input.
 `tb test` and `tb open` need the platform, `-p android|ios|web`, unless a device is named (`-d`,
-`--device`, `TB_DEVICE`); tb does not pick one for you.
+`--device`, `TB_DEVICE`); tb does not pick one for you. A `TB_DEVICE` that names no connected
+device does not count.
 
 ## Run tests
 
 `tb test <flow files or folders> [options]`
 
-With no phone running and a flow that needs one, `tb test` starts one: the first Android
-emulator (AVD) it finds, else (on a Mac) a shut-down iPhone simulator of the newest iOS,
-without its window. It says which on stderr, waits for the boot, and leaves the device running.
+With no phone running and a flow that needs one, `tb test` starts one of the platform asked
+for: with `-p android` the first Android emulator (AVD) it finds, with `-p ios` (on a Mac) a
+shut-down iPhone simulator of the newest iOS, without its window. It says which on stderr, waits for the boot, and leaves the device running.
 Not with `--device`, shards, a multi-device flow, or on CI (`CI` / `TB_CI` set).
 
 | Option | Meaning |
 |---|---|
 | `-e, --env KEY=VALUE` | Set a variable (repeatable). A flow's own `env:` is applied after it, so write overridable defaults there as `KEY: ${KEY \|\| 'default'}`. |
-| `-p, --platform android\|ios\|web` | Run on this platform only. |
+| `-p, --platform android\|ios\|web` | The platform to run on: required unless a device is named (`--device`, a connected `TB_DEVICE`) or every flow names its `devices:` roles. |
 | `--device a,b` (alias `--udid`) | Devices to use (serial, UDID or name). |
 | `--device role=DEVICE` | Pin a multi-device flow's role (repeatable): `--device alice="iPhone 17"`. |
 | `--config FILE` | Workspace config (default: `config.yaml` in the folder). |

@@ -148,10 +148,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	defer cancel()
 
 	platform := strings.ToLower(a.str("platform"))
-	if platform == "" && len(a.list("device")) == 0 && strings.TrimSpace(os.Getenv("TB_DEVICE")) == "" && !onlyMultiDevice(plan) {
-		fmt.Fprintln(os.Stderr, noPlatform)
-		return 2
-	}
 	all := listDevices(ctx)
 	var devs []device.Info
 	for _, d := range all {
@@ -165,9 +161,14 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
 		if d, err := device.Pick(devs, "", env); err == nil {
 			preferred = d.Serial
-			devs = preferFirst(devs, d.Serial)
-		} else if !a.flag("quiet") && !a.flag("json") && phones(devs) > 1 {
-			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
+			platform = string(d.Platform)
+			var same []device.Info
+			for _, o := range devs {
+				if o.Platform == d.Platform {
+					same = append(same, o)
+				}
+			}
+			devs = preferFirst(same, d.Serial)
 		}
 	}
 	rolePins := map[string]string{}
@@ -183,6 +184,13 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			continue
 		}
 		want = append(want, w)
+	}
+	if platform == "" && len(want) == 0 && !onlyMultiDevice(plan) {
+		if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); env != "" {
+			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device; ", env)
+		}
+		fmt.Fprintln(os.Stderr, noPlatform)
+		return 2
 	}
 	if len(want) > 0 {
 		var picked []device.Info
