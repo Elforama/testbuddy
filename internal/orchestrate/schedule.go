@@ -284,6 +284,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	notRun := func(j *Job, last *Result) Result {
 		if last != nil {
 			r := *last
+			r.Retried = false
 			if r.Err != nil {
 				r.Err = fmt.Errorf("%w\n%s", r.Err, errNotRetried)
 			} else {
@@ -349,6 +350,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			r.Retried = true
 			fr, ok := finish(r)
 			if !ok {
+				fr.Retried = false
 				r, reported = fr, true
 				break
 			}
@@ -467,6 +469,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			pending = append([]*Job{retry}, pending...)
 			continue
 		}
+		r.Retried = false
 		results = append(results, r)
 	}
 	return results

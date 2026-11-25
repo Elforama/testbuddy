@@ -331,7 +331,11 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	}
 	cmds := f.Commands
 	if n := r.opts.FromStep; err == nil && n > 1 && n <= len(cmds) {
-		r.opts.Trace.Printf(r.opts.Role, 0, "--from %d: onFlowStart and steps 1 to %d not run", n, n-1)
+		left := fmt.Sprintf("steps 1 to %d", n-1)
+		if len(f.Config.OnFlowStart) > 0 {
+			left = "onFlowStart and " + left
+		}
+		r.opts.Trace.Printf(r.opts.Role, 0, "--from %d: %s not run", n, left)
 		for _, c := range cmds[:n-1] {
 			desc := r.describe(c)
 			r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: desc + " (before --from)", Status: Skipped})
