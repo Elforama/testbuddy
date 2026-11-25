@@ -68,9 +68,11 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+tb test and tb open need -p android|ios|web unless a device is named (-d, --device, TB_DEVICE)
+or the flows name it (url:, devices: roles; an --app URL for tb open).
 TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
 A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
-With one device connected, or one session open (except for tb open), -d is optional; with
+With one device connected, or one session open, the session commands need no -d; with
 several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.
@@ -408,6 +410,12 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		if len(a.pos) > 0 && args["device"] == "" {
 			args["device"] = a.pos[0]
 		}
+		app, _ := args["app"].(string)
+		if err := explicitDevice(platform, args["device"].(string), app); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		args["platform"] = openPlatform(platform, args["device"].(string), app)
 	}
 	return callDaemon(cmd, args)
 }
@@ -654,6 +662,22 @@ func cmdDaemon(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+const noPlatform = "say which platform: -p android, ios or web (or name a device with -d)"
+
+func explicitDevice(platform, dev, app string) error {
+	if platform == "" && orEnvDevice(dev) == "" && !device.IsURL(app) {
+		return errors.New(noPlatform)
+	}
+	return nil
+}
+
+func openPlatform(platform, dev, app string) string {
+	if platform == "" && orEnvDevice(dev) == "" && device.IsURL(app) {
+		return string(device.Web)
+	}
+	return platform
 }
 
 func orEnvDevice(d string) string {

@@ -29,7 +29,7 @@ onFlowStart:
 `)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--from", "4", "--json", "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--from", "4", "--json", "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -52,7 +52,7 @@ func TestTestFromSaysTheStepToStartFrom(t *testing.T) {
 	run := func(args ...string) string {
 		var code int
 		out, errOut := capture(t, func() {
-			code = cmdTest(append([]string{flow, "--debug-output", t.TempDir()}, args...))
+			code = cmdTest(append([]string{flow, "-p", "android", "--debug-output", t.TempDir()}, args...))
 		})
 		if code != 1 {
 			t.Fatalf("exit %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -145,7 +145,7 @@ func TestTestFromNumbersStepsAsTheFlowDoes(t *testing.T) {
 	report := filepath.Join(dir, "report.html")
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--from", "4", "--format", "html-detailed", "--output", report, "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--from", "4", "--format", "html-detailed", "--output", report, "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)

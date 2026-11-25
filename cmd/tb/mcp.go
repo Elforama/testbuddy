@@ -35,7 +35,7 @@ func schema(props map[string]any, required ...string) map[string]any {
 	return s
 }
 
-var devProp = map[string]any{"type": "string", "description": "device name/serial or session name (default: TB_DEVICE); optional with one device connected, needed with several"}
+var devProp = map[string]any{"type": "string", "description": "device name/serial or session name (default: TB_DEVICE); optional with one device connected, needed with several (open: this or platform)"}
 
 var mcpTools = []mcpTool{
 	{"devices", "List devices and open sessions.", schema(map[string]any{})},
@@ -249,9 +249,13 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		resp = call("devices", map[string]any{})
 	case "open":
 		headless, _ := args["headless"].(bool)
-		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": str("platform")}
+		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": openPlatform(str("platform"), str("device"), str("app"))}
 		if headless {
 			params["headless"] = true
+		}
+		if err := explicitDevice(str("platform"), str("device"), str("app")); err != nil {
+			resp = daemon.Response{Exit: 2, Text: err.Error()}
+			break
 		}
 		resp = call("open", params)
 	case "look":

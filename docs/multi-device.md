@@ -38,8 +38,9 @@ env:                            # shared env
     - assertVisible: ${MESSAGE}
 ```
 
-Run it like any flow: `tb test chat.yaml`. It can sit in a folder with ordinary flows and
-be run and sharded with them.
+Run it like any flow: `tb test chat.yaml` (no `-p`: its roles name their platforms). In a folder with ordinary flows it needs
+`-p` like them, and `-p` limits its roles to that platform too; name each device with
+`--device a,b` to run roles on several platforms.
 
 ## Keeping devices in step, passing values
 

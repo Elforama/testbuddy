@@ -24,7 +24,7 @@ scenarios on each platform:
 ```sh
 tb test bench/flows/scenarios -p android
 tb test bench/flows/scenarios -p ios
-tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
+tb test bench/flows/scenarios -p web -e BENCH=http://127.0.0.1:7360/ --headless
 ```
 
 CI and the benchmark scripts also select [standalone device flows](flows/device).
@@ -83,7 +83,7 @@ bench/ios/build.sh                         # then: xcrun simctl install booted <
 
 tb test bench/flows/journey.yaml -p android
 tb test bench/flows/journey.yaml -p ios
-tb test bench/flows/journey-web.yaml
+tb test bench/flows/journey-web.yaml -p web
 ```
 
 ## Time it
@@ -120,7 +120,7 @@ slide-in.
 
 ```sh
 go run ./bench/web -clicklog bench/results/web-clicks.jsonl
-tb test bench/flows/journey-web-instrumented.yaml --headless     # as many times as you like
+tb test bench/flows/journey-web-instrumented.yaml -p web --headless     # as many times as you like
 bench/clicks.py bench/results/web-clicks.jsonl
 ```
 

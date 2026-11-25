@@ -408,7 +408,7 @@ jobs:
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       - name: Run the bench journey in headless Chrome
-        run: bin/tb test bench/flows/journey-web.yaml --headless --retries 1 --format junit --output build/e2e/web.xml --debug-output build/e2e/web
+        run: bin/tb test bench/flows/journey-web.yaml -p web --headless --retries 1 --format junit --output build/e2e/web.xml --debug-output build/e2e/web
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows in headless Chrome
         if: ${{ !cancelled() }}
@@ -416,7 +416,7 @@ jobs:
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/navigation-deep-link.yaml
           bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
-          --headless --retries 1 --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+          -p web --headless --retries 1 --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
       # The journey once more, recorded with captions and touches for the pull request
       # (the recordings job). Not timed, and a failure here only warns.
       - name: Record the journey with --annotate
@@ -424,7 +424,7 @@ jobs:
         continue-on-error: true
         run: |
           command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
-          bin/tb test bench/flows/journey-web.yaml --headless --record --annotate --debug-output build/e2e/annotated/web ||
+          bin/tb test bench/flows/journey-web.yaml -p web --headless --record --annotate --debug-output build/e2e/annotated/web ||
             echo "::warning title=Annotated recording failed::the --annotate journey failed on the web (build/e2e/annotated/web in the web-e2e artifact)"
       # A flow that failed and was run once more (--retries 1) passes the job if its retry
       # passed, so each one is named here: a flaky flow or an intermittent regression shows.

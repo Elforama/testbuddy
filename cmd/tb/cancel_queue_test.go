@@ -29,7 +29,7 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 			}
 			out := filepath.Join(dir, "report."+format)
 			debug := filepath.Join(dir, "debug")
-			args := append(files, "--debug-output", debug)
+			args := append(files, "-p", "android", "--debug-output", debug)
 			if format == "json" {
 				args = append(args, "--json")
 			} else {
