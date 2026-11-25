@@ -35,7 +35,8 @@ const testUsage = `Usage: tb test <flow files or folders> [options]
 Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Options:
   -e, --env KEY=VALUE        set a variable (repeatable)
   -p, --platform android|ios|web  the platform to run on: required unless a device is named
-                             (--device, TB_DEVICE) or every flow names it (url:, devices: roles)
+                             (--device, a connected TB_DEVICE or a session's name) or every
+                             flow names it (url:, devices: roles)
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
                              (TB_DEVICE: the device a run of one device at a time tries first; the
@@ -159,7 +160,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	deviceArgs := a.list("device")
 	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
 	preferred, envMissed := "", false
-	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
+	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" && !flowsNamePlatform(plan) {
 		d, err := device.Pick(devs, "", env)
 		if err != nil {
 			if serial := sessionDevice(ctx, env); serial != "" {
@@ -196,7 +197,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	if platform == "" && len(want) == 0 && !flowsNamePlatform(plan) {
 		if envMissed {
-			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device; ", strings.TrimSpace(os.Getenv("TB_DEVICE")))
+			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device or open session; ", strings.TrimSpace(os.Getenv("TB_DEVICE")))
 		}
 		fmt.Fprintln(os.Stderr, noPlatform)
 		return 2
@@ -1009,13 +1010,17 @@ var sessionDevice = func(ctx context.Context, name string) string {
 	cl.SetDeadline(time.Now().Add(10 * time.Second))
 	stop := context.AfterFunc(ctx, func() { cl.SetDeadline(time.Now()) })
 	defer stop()
-	resp, err := cl.Call(daemon.Request{Cmd: "devices", Args: []byte("{}")}, nil)
-	var devs []struct{ Serial, Session string }
+	args, _ := json.Marshal(map[string]string{"owner": strings.TrimSpace(os.Getenv("TB_SESSION_OWNER"))})
+	resp, err := cl.Call(daemon.Request{Cmd: "devices", Args: args}, nil)
+	var devs []struct {
+		Serial, Session string
+		Others          bool
+	}
 	if err != nil || !resp.OK || json.Unmarshal(resp.JSON, &devs) != nil {
 		return ""
 	}
 	for _, d := range devs {
-		if d.Session != "" && d.Session == name {
+		if d.Session != "" && d.Session == name && !d.Others {
 			return d.Serial
 		}
 	}

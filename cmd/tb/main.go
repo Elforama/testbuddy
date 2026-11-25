@@ -415,6 +415,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
+		args["platform"] = openPlatform(platform, args["device"].(string), app)
 	}
 	return callDaemon(cmd, args)
 }
@@ -670,6 +671,13 @@ func explicitDevice(platform, dev, app string) error {
 		return errors.New(noPlatform)
 	}
 	return nil
+}
+
+func openPlatform(platform, dev, app string) string {
+	if platform == "" && orEnvDevice(dev) == "" && device.IsURL(app) {
+		return string(device.Web)
+	}
+	return platform
 }
 
 func orEnvDevice(d string) string {

@@ -104,7 +104,7 @@ func TestCmdTestTBDeviceThatNamesNoDevice(t *testing.T) {
 		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
 	})
 	all := out + errOut
-	if code != 2 || !strings.Contains(all, "TB_DEVICE=alice names no connected device; "+noPlatform) {
+	if code != 2 || !strings.Contains(all, "TB_DEVICE=alice names no connected device or open session; "+noPlatform) {
 		t.Errorf("exit %d:\n%s", code, all)
 	}
 }

@@ -249,7 +249,7 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		resp = call("devices", map[string]any{})
 	case "open":
 		headless, _ := args["headless"].(bool)
-		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": str("platform")}
+		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": openPlatform(str("platform"), str("device"), str("app"))}
 		if headless {
 			params["headless"] = true
 		}

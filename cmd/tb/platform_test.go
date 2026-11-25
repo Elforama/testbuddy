@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/elforama/testbuddy/internal/connect"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/devlock"
+	"github.com/elforama/testbuddy/internal/driver"
 )
 
 func TestTestNeedsAPlatformOrADevice(t *testing.T) {
@@ -127,5 +130,37 @@ func TestTestTBDeviceNamesASession(t *testing.T) {
 	out, errOut := capture(t, func() { code = cmdTest([]string{flow, "--debug-output", t.TempDir()}) })
 	if code != 0 || len(apps["emulator-5750"].launched) != 1 {
 		t.Errorf("exit %d, launched on alice's device %v; want the run on the session's device\n%s%s", code, apps["emulator-5750"].launched, out, errOut)
+	}
+}
+
+func TestOpenOfAURLOpensTheWeb(t *testing.T) {
+	t.Setenv("TB_DEVICE", "")
+	for _, c := range []struct{ platform, device, app, want string }{
+		{"", "", "https://example.com", "web"},
+		{"", "", "com.example.app", ""},
+		{"android", "", "https://example.com", "android"},
+		{"", "emulator-5554", "https://example.com", ""},
+	} {
+		if got := openPlatform(c.platform, c.device, c.app); got != c.want {
+			t.Errorf("openPlatform(%q, %q, %q) = %q, want %q", c.platform, c.device, c.app, got, c.want)
+		}
+	}
+}
+
+func TestTestOfWebFlowsIgnoresTBDevice(t *testing.T) {
+	withFakePhone(t)
+	old := listDevices
+	listDevices = func(ctx context.Context) []device.Info { return append(old(ctx), device.WebDevice(1)) }
+	t.Setenv("TB_DEVICE", "emulator-5554")
+	var ran []string
+	oldOverride := connect.Override(device.Web, func(ctx context.Context, i device.Info) (driver.Driver, error) {
+		ran = append(ran, i.Serial)
+		return nil, errors.New("no browser here")
+	})
+	t.Cleanup(oldOverride)
+	flow := writeFlow(t, t.TempDir(), "web.yaml", "url: https://example.com\n---\n- assertVisible: Home\n")
+	capture(t, func() { cmdTest([]string{flow, "--debug-output", t.TempDir()}) })
+	if len(ran) == 0 {
+		t.Errorf("the web flow did not go to the browser: TB_DEVICE's phone won over its url:")
 	}
 }
