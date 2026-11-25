@@ -34,6 +34,7 @@ type Event struct {
 	At     time.Time
 	Text   string
 	Device string
+	Seq    int
 }
 
 type Hub struct {
@@ -70,7 +71,7 @@ func (h *Hub) AddEvents(evs []Event) int {
 			h.dropped++
 			continue
 		}
-		h.events = append(h.events, Event{At: at, Text: t, Device: e.Device})
+		h.events = append(h.events, Event{At: at, Text: t, Device: e.Device, Seq: len(h.events)})
 		n++
 	}
 	return n
@@ -87,18 +88,6 @@ func (h *Hub) Between(start, end time.Time, names ...string) []Event {
 		out = append(out, e)
 	}
 	return out
-}
-
-func (h *Hub) After(t time.Time) int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	n := 0
-	for _, e := range h.events {
-		if e.At.After(t) {
-			n++
-		}
-	}
-	return n
 }
 
 func (h *Hub) Count() (kept, dropped int) {

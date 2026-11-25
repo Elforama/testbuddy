@@ -73,7 +73,7 @@ func TestRunEventsForJob(t *testing.T) {
 	get := e.forJob(ds)
 	texts := func(role string) string {
 		var s []string
-		for _, ev := range get(role, time.Now().Add(-time.Minute), time.Now()) {
+		for _, ev := range get(role, time.Now().Add(-time.Minute), time.Now().Add(-time.Minute), time.Now()) {
 			s = append(s, ev.Text)
 		}
 		return strings.Join(s, ",")
@@ -124,39 +124,65 @@ func TestEventsPortNeedsAnnotate(t *testing.T) {
 	}
 }
 
+func eventTexts(evs []engine.AnnotateEvent) string {
+	var s []string
+	for _, ev := range evs {
+		s = append(s, ev.Text)
+	}
+	return strings.Join(s, ",")
+}
+
 func TestIssue413EventsBeforeTheRecordingStartsAreShown(t *testing.T) {
 	hub := marks.NewHub()
 	e := &runEvents{hub: hub}
-	ds := map[string]device.Info{"": {Serial: "SIM-1", Name: "iPhone"}}
-	get := e.forJob(ds)
-	texts := func(evs []engine.AnnotateEvent) string {
-		var s []string
-		for _, ev := range evs {
-			s = append(s, ev.Text)
-		}
-		return strings.Join(s, ",")
-	}
+	get := e.forJob(map[string]device.Info{"": {Serial: "SIM-1", Name: "iPhone"}})
+	tick := func() time.Time { time.Sleep(15 * time.Millisecond); return time.Now() }
+	hub.Add("", "stale")
+	flow1 := tick()
 	hub.Add("", "launch", "sign_in")
-	time.Sleep(20 * time.Millisecond)
-	start1 := time.Now()
+	start1 := tick()
 	hub.Add("", "screen_view")
-	time.Sleep(20 * time.Millisecond)
-	end1 := time.Now()
-	time.Sleep(10 * time.Millisecond)
+	end1 := tick()
 	hub.Add("", "between")
-	time.Sleep(20 * time.Millisecond)
-	start2 := time.Now()
-	time.Sleep(10 * time.Millisecond)
-	end2 := time.Now()
-	if got := texts(get("", start1, end1)); got != "launch,sign_in,screen_view" {
-		t.Errorf("issue #413: the first video shows %q, want the events sent before it started too", got)
+	flow2 := tick()
+	start2 := tick()
+	end2 := tick()
+	if got := eventTexts(get("", flow1, start1, end1)); got != "launch,sign_in,screen_view" {
+		t.Errorf("issue #413: the first video shows %q, want the events sent after its flow began, before it recorded too", got)
 	}
-	if got := texts(get("", start2, end2)); got != "between" {
+	if got := eventTexts(get("", flow2, start2, end2)); got != "between" {
 		t.Errorf("issue #413: the second video shows %q, want the event sent between the flows", got)
 	}
-	time.Sleep(10 * time.Millisecond)
+	tick()
 	hub.Add("", "too late")
-	if n := e.unshown(); n != 1 {
-		t.Errorf("issue #413: %d events reported as in no video, want 1 (the one after the last video)", n)
+	hub.Add("nowhere", "for a device that never recorded")
+	if n, _ := e.unshown(); n != 3 {
+		t.Errorf("issue #413: %d events reported as in no video, want 3 (stale, too late, nowhere)", n)
+	}
+}
+
+func TestIssue413DevicesRecordingTogetherKeepTheirOwnEvents(t *testing.T) {
+	hub := marks.NewHub()
+	e := &runEvents{hub: hub}
+	tick := func() time.Time { time.Sleep(15 * time.Millisecond); return time.Now() }
+	a := e.forJob(map[string]device.Info{"": {Serial: "A"}})
+	b := e.forJob(map[string]device.Info{"": {Serial: "B"}})
+	flowB := tick()
+	startB := tick()
+	hub.Add("B", "b1")
+	flowA := tick()
+	startA := tick()
+	hub.Add("", "both")
+	endA := tick()
+	hub.Add("B", "b2")
+	endB := tick()
+	if got := eventTexts(a("", flowA, startA, endA)); got != "both" {
+		t.Errorf("A's video shows %q", got)
+	}
+	if got := eventTexts(b("", flowB, startB, endB)); got != "b1,both,b2" {
+		t.Errorf("issue #413 review: B's video, annotated after A's, shows %q, want b1,both,b2", got)
+	}
+	if got := eventTexts(b("", flowB, startB, endB)); got != "b1,both,b2" {
+		t.Errorf("asked again out of order, B's video shows %q", got)
 	}
 }

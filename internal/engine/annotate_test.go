@@ -159,7 +159,7 @@ func TestAnnotateDrawsTheEventsSentDuringTheRun(t *testing.T) {
 	}
 	var askedRole string
 	var asked [2]time.Time
-	events := func(role string, start, end time.Time) []AnnotateEvent {
+	events := func(role string, _, start, end time.Time) []AnnotateEvent {
 		askedRole, asked = role, [2]time.Time{start, end}
 		return []AnnotateEvent{
 			{At: start.Add(-time.Second), Text: "before the video"},
@@ -195,7 +195,7 @@ func TestAnnotateDrawsCaptionsWhenTheEventsFail(t *testing.T) {
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	dir := t.TempDir()
 	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
-	events := func(_ string, start, _ time.Time) []AnnotateEvent {
+	events := func(_ string, _, start, _ time.Time) []AnnotateEvent {
 		return []AnnotateEvent{{At: start.Add(10 * time.Millisecond), Text: "screen_view"}}
 	}
 	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Annotate: true,
@@ -225,7 +225,7 @@ func TestAnnotateCapsTheEventsAVideoDraws(t *testing.T) {
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	dir := t.TempDir()
 	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
-	events := func(_ string, start, end time.Time) []AnnotateEvent {
+	events := func(_ string, _, start, end time.Time) []AnnotateEvent {
 		var out []AnnotateEvent
 		for i := 0; i < maxVideoEvents+500; i++ {
 			out = append(out, AnnotateEvent{At: start.Add(end.Sub(start) * time.Duration(i) / time.Duration(maxVideoEvents+500)), Text: fmt.Sprint(i)})

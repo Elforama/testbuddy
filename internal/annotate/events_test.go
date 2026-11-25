@@ -576,3 +576,18 @@ func TestIssue413EarlyEventShowsAtTheFirstFrame(t *testing.T) {
 		t.Errorf("issue #413: its time reads %q", got)
 	}
 }
+
+func TestIssue413EarlyBurstGetsRowsNotALongHold(t *testing.T) {
+	var evs []Event
+	for i := 10; i >= 1; i-- {
+		evs = append(evs, Event{-time.Duration(i) * time.Second, fmt.Sprintf("e%d", i)})
+	}
+	l := layoutEvents(evs, 5*time.Second)
+	var held time.Duration
+	for _, h := range l.holds {
+		held += h.Dur
+	}
+	if l.rows != eventRowsMax || held > 5*eventRead {
+		t.Errorf("issue #413 review: 10 events from before the video get %d rows and hold its first frame %s", l.rows, held)
+	}
+}

@@ -22,10 +22,12 @@ type runEvents struct {
 
 	mu       sync.Mutex
 	reversed map[string]bool
-	opened   time.Time
-	shown    map[string]time.Time
-	lastEnd  time.Time
+	lastEnd  map[string]time.Time
+	shown    map[int]bool
+	videos   int
 }
+
+const betweenFlows = 30 * time.Second
 
 var reverseADB = func(ctx context.Context, serial string, port int, remove bool) error {
 	p := "tcp:" + strconv.Itoa(port)
@@ -57,7 +59,7 @@ func serveEvents(a *args, con *console) (*runEvents, string) {
 			con.printf("  another tb run is taking events too: tb mark sends there unless given --url %s\n", srv.URL)
 		}
 	}
-	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}, opened: time.Now()}, srv.URL
+	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}}, srv.URL
 }
 
 func (e *runEvents) reach(ctx context.Context, d device.Info) {
@@ -75,43 +77,52 @@ func (e *runEvents) reach(ctx context.Context, d device.Info) {
 	e.mu.Unlock()
 }
 
-func (e *runEvents) forJob(ds map[string]device.Info) func(role string, start, end time.Time) []engine.AnnotateEvent {
+func (e *runEvents) forJob(ds map[string]device.Info) func(role string, since, start, end time.Time) []engine.AnnotateEvent {
 	if e == nil {
 		return nil
 	}
-	return func(role string, start, end time.Time) []engine.AnnotateEvent {
+	return func(role string, since, start, end time.Time) []engine.AnnotateEvent {
 		d := ds[role]
+		key := d.Serial
+		if key == "" {
+			key = "role:" + role
+		}
 		e.mu.Lock()
-		from := e.opened
-		if last, ok := e.shown[role]; ok {
-			from = last.Add(time.Nanosecond)
+		if e.lastEnd == nil {
+			e.lastEnd, e.shown = map[string]time.Time{}, map[int]bool{}
 		}
-		if e.shown == nil {
-			e.shown = map[string]time.Time{}
+		from := since
+		if prev, ok := e.lastEnd[key]; ok && prev.Before(since) && since.Sub(prev) <= betweenFlows {
+			from = prev.Add(time.Nanosecond)
 		}
-		if end.After(e.shown[role]) {
-			e.shown[role] = end
+		if from.After(start) {
+			from = start
 		}
-		if end.After(e.lastEnd) {
-			e.lastEnd = end
+		if end.After(e.lastEnd[key]) {
+			e.lastEnd[key] = end
 		}
+		e.videos++
 		e.mu.Unlock()
+		evs := e.hub.Between(from, end, d.Serial, d.Name, role)
 		var out []engine.AnnotateEvent
-		for _, ev := range e.hub.Between(from, end, d.Serial, d.Name, role) {
+		e.mu.Lock()
+		for _, ev := range evs {
+			e.shown[ev.Seq] = true
 			out = append(out, engine.AnnotateEvent{At: ev.At, Text: ev.Text})
 		}
+		e.mu.Unlock()
 		return out
 	}
 }
 
-func (e *runEvents) unshown() int {
+func (e *runEvents) unshown() (n int, videos int) {
 	if e == nil {
-		return 0
+		return 0, 0
 	}
+	kept, _ := e.hub.Count()
 	e.mu.Lock()
-	after := e.lastEnd
-	e.mu.Unlock()
-	return e.hub.After(after)
+	defer e.mu.Unlock()
+	return kept - len(e.shown), e.videos
 }
 
 func (e *runEvents) close() {
@@ -119,15 +130,10 @@ func (e *runEvents) close() {
 		return
 	}
 	e.srv.Close()
-	if n := e.unshown(); n > 0 {
-		e.mu.Lock()
-		none := e.lastEnd.IsZero()
-		e.mu.Unlock()
-		if none {
-			fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came, but no video was recorded to show them\n", n)
-		} else {
-			fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came after the last video ended and are in no video\n", n)
-		}
+	if n, videos := e.unshown(); n > 0 && videos == 0 {
+		fmt.Fprintf(os.Stderr, "--annotate: %d event(s) came, but no video was recorded to show them\n", n)
+	} else if n > 0 {
+		fmt.Fprintf(os.Stderr, "--annotate: %d event(s) are in no video: sent while no flow of their device ran, or for a device that recorded none\n", n)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()

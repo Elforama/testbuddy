@@ -115,7 +115,7 @@ func (r *Runner) annotateVideo(v Video) {
 	caps, touches := videoNotes(r.rec.steps, r.rec.touches, v.Start, v.End, max(r.annotateStep(), captionTail))
 	var events []annotate.Event
 	if r.opts.AnnotateEvents != nil {
-		events = videoEvents(r.opts.AnnotateEvents(r.opts.Role, v.Start, v.End), v.Start, v.End)
+		events = videoEvents(r.opts.AnnotateEvents(r.opts.Role, r.flowBegan, v.Start, v.End), v.Start, v.End)
 	}
 	if len(caps) == 0 && len(touches) == 0 && len(events) == 0 {
 		return
