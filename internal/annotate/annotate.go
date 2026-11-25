@@ -235,7 +235,7 @@ func videoEnd(ctx context.Context, dir, ffmpeg, path string) time.Duration {
 	if num <= 0 || den <= 0 || end <= 0 {
 		return 0
 	}
-	return time.Duration(end * num * int64(time.Second) / den)
+	return time.Duration(float64(end) * float64(num) / float64(den) * float64(time.Second))
 }
 
 func SRT(caps []Caption) string {
