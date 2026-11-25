@@ -7,7 +7,7 @@ three platforms:
 tb test bench/flows/scenarios -p android
 tb test bench/flows/scenarios -p ios
 go run ./bench/web &   # serves http://127.0.0.1:7360/
-tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
+tb test bench/flows/scenarios -p web -e BENCH=http://127.0.0.1:7360/ --headless
 ```
 
 Share the steps for equivalent UI. Branch only where the user experience differs.

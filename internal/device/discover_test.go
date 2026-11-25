@@ -88,6 +88,7 @@ func TestPick(t *testing.T) {
 		{"platform filters names", all, Android, "iPhone 17", "", `no connected device matches "iPhone 17" (see ` + "`tb devices`)"},
 		{"no match", all, "", "Pixel 9", "", `no connected device matches "Pixel 9" (see ` + "`tb devices`)"},
 		{"none of platform", []Info{pixel}, IOS, "", "", "no ios device is connected: start an emulator or simulator first"},
+		{"no browser", []Info{pixel}, Web, "", "", "no web browser found: install Google Chrome (or set TB_CHROME to its path)"},
 		{"none at all", nil, "", "", "", "no device is connected: start an Android emulator or boot an iOS simulator first"},
 		{"want with none", nil, "", "x", "", `no connected device matches "x" (see ` + "`tb devices`)"},
 	}

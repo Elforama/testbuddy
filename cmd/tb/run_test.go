@@ -213,7 +213,7 @@ func TestCmdTestPasses(t *testing.T) {
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--json", "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--json", "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -248,7 +248,7 @@ func TestCmdTestFailureArtifacts(t *testing.T) {
 	debug := filepath.Join(dir, "debug")
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--format", "junit", "--output", report, "--debug-output", debug,
+		code = cmdTest([]string{flow, "-p", "android", "--format", "junit", "--output", report, "--debug-output", debug,
 			"--flatten-debug-output"})
 	})
 	if code != 1 {
@@ -313,7 +313,7 @@ func TestCmdTestSameNamedFlowsKeepTheirOwnDebugFolders(t *testing.T) {
 	debug := filepath.Join(dir, "debug")
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{failing, passing, "--json", "--debug-output", debug, "--flatten-debug-output"})
+		code = cmdTest([]string{failing, "-p", "android", passing, "--json", "--debug-output", debug, "--flatten-debug-output"})
 	})
 	if code != 1 {
 		t.Fatalf("exit %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)

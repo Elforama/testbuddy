@@ -2,18 +2,28 @@
 
 Exit status for every command: **0** ok, **1** a command or flow failed, **2** bad input.
 `-d` takes a session name (from `tb open --name`), a serial/UDID or a device name, and defaults
-to `TB_DEVICE`; with one device connected it is optional, with several tb asks which. A flag's
+to `TB_DEVICE`; for the session commands (`look`, `do`, ...) it is optional with one device
+connected, and with several tb asks which. A flag's
 value is checked before anything runs: a number flag takes a number, an on/off flag given a
 value takes `true` or `false` (`--json=false`), and anything else is bad input.
+`tb test` and `tb open` need the platform, `-p android|ios|web`, unless a device is named (`-d`,
+`--device`, `TB_DEVICE`) or the flows name it (`url:` for the web, `devices:` roles; for `tb open`,
+an `--app` URL); tb does not pick one for you. A `TB_DEVICE` that names neither a connected device
+nor an open session does not count.
 
 ## Run tests
 
 `tb test <flow files or folders> [options]`
 
+With no phone running and a flow that needs one, `tb test` starts one of the platform asked
+for: with `-p android` the first Android emulator (AVD) it finds, with `-p ios` (on a Mac) a
+shut-down iPhone simulator of the newest iOS, without its window. It says which on stderr, waits for the boot, and leaves the device running.
+Not with `--device`, shards, a multi-device flow, or on CI (`CI` / `TB_CI` set).
+
 | Option | Meaning |
 |---|---|
 | `-e, --env KEY=VALUE` | Set a variable (repeatable). A flow's own `env:` is applied after it, so write overridable defaults there as `KEY: ${KEY \|\| 'default'}`. |
-| `-p, --platform android\|ios\|web` | Run on this platform only. |
+| `-p, --platform android\|ios\|web` | The platform to run on: required unless a device is named (`--device`, a connected `TB_DEVICE` or a session's name) or every flow names its platform (`url:`, `devices:` roles). |
 | `--device a,b` (alias `--udid`) | Devices to use (serial, UDID or name). |
 | `--device role=DEVICE` | Pin a multi-device flow's role (repeatable): `--device alice="iPhone 17"`. |
 | `--config FILE` | Workspace config (default: `config.yaml` in the folder). |
@@ -70,7 +80,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | Command | What it does |
 |---|---|
 | `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
-| `tb open [-d DEVICE] [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
+| `tb open -p PLATFORM \| -d DEVICE [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
 | `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements. |
 | `tb do - < steps.yaml` | Steps from stdin. |
@@ -204,9 +214,12 @@ already open. A command with `-p` does not use it. With no device named and seve
 simulators connected, a session command is refused and lists them, rather than taking one;
 the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
 In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or multi-device flow),
-`TB_DEVICE` names the device tried first (a serial or device name: a session's name is not seen
-there): your own idle session on it gives it back, and when it cannot run a flow or is in use
-(another agent's session, or yours running a command) the flow goes to another. When the run had
+`TB_DEVICE` names the device tried first and, with no `-p`, the platform (a serial or device
+name of a connected device, or a session's name for the device it has open; anything else gets
+the run refused):
+your own idle session on it gives it back, and when it cannot run a flow or is in use (another
+agent's session, or yours running a command) the flow goes to another of the same platform. It is not used when every flow names its platform
+(`url:`, `devices:` roles). When the run had
 a choice of phones or simulators, it says which one it took and why not the others before its
 first flow there.
 

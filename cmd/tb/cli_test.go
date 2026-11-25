@@ -413,7 +413,7 @@ func TestNumberFlagsRejectBadValues(t *testing.T) {
 	f := startFakeDaemon(t)
 	test := func(argv ...string) func() int {
 		return func() int {
-			return cmdTest(append([]string{flow, "--json", "--debug-output", filepath.Join(dir, "debug")}, argv...))
+			return cmdTest(append([]string{flow, "-p", "android", "--json", "--debug-output", filepath.Join(dir, "debug")}, argv...))
 		}
 	}
 	cases := []struct {
@@ -457,7 +457,7 @@ func TestFlagValuesRejectBadValues(t *testing.T) {
 	f := startFakeDaemon(t)
 	test := func(argv ...string) func() int {
 		return func() int {
-			return cmdTest(append([]string{flow, "--debug-output", filepath.Join(dir, "debug")}, argv...))
+			return cmdTest(append([]string{flow, "-p", "android", "--debug-output", filepath.Join(dir, "debug")}, argv...))
 		}
 	}
 	const sizeWant = "want WIDTHxHEIGHT, each a whole number from 200 to 10000, such as 1280x800"

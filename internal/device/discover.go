@@ -208,6 +208,9 @@ func Pick(devs []Info, platform Platform, want string) (Info, error) {
 		return Info{}, fmt.Errorf("no connected device matches %q (see `tb devices`)", want)
 	}
 	if len(cands) == 0 {
+		if platform == Web {
+			return Info{}, fmt.Errorf("no web browser found: install Google Chrome (or set TB_CHROME to its path)")
+		}
 		if platform != "" {
 			return Info{}, fmt.Errorf("no %s device is connected: start an emulator or simulator first", platform)
 		}

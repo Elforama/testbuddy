@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -33,10 +34,13 @@ const testUsage = `Usage: tb test <flow files or folders> [options]
 
 Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Options:
   -e, --env KEY=VALUE        set a variable (repeatable)
-  -p, --platform android|ios|web  run on this platform only
+  -p, --platform android|ios|web  the platform to run on: required unless a device is named
+                             (--device, a connected TB_DEVICE or a session's name) or every
+                             flow names it (url:, devices: roles)
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
-                             (TB_DEVICE: the device a run of one device at a time tries first)
+                             (TB_DEVICE: the device a run of one device at a time tries first; the
+                             run keeps to its platform; not used when every flow names its own)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
@@ -182,13 +186,26 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	deviceArgs := a.list("device")
 	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
-	preferred := ""
-	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
-		if d, err := device.Pick(devs, "", env); err == nil {
+	preferred, envMissed := "", false
+	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" && !flowsNamePlatform(plan) {
+		d, err := device.Pick(devs, "", env)
+		if err != nil {
+			if serial := sessionDevice(ctx, env); serial != "" {
+				d, err = device.Pick(devs, "", serial)
+			}
+		}
+		if err == nil {
 			preferred = d.Serial
-			devs = preferFirst(devs, d.Serial)
-		} else if !a.flag("quiet") && !a.flag("json") && phones(devs) > 1 {
-			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
+			platform = string(d.Platform)
+			var same []device.Info
+			for _, o := range devs {
+				if o.Platform == d.Platform {
+					same = append(same, o)
+				}
+			}
+			devs = preferFirst(same, d.Serial)
+		} else {
+			envMissed = true
 		}
 	}
 	rolePins := map[string]string{}
@@ -204,6 +221,13 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			continue
 		}
 		want = append(want, w)
+	}
+	if platform == "" && len(want) == 0 && !flowsNamePlatform(plan) {
+		if envMissed {
+			fmt.Fprintf(os.Stderr, "TB_DEVICE=%s names no connected device or open session; ", strings.TrimSpace(os.Getenv("TB_DEVICE")))
+		}
+		fmt.Fprintln(os.Stderr, noPlatform)
+		return 2
 	}
 	if len(want) > 0 {
 		var picked []device.Info
@@ -241,6 +265,14 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		if !known {
 			fmt.Fprintf(os.Stderr, "--device %s=...: no flow has a device role named %q\n", role, role)
 			return 2
+		}
+	}
+	if phones(devs) == 0 && single && !ci.On() && needsPhone(plan) && startDevice(ctx, device.Platform(platform), func(s string) { fmt.Fprintln(os.Stderr, s) }) {
+		devs = nil
+		for _, d := range listDevices(ctx) {
+			if platform == "" || string(d.Platform) == platform {
+				devs = append(devs, d)
+			}
 		}
 	}
 	if len(devs) == 0 {
@@ -986,6 +1018,50 @@ func preferFirst(devs []device.Info, serial string) []device.Info {
 		}
 	}
 	return out
+}
+
+func flowsNamePlatform(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if len(f.Config.Devices) == 0 && !f.Config.Web() {
+			return false
+		}
+	}
+	return true
+}
+
+var sessionDevice = func(ctx context.Context, name string) string {
+	cl := daemon.Dial()
+	if cl == nil {
+		return ""
+	}
+	defer cl.Close()
+	cl.SetDeadline(time.Now().Add(10 * time.Second))
+	stop := context.AfterFunc(ctx, func() { cl.SetDeadline(time.Now()) })
+	defer stop()
+	args, _ := json.Marshal(map[string]string{"owner": strings.TrimSpace(os.Getenv("TB_SESSION_OWNER"))})
+	resp, err := cl.Call(daemon.Request{Cmd: "devices", Args: args}, nil)
+	var devs []struct {
+		Serial, Session string
+		Others          bool
+	}
+	if err != nil || !resp.OK || json.Unmarshal(resp.JSON, &devs) != nil {
+		return ""
+	}
+	for _, d := range devs {
+		if d.Session != "" && d.Session == name && !d.Others {
+			return d.Serial
+		}
+	}
+	return ""
+}
+
+func needsPhone(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if !f.Config.Web() {
+			return true
+		}
+	}
+	return false
 }
 
 func phones(devs []device.Info) int {

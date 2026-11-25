@@ -67,14 +67,19 @@ Or from inside Claude Code: `/plugin marketplace add Elforama/testbuddy`, then
 `/plugin install test-buddy@test-buddy`.
 
 **Devices.** Start an Android emulator (or plug in a phone with USB debugging), boot an iOS
-simulator, or have Google Chrome installed for web flows.
+simulator, or have Google Chrome installed for web flows. With no phone running, `tb test`
+starts one of the platform asked for: with `-p android` the first Android emulator (AVD) it
+finds, with `-p ios` (on a Mac) a shut-down iPhone simulator of the newest iOS. It says which, waits for the boot, and leaves
+it running (not on CI, where devices are set up on purpose). `tb test` and `tb open` need the
+platform: `-p android`, `ios` or `web`, unless a device is named (`-d`, `--device`, `TB_DEVICE`)
+or the flows name it (`url:` for the web, `devices:` roles); `tb open --app` with a URL is web.
 
 ## Quick start
 
 ```sh
 tb devices                          # what tb can drive, and which are free or in use (by whom)
-tb test login.yaml                  # run one flow
-tb test flows/ -p android           # every flow in a folder, on Android only
+tb test login.yaml -p android       # run one flow on Android (-p or a device is required)
+tb test flows/ -p ios               # every flow in a folder, on an iOS simulator
 tb test flows/ -p web --headless    # web (url:) flows in headless Chrome
 tb check flows/                     # check flow syntax, no device needed
 tb check --lint flows/              # also list fragile steps (coordinates, indexes, ...)
@@ -220,15 +225,16 @@ publishes the archives on the release.
 ## Run tests
 
 ```sh
-tb test flows/login.yaml
-tb test flows/ -e PASSWORD=secret --include-tags smoke
-tb test flows/ --format junit --output report.xml
-tb test flows/ --shard-split 3            # three devices pull flows from one queue
-tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
-tb test flows/login.yaml --from 12        # start at step 12, on the screen the device is on now
-tb test flows/ --json                     # machine-readable results
-tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
-tb test flows/ --record                   # record each flow's screen, start to finish, into the reports
+tb test flows/login.yaml -p android
+tb test flows/login.yaml -d emulator-5554   # a named device needs no -p
+tb test flows/ -p android -e PASSWORD=secret --include-tags smoke
+tb test flows/ -p android --format junit --output report.xml
+tb test flows/ -p android --shard-split 3 # three devices pull flows from one queue
+tb test flows/ -p android --retries 1     # re-run a failed flow, on another device if one is free
+tb test flows/login.yaml -p android --from 12  # start at step 12, on the screen the device is on now
+tb test flows/ -p android --json          # machine-readable results
+tb test flows/ -p android --timeline      # also an HTML timeline of each flow: steps, screens, taps
+tb test flows/ -p android --record        # record each flow's screen, start to finish, into the reports
 tb replay flows/f.yaml -d DEV --record --annotate  # a video a person can follow, to attach to a PR
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
@@ -306,7 +312,7 @@ right moment. While the run lasts tb takes them at `POST http://127.0.0.1:7357/e
 clock as the captions, so the sender needs no clock and nothing to do with the video:
 
 ```bash
-tb test flows/checkout.yaml --record --annotate        # prints the events URL
+tb test flows/checkout.yaml -p android --record --annotate  # prints the events URL
 tb mark "purchase_completed {sku: 42}"                 # from another shell or a script
 curl --data-binary '{"event":"purchase","properties":{"sku":42}}' http://127.0.0.1:7357/event
 ```
@@ -425,7 +431,7 @@ one. `tb look` on a device is the final word.
 ## Drive a device (agents and people)
 
 ```sh
-tb open --name alice --app com.example.app    # optional: name a device
+tb open -p android --name alice --app com.example.app  # -p or -d is required
 tb look                                       # what is on screen
 tb do 'tapOn: @7' 'inputText: "user@example.com"' 'tapOn: "Next"'
 tb wait "Welcome"                             # waits on device events, not a loop
