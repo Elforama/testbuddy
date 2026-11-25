@@ -628,3 +628,26 @@ func TestDirOf(t *testing.T) {
 		}
 	}
 }
+
+func TestFromStepSkipsOnFlowStartAndTheStepsBefore(t *testing.T) {
+	f := &fakeDriver{screen: static()}
+	var events []string
+	o := quick
+	o.FromStep = 3
+	o.Reporter = ReporterFunc(func(e Event) {
+		if e.Status == Skipped {
+			events = append(events, e.Desc)
+		}
+	})
+	res := runSrc(t, f, o, t.TempDir(), "appId: app\nonFlowStart:\n  - inputText: start\nonFlowComplete:\n  - inputText: end\n---\n- inputText: one\n- inputText: two\n- inputText: three\n")
+	mustPass(t, res)
+	if want := []string{"three", "end"}; !reflect.DeepEqual(f.typed, want) {
+		t.Errorf("typed %q, want %q", f.typed, want)
+	}
+	if len(res.Steps) != 3 || res.Steps[0].Status != Skipped || res.Steps[1].Status != Skipped || res.Steps[2].Status != Passed {
+		t.Errorf("steps %+v", res.Steps)
+	}
+	if want := []string{"Input text one (before --from)", "Input text two (before --from)"}; !reflect.DeepEqual(events, want) {
+		t.Errorf("skipped events %q, want %q", events, want)
+	}
+}

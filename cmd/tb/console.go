@@ -16,12 +16,13 @@ import (
 )
 
 type console struct {
-	mu     sync.Mutex
-	w      io.Writer
-	quiet  bool
-	prefix bool
-	color  bool
-	start  time.Time
+	mu       sync.Mutex
+	w        io.Writer
+	quiet    bool
+	prefix   bool
+	color    bool
+	start    time.Time
+	fromHint bool
 }
 
 func newConsole(w io.Writer, quiet, prefix bool) *console {
@@ -86,7 +87,11 @@ func (c *console) reporter(flowName, device string) engine.Reporter {
 			engine.Passed: c.paint("32", "✓"), engine.Warned: c.paint("33", "⚠"),
 			engine.Skipped: c.paint("2", "○"), engine.Failed: c.paint("31", "✗"),
 		}[e.Status]
-		c.printf("%s%s%s %s  %s\n", tag, indent, mark, e.Desc, c.paint("2", dur(e.Elapsed)))
+		took := "  " + c.paint("2", dur(e.Elapsed))
+		if e.Status == engine.Skipped && e.Elapsed == 0 {
+			took = ""
+		}
+		c.printf("%s%s%s %s%s\n", tag, indent, mark, e.Desc, took)
 		if e.Err != nil && e.Status != engine.Passed {
 			for _, line := range strings.Split(strings.TrimSpace(e.Err.Error()), "\n") {
 				c.printf("%s%s    %s\n", tag, indent, c.paint("2", line))
@@ -117,6 +122,9 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		var nf *engine.NotFound
 		if errors.As(r.Err, &nf) && nf.Screen != nil {
 			c.printScreen(nf.Screen, nf.Query)
+		}
+		if n := len(r.Steps); c.fromHint && !r.Retried && n > 0 && len(r.Job.Flow.Config.Devices) == 0 && !r.Job.Flow.Config.Web() && r.Steps[n-1].Status == engine.Failed {
+			c.printf("  failed at step %d: to run this flow from there, pass --from %d\n", n, n)
 		}
 		c.printf("  debug: %s (log.txt: what tb did, step by step)\n", debugDir)
 	case engine.Skipped:

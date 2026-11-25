@@ -26,6 +26,7 @@ value takes `true` or `false` (`--json=false`), and anything else is bad input.
 | `--debug-output DIR` | Where each flow's `log.txt` (what tb did, step by step) and its failure files (screenshot, screen listing, hierarchy, steps) go: a folder per flow, named after it (flows of a run that share a name add their directory, like `smoke-login`). |
 | `--flatten-debug-output` | Write debug files straight into `--debug-output`. |
 | `--retries N` | Re-run a failed flow up to N times (on another device if one is free). |
+| `--from N` | One flow, on a phone (not the web): start at its Nth step, on the screen the device is on now; `onFlowStart` and the steps before N do not run (the console and reports show them as skipped, so step numbers match the file). A failed run says the step to pass (`failed at step 12: to run this flow from there, pass --from 12`). |
 | `--wait-for-device TIME` | A device another tb holds (another run, an open session): wait up to TIME (`5m`, `90s`) for it instead of failing at once. |
 | `--keep-animations` | Do not turn Android animations off during the run. |
 | `--keep-agents` | Leave tb's agent running on each device after the run: the next run starts faster, but other test tools cannot use the device until `tb release`. |
