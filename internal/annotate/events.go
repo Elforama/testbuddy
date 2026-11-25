@@ -51,6 +51,7 @@ type eventLog struct {
 	holds  []hold
 	states []logState
 	shown  []time.Duration
+	tail   time.Duration
 }
 
 const oneFrame = time.Second / outFPS
@@ -122,6 +123,13 @@ func layoutEvents(events []Event, length time.Duration) eventLog {
 		log.shown = append(log.shown, t)
 	}
 	log.states = logStates(all, log.holds)
+	if length > 0 {
+		var last time.Duration
+		for _, r := range all {
+			last = max(last, r.gone)
+		}
+		log.tail = wholeFrames(last - (length + extra))
+	}
 	return log
 }
 

@@ -112,7 +112,7 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 		}
 		inputs = append(inputs, "-f", "concat", "-safe", "0", "-i", "events.ffconcat")
 	}
-	g := graph(frame{w: w, h: h, band: band, eventBand: eband, caps: caps, touches: touches, states: log.states, holds: log.holds})
+	g := graph(frame{w: w, h: h, band: band, eventBand: eband, caps: caps, touches: touches, states: log.states, holds: log.holds, tail: log.tail})
 	out := filepath.Join(tmp, "out.mp4")
 	args := func(codec ...string) []string {
 		a := append([]string{"-hide_banner", "-loglevel", "error", "-y"}, inputs...)
@@ -247,6 +247,7 @@ type frame struct {
 	touches               []Touch
 	states                []logState
 	holds                 []hold
+	tail                  time.Duration
 }
 
 func graph(f frame) string {
@@ -282,6 +283,9 @@ func graph(f frame) string {
 		}
 		g = append(g, fmt.Sprintf("%strim=start_frame=%d,setpts=PTS-STARTPTS%s", parts[len(f.holds)], from, segs[len(f.holds)]))
 		step(fmt.Sprintf("%sconcat=n=%d:v=1:a=0", strings.Join(segs, ""), len(segs)))
+	}
+	if n := frames(f.tail); n > 0 {
+		step(fmt.Sprintf("[%s]tpad=stop_mode=clone:stop=%d", cur, n))
 	}
 	input := 1
 	if len(f.touches) > 0 {
