@@ -153,9 +153,12 @@ func TestEventLogHoldsWhereFFmpegCan(t *testing.T) {
 	if len(l.holds) != 0 {
 		t.Errorf("holds %+v in the last frame", l.holds)
 	}
+	if l.tail <= 0 {
+		t.Errorf("a burst in the last frame does not hold the end")
+	}
 	for _, s := range l.states {
-		if s.Paused {
-			t.Errorf("a paused state %+v with no hold", s)
+		if s.Paused && s.Start < 5*time.Second {
+			t.Errorf("a paused state %+v before the held end", s)
 		}
 	}
 }
@@ -407,9 +410,9 @@ func TestBurnManyHoldsDoNotDrift(t *testing.T) {
 	if err := Burn(context.Background(), path, Drawing{Events: evs}); err != nil {
 		t.Fatal(err)
 	}
-	want := 360 + frames(held)
+	want := 360 + frames(held) + frames(l.tail)
 	if got := frameCount(t, ffmpeg, path); got < want-1 || got > want+1 {
-		t.Errorf("%d frames, want %d: 12 s and the layout's %d holds, %s", got, want, len(l.holds), held)
+		t.Errorf("%d frames, want %d: 12 s, the layout's %d holds, %s, and its end held %s", got, want, len(l.holds), held, l.tail)
 	}
 }
 
@@ -564,5 +567,119 @@ func TestTouchRingLastsThroughAHold(t *testing.T) {
 		[]hold{{At: dms(2200), Dur: time.Second}})
 	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,0.500,1.100)'") {
 		t.Errorf("ring shown %s, want 0.5 s to 1.1 s", overlayAt(touches[0]))
+	}
+}
+
+func bandHasText(t *testing.T, ffmpeg, path string, at time.Duration, y, w, h int) bool {
+	t.Helper()
+	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", fmt.Sprintf("%.3f", at.Seconds()), "-i", path,
+		"-vf", fmt.Sprintf("crop=%d:%d:0:%d", w, h, y), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-").Output()
+	if err != nil || len(out) == 0 {
+		return false
+	}
+	lo, hi := out[0], out[0]
+	for _, b := range out {
+		lo, hi = min(lo, b), max(hi, b)
+	}
+	return int(hi)-int(lo) > 60
+}
+
+func TestIssue411EventAsTheVideoEndsIsShownForItsTime(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recording.mp4")
+	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:size=240x360:rate=30:duration=9.333",
+		"-pix_fmt", "yuv420p", path).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg cannot make a test video: %v %s", err, out)
+	}
+	evs := []Event{{dms(2000), "cart opened"}, {dms(9330), "purchase done"}}
+	if err := Burn(context.Background(), path, Drawing{Events: evs}); err != nil {
+		t.Fatal(err)
+	}
+	_, h, length, err := videoInfo(context.Background(), dir, ffmpeg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := dms(9330) + eventShown - oneFrame; length < want {
+		t.Errorf("issue #411: the video is %s long, so an event at 9.330 s is up for %s, not %s", length, length-dms(9330), eventShown)
+	}
+	band := eventBandHeight(1, eventSize(240, 360))
+	if h != 360+band {
+		t.Fatalf("height %d, want %d", h, 360+band)
+	}
+	if !bandHasText(t, ffmpeg, path, dms(2500), 360, 240, band) {
+		t.Fatal("the first event is not drawn: the check itself is wrong")
+	}
+	if !bandHasText(t, ffmpeg, path, dms(9330)+eventRead, 360, 240, band) {
+		t.Errorf("issue #411: \"purchase done\" is not in the video %s after it arrived", eventRead)
+	}
+}
+
+func TestIssue411EventOfTheLastTapIsUpForItsTwoSeconds(t *testing.T) {
+	length := 9 * time.Second
+	l := layoutEvents([]Event{{length - dms(500), "purchase done"}}, length)
+	if got := length + l.tail - (length - dms(500)); got < eventShown {
+		t.Errorf("issue #411: the last tap's event is up for %s in the video, want %s", got, eventShown)
+	}
+	if l := layoutEvents([]Event{{dms(1000), "early"}}, length); l.tail != 0 {
+		t.Errorf("an event well before the end holds the end for %s", l.tail)
+	}
+}
+
+func TestIssue411BurstInTheLastFrameIsReadable(t *testing.T) {
+	length := dms(9333)
+	var evs []Event
+	for i := 0; i < 9; i++ {
+		evs = append(evs, Event{dms(9300 + 4*i), fmt.Sprintf("e%d", i)})
+	}
+	l := layoutEvents(evs, length)
+	end := length + l.tail
+	for _, h := range l.holds {
+		end += h.Dur
+	}
+	for i, at := range l.shown {
+		var gone time.Duration
+		for _, s := range l.states {
+			for _, r := range s.Rows {
+				if r.text == evs[i].Text {
+					gone = max(gone, r.gone)
+				}
+			}
+		}
+		if up := min(gone, end) - at; up < eventRead {
+			t.Errorf("issue #411: %s is up for %s in the video, want at least %s", evs[i].Text, up, eventRead)
+		}
+	}
+	var paused bool
+	for _, s := range l.states {
+		if s.Start >= length && s.Paused {
+			paused = true
+		}
+	}
+	if !paused {
+		t.Errorf("the held end is not marked paused for events")
+	}
+}
+
+func TestIssue411VideoWithLongerSound(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recording.mp4")
+	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:size=240x360:rate=30:duration=9.333",
+		"-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", path).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg cannot make a test video: %v %s", err, out)
+	}
+	if err := Burn(context.Background(), path, Drawing{Events: []Event{{dms(2000), "cart opened"}, {dms(9330), "purchase done"}}}); err != nil {
+		t.Fatal(err)
+	}
+	band := eventBandHeight(1, eventSize(240, 360))
+	if !bandHasText(t, ffmpeg, path, dms(9330)+eventRead, 360, 240, band) {
+		t.Errorf("issue #411: with 12 s of sound, \"purchase done\" is not in the video %s after it arrived", eventRead)
 	}
 }
