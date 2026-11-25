@@ -112,6 +112,7 @@ type Runner struct {
 	screenAt   time.Time
 	screenTook time.Duration
 	history    []screenSnapshot
+	seen       *ui.Screen
 	ctxKey     string
 	ctxReady   bool
 	ctxWin     int
@@ -421,7 +422,11 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	r.lastInteraction = time.Now()
 	r.resetFront()
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
+	defer func() { r.seen = nil }()
 	for i, c := range cmds {
+		if i > 0 {
+			r.seen = nil
+		}
 		start := time.Now()
 		r.takeHints()
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)

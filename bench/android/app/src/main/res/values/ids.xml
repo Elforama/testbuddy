@@ -242,6 +242,10 @@
     <item name="slow_detail_title" type="id" />
     <item name="slow_list" type="id" />
     <item name="slow_list_open" type="id" />
+    <item name="relabel_open" type="id" />
+    <item name="relabel_search" type="id" />
+    <item name="relabel_taps" type="id" />
+    <item name="relabel_title" type="id" />
     <item name="slow_list_spinner" type="id" />
     <item name="slow_open" type="id" />
     <item name="snackbar_action" type="id" />

@@ -417,6 +417,11 @@ jobs:
           bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
           --headless --retries 1 --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+      # Issue #421: in a session, a tap by a label that changed in place since the last look fails
+      # within seconds, naming what took its place, instead of waiting the whole lookup time.
+      - name: Check a session tap on a relabelled button
+        if: ${{ !cancelled() }}
+        run: bench/checks/relabel-tap.sh web http://127.0.0.1:7360/
       # The journey once more, recorded with captions and touches for the pull request
       # (the recordings job). Not timed, and a failure here only warns.
       - name: Record the journey with --annotate

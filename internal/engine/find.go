@@ -112,6 +112,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	start, reads := time.Now(), 0
 	final := false
 	away := r.awayWatch()
+	replaced := &replacedWatch{was: r.seenTarget(sel)}
 	for {
 		reads++
 		s, err = r.readUntil(ctx, deadline)
@@ -142,6 +143,11 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			}
 			return n, s, waited, nil
 		}
+		if replaced.see(s) && time.Now().Before(deadline) {
+			msg := replaced.message(sel)
+			r.tracef("not found: %s, after %s and %d reads: %s", sel.Describe(), since(start), reads, msg)
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: msg}, Screen: s, Query: sel.Text}
+		}
 		if away.seen(s) && time.Now().Before(deadline) {
 			r.tracef("not found: %s, after %s and %d reads: %s for %s", sel.Describe(), since(start), reads, away.what, since(away.since))
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
@@ -165,7 +171,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		waited = true
-		silence, err := w.Wait(ctx, s.Seq, away.wake(deadline), firstChange)
+		silence, err := w.Wait(ctx, s.Seq, replaced.wake(away.wake(deadline)), firstChange)
 		firstChange = false
 		if err != nil {
 			return nil, s, waited, err

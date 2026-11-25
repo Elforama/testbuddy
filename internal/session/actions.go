@@ -110,6 +110,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	for _, n := range result.Notes {
 		fmt.Fprintf(&out, "note: %s\n", n)
 	}
+	if d.last != nil {
+		runner.SetSeen(d.last.Screen)
+	}
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
 		notes := dialogNotes(d)
 		if a.JSON {

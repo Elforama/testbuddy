@@ -30,3 +30,11 @@ tags: [scenarios]
     timeout: 20000
 - tapOn: {id: back}
 - assertVisible: {id: scenario_title}
+# Issue #421: a button whose label changes in place 4 s after opening, then every 3 s.
+- tapOn: {id: relabel_open}
+- assertVisible: {id: relabel_search, text: "Search"}
+- assertVisible: "Search for Roof Repair"
+- tapOn: {id: relabel_search}
+- assertVisible: "Search taps: 1"
+- tapOn: {id: back}
+- assertVisible: {id: scenario_title}

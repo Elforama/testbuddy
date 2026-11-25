@@ -64,6 +64,11 @@ happens and what to do.
 - **Every lookup already waits.** `tapOn`, `assertVisible` and the other lookups wait up to
   17 s (7 s when `optional`) on device events, re-reading only when the screen changed. Slow
   content inside the UI (a list loading, a spinner then a result) needs nothing more.
+- **A label that changed since your last look fails fast.** In a `tb do`, a lookup of a label
+  that `tb look` (or the last `tb do`) showed, and that another label has replaced in the same
+  place for 2 s, fails then instead of after 17 s: `"Search" (in your last look) is gone; at its
+  place now: Button "Search for, Roof Repair"`. Tap the new one by its `@ref` or `id`. Flows
+  (`tb test`) still wait the whole time.
 - **`extendedWaitUntil`** (default timeout 17 s, like a lookup) is for an end state that can
   take longer: `extendedWaitUntil: {visible: "Report ready", timeout: 60000}`.
 - **`waitForAnimationToEnd`** (default timeout 15 s) never fails. On Android and iOS it waits

@@ -36,6 +36,7 @@
       }, 'Block UI'),
       jankText,
       h('button', { id: 'slow_list_open', onclick: () => Bench.go('/slow/list') }, 'Slow list'),
+      h('button', { id: 'relabel_open', onclick: () => Bench.go('/slow/relabel') }, 'Relabel'),
     );
     return {
       enter(params, info) {
@@ -88,6 +89,31 @@
         t1 = setTimeout(() => { page.replaceChildren(); rows(1, 20); loaded = 20; }, 2500);
       },
       leave() { clearTimeout(t1); clearTimeout(t2); },
+    };
+  });
+
+  Bench.sub('slow_relabel', '/slow/relabel', 'Relabel', 'relabel_title', (page) => {
+    const hints = ['Roof Repair', 'House Cleaner', 'Plumber'];
+    const count = h('span', { id: 'relabel_taps' }, 'Search taps: 0');
+    let taps = 0, first = 0, every = 0;
+    const search = h('button', {
+      id: 'relabel_search',
+      onclick: () => { taps++; count.textContent = 'Search taps: ' + taps; },
+    }, 'Search');
+    page.append(search, count);
+    const stop = () => { clearTimeout(first); clearInterval(every); };
+    return {
+      enter(params, info) {
+        if (info.how === 'pop') return;
+        stop();
+        taps = 0;
+        count.textContent = 'Search taps: 0';
+        search.textContent = 'Search';
+        let i = 0;
+        const next = () => { search.textContent = 'Search for ' + hints[i++ % hints.length]; };
+        first = setTimeout(() => { next(); every = setInterval(next, 3000); }, 4000);
+      },
+      leave: stop,
     };
   });
 })();

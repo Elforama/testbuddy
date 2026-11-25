@@ -66,6 +66,9 @@ class SlowActivity : ScenarioActivity() {
         content.button(R.id.slow_list_open, "Slow list") {
             startActivity(Intent(this, SlowListActivity::class.java))
         }
+        content.button(R.id.relabel_open, "Relabel") {
+            startActivity(Intent(this, RelabelActivity::class.java))
+        }
     }
 
     companion object {
@@ -157,5 +160,33 @@ class SlowListActivity : ScenarioActivity() {
     companion object {
         const val PAGE = 20
         const val MAX = 40
+    }
+}
+
+class RelabelActivity : ScenarioActivity() {
+    private var taps = 0
+    private var shown = 0
+    private lateinit var count: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        screen("Relabel", titleId = R.id.relabel_title)
+        val search = content.button(R.id.relabel_search, "Search") {
+            taps++
+            count.text = "Search taps: $taps"
+        }
+        count = content.text(R.id.relabel_taps, "Search taps: 0")
+        later(FIRST_MS) { next(search) }
+    }
+
+    private fun next(search: TextView) {
+        search.text = "Search for ${HINTS[shown++ % HINTS.size]}"
+        later(EVERY_MS) { next(search) }
+    }
+
+    companion object {
+        const val FIRST_MS = 4000L
+        const val EVERY_MS = 3000L
+        val HINTS = listOf("Roof Repair", "House Cleaner", "Plumber")
     }
 }
