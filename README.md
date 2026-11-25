@@ -67,7 +67,10 @@ Or from inside Claude Code: `/plugin marketplace add Elforama/testbuddy`, then
 `/plugin install test-buddy@test-buddy`.
 
 **Devices.** Start an Android emulator (or plug in a phone with USB debugging), boot an iOS
-simulator, or have Google Chrome installed for web flows.
+simulator, or have Google Chrome installed for web flows. With no phone running, `tb test`
+starts one for flows that need it: the first Android emulator (AVD) it finds, else (on a Mac)
+a shut-down iPhone simulator of the newest iOS. It says which, waits for the boot, and leaves
+it running (not on CI, where devices are set up on purpose).
 
 ## Quick start
 

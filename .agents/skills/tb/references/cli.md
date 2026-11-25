@@ -10,6 +10,11 @@ value takes `true` or `false` (`--json=false`), and anything else is bad input.
 
 `tb test <flow files or folders> [options]`
 
+With no phone running and a flow that needs one, `tb test` starts one: the first Android
+emulator (AVD) it finds, else (on a Mac) a shut-down iPhone simulator of the newest iOS,
+without its window. It says which on stderr, waits for the boot, and leaves the device running.
+Not with `--device`, shards, a multi-device flow, or on CI (`CI` / `TB_CI` set).
+
 | Option | Meaning |
 |---|---|
 | `-e, --env KEY=VALUE` | Set a variable (repeatable). A flow's own `env:` is applied after it, so write overridable defaults there as `KEY: ${KEY \|\| 'default'}`. |

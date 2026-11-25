@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -214,6 +215,14 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		if !known {
 			fmt.Fprintf(os.Stderr, "--device %s=...: no flow has a device role named %q\n", role, role)
 			return 2
+		}
+	}
+	if phones(devs) == 0 && single && !ci.On() && needsPhone(plan) && startDevice(ctx, device.Platform(platform), func(s string) { fmt.Fprintln(os.Stderr, s) }) {
+		devs = nil
+		for _, d := range listDevices(ctx) {
+			if platform == "" || string(d.Platform) == platform {
+				devs = append(devs, d)
+			}
 		}
 	}
 	if len(devs) == 0 {
@@ -958,6 +967,15 @@ func preferFirst(devs []device.Info, serial string) []device.Info {
 		}
 	}
 	return out
+}
+
+func needsPhone(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if !f.Config.Web() {
+			return true
+		}
+	}
+	return false
 }
 
 func phones(devs []device.Info) int {

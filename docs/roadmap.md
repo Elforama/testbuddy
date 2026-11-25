@@ -69,7 +69,6 @@ coexist on one emulator.
 - **Re-run from a step**: `tb test flow.yaml --from 12`, against a live session, to iterate
   on a failing step without the whole flow.
 - **Watch mode**: `tb test --watch` re-runs a flow when its YAML changes.
-- **Start a device**: start an emulator or boot a simulator when none runs.
 - **Label failures**: say whether a failure looks like the app, a timing race or the device
   connection, with the reason.
 - **Real iPhones**: tb drives iOS simulators only.
@@ -102,3 +101,4 @@ coexist on one emulator.
 | Flaky `TestAdoptKeepsSeqIncreasing` (one failing run, 2026-11-07, before the fix landed; issue #74) | `4ed28b0` |
 | `tb test --timeline`: the run as an HTML timeline | #36 |
 | `tb test --record`: each flow's screen recorded start to finish, in every report and the timeline (web via `ffmpeg`) | this change |
+| `tb test` starts an emulator or boots a simulator when no phone runs | this change |
