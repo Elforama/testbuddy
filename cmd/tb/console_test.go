@@ -70,7 +70,7 @@ func TestReporterLines(t *testing.T) {
 		{"nested", engine.Event{Desc: "back", Status: engine.Passed, Depth: 2, Elapsed: 1500 * time.Millisecond}, "      ✓ back  1.5s\n"},
 		{"warned shows its error", engine.Event{Desc: "tapOn: X", Status: engine.Warned, Err: errors.New("optional: not found")},
 			"  ⚠ tapOn: X  0ms\n      optional: not found\n"},
-		{"skipped", engine.Event{Desc: "runFlow: a.yaml", Status: engine.Skipped}, "  ○ runFlow: a.yaml  0ms\n"},
+		{"skipped", engine.Event{Desc: "runFlow: a.yaml", Status: engine.Skipped}, "  ○ runFlow: a.yaml\n"},
 		{"failed shows each error line", engine.Event{Desc: "assertVisible: Hi", Status: engine.Failed, Depth: 1,
 			Err: errors.New("  not found\nscreen changed  \n")}, "    ✗ assertVisible: Hi  0ms\n        not found\n        screen changed\n"},
 		{"passed hides its error", engine.Event{Desc: "x", Status: engine.Passed, Err: errors.New("ignored")}, "  ✓ x  0ms\n"},

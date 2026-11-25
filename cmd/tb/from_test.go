@@ -167,14 +167,15 @@ func TestTestFromNumbersStepsAsTheFlowDoes(t *testing.T) {
 
 func TestFlowEndNamesTheStepOnlyOnTheLastAttempt(t *testing.T) {
 	con, out := plainConsole(false, false)
-	con.fromHint, con.retries = true, 1
+	con.fromHint = true
 	r := result("Login", engine.Failed, errors.New("not found"), time.Second)
 	r.Steps = []engine.StepResult{{Status: engine.Passed}, {Status: engine.Failed}}
+	r.Retried = true
 	con.flowEnd(r, "/d")
 	if strings.Contains(out.String(), "--from") {
 		t.Errorf("an attempt that will be retried names a step:\n%s", out.String())
 	}
-	r.Job.Attempt = 1
+	r.Retried = false
 	con.flowEnd(r, "/d")
 	if !strings.Contains(out.String(), "failed at step 2: to run this flow from there, pass --from 2") {
 		t.Errorf("the last attempt does not name its step:\n%s", out.String())

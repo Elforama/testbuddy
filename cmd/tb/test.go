@@ -68,8 +68,8 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --retries N                re-run a failed flow up to N times (on another device if free)
   --from N                   one flow, on a phone: start at its Nth step, on the screen the
                              device is on now (onFlowStart and the steps before N do not
-                             run: the reports list them as skipped); a failed run says the
-                             step to pass
+                             run: the reports list them as skipped; a retry starts at N too);
+                             a failed run says the step to pass
   --keep-animations          do not turn Android animations off during the run
   --keep-agents              leave tb's agent running on each device after the run (the next
                              run starts faster; other test tools cannot use the device until
@@ -313,7 +313,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 	con.fromHint = !replay
-	con.retries = a.num("retries", 0)
 
 	events, eventsURL := serveEvents(a, con)
 	if events != nil {

@@ -186,6 +186,13 @@ func TestScheduleRetriesUntilLimit(t *testing.T) {
 	if !reflect.DeepEqual(attempts, []int{0, 1, 2}) {
 		t.Errorf("Finished attempts %v, want [0 1 2]", attempts)
 	}
+	var retried []bool
+	for _, fr := range rec.Finished() {
+		retried = append(retried, fr.Retried)
+	}
+	if !reflect.DeepEqual(retried, []bool{true, true, false}) || r.Retried {
+		t.Errorf("Finished Retried %v (final %v), want [true true false]: only the last attempt has no retry after it", retried, r.Retried)
+	}
 	if orig.Attempt != 0 {
 		t.Errorf("the caller's job was modified: attempt %d", orig.Attempt)
 	}

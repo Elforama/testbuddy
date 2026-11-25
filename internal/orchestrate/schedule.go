@@ -65,6 +65,7 @@ type Result struct {
 	Steps    []engine.StepResult
 	Runner   *engine.Runner
 	Videos   []engine.Video
+	Retried  bool
 	lost     *lostDevice
 	logged   bool
 }
@@ -345,6 +346,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			if next == nil {
 				break
 			}
+			r.Retried = true
 			fr, ok := finish(r)
 			if !ok {
 				r, reported = fr, true
@@ -458,6 +460,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			continue
 		}
 		retry := retryOf(r)
+		r.Retried = retry != nil
 		r, ok := finish(r)
 		if retry != nil && ok {
 			lastOf[retry] = &r
