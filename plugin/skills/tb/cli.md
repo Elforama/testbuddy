@@ -217,7 +217,8 @@ In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or mul
 name of a connected device, or a session's name for the device it has open; anything else gets
 the run refused):
 your own idle session on it gives it back, and when it cannot run a flow or is in use (another
-agent's session, or yours running a command) the flow goes to another of the same platform. When the run had
+agent's session, or yours running a command) the flow goes to another of the same platform. It is not used when every flow names its platform
+(`url:`, `devices:` roles). When the run had
 a choice of phones or simulators, it says which one it took and why not the others before its
 first flow there.
 

@@ -40,7 +40,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
                              (TB_DEVICE: the device a run of one device at a time tries first; the
-                             run keeps to its platform)
+                             run keeps to its platform; not used when every flow names its own)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
