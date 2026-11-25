@@ -1,0 +1,119 @@
+{
+  "branch": "ccr-fca6522b-issue-411",
+  "commit": "012b53d6bafc1921391e80550cc53e266f7e3744",
+  "date": "2026-11-25T04:05:44Z",
+  "event": "pull_request",
+  "flows": {
+    "bench/flows/device/accessibility-values.yaml": {
+      "name": "Accessibility: buttons and switch with values",
+      "passed": false,
+      "seconds": 1.33
+    },
+    "bench/flows/device/controls-gestures.yaml": {
+      "name": "Controls: reaction gesture and numeric placeholder",
+      "passed": false,
+      "seconds": 1.13
+    },
+    "bench/flows/device/ios/embedded-browser.yaml": {
+      "name": "Read content in the embedded system browser",
+      "passed": false,
+      "seconds": 1.62
+    },
+    "bench/flows/device/ios/nested-button.yaml": {
+      "name": "Tap a button inside another button by id",
+      "passed": false,
+      "seconds": 2.0
+    },
+    "bench/flows/device/navigation-deep-link.yaml": {
+      "name": "Open a deep link with its navigation stack",
+      "passed": false,
+      "seconds": 0.74
+    },
+    "bench/flows/journey.yaml": {
+      "name": "Bench journey",
+      "passed": false,
+      "seconds": 1.37
+    },
+    "bench/flows/scenarios/a11y_good.yaml": {
+      "name": "Scenario good accessibility",
+      "passed": false,
+      "seconds": 3.03
+    },
+    "bench/flows/scenarios/a11y_poor.yaml": {
+      "name": "Scenario poor accessibility",
+      "passed": false,
+      "seconds": 1.79
+    },
+    "bench/flows/scenarios/animations.yaml": {
+      "name": "Scenario animations",
+      "passed": false,
+      "seconds": 2.13
+    },
+    "bench/flows/scenarios/controls.yaml": {
+      "name": "Scenario controls",
+      "passed": false,
+      "seconds": 1.25
+    },
+    "bench/flows/scenarios/errors.yaml": {
+      "name": "Scenario errors and retries",
+      "passed": false,
+      "seconds": 1.82
+    },
+    "bench/flows/scenarios/keyboard.yaml": {
+      "name": "Scenario keyboard",
+      "passed": false,
+      "seconds": 1.6
+    },
+    "bench/flows/scenarios/lists.yaml": {
+      "name": "Scenario lists",
+      "passed": false,
+      "seconds": 2.37
+    },
+    "bench/flows/scenarios/native.yaml": {
+      "name": "Scenario native toolkits",
+      "passed": false,
+      "seconds": 1.43
+    },
+    "bench/flows/scenarios/navigation.yaml": {
+      "name": "Scenario navigation and back stack",
+      "passed": false,
+      "seconds": 0.78
+    },
+    "bench/flows/scenarios/onboarding.yaml": {
+      "name": "Scenario onboarding and login",
+      "passed": false,
+      "seconds": 0.54
+    },
+    "bench/flows/scenarios/overlays.yaml": {
+      "name": "Scenario overlays",
+      "passed": false,
+      "seconds": 0.77
+    },
+    "bench/flows/scenarios/permissions.yaml": {
+      "name": "Scenario permissions",
+      "passed": false,
+      "seconds": 1.02
+    },
+    "bench/flows/scenarios/slow.yaml": {
+      "name": "Scenario slow and janky",
+      "passed": false,
+      "seconds": 1.11
+    },
+    "bench/flows/scenarios/transitions.yaml": {
+      "name": "Scenario screen transitions",
+      "passed": false,
+      "seconds": 0.89
+    },
+    "bench/flows/scripting.yaml": {
+      "name": "Scripting",
+      "passed": false,
+      "seconds": 1.47
+    }
+  },
+  "platform": "ios",
+  "run_attempt": "1",
+  "run_id": "45542583227",
+  "runner": "macOS ARM64 macos26 20261117.0516.1",
+  "total_seconds": 30.19,
+  "url": "https://github.com/Elforama/testbuddy/actions/runs/45542583227"
+}
