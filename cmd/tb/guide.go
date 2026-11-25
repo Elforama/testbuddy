@@ -9,7 +9,7 @@ Interactive sessions stay connected between calls through a background daemon.
 
 Explore an app:
 - tb devices                      list devices: free, in use (by whom), or your session
-- tb open --name alice [-d DEVICE] [--app APP_ID]   optional; names a device for multi-device work
+- tb open -p android|ios|web [--name alice] [--app APP_ID]   or -d DEVICE instead of -p; --name for multi-device work
 - tb look [-d alice]              screen as one line per element: @ref Kind "label" #id state;
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.
                                   where layout matters (unindented lines stack top to bottom);
@@ -38,14 +38,14 @@ Explore an app:
                                   use the device serial, simulator UDID or unique name, or -d web --headless
 
 Run tests:
-- tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
-- tb test flows/ --json           machine-readable results: each flow's status, seconds and error; a
+- tb test flows/ -p android       run YAML flows; Maestro flows run unchanged (tb test -h); -p or a device is required
+- tb test flows/ -p ios --json    machine-readable results: each flow's status, seconds and error; a
                                   failed flow's debugDir (log.txt: what tb did; screen.txt: the screen)
-- tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
-- tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
+- tb test flows/ -p ios --timeline also timeline.html per flow: each step's screens, taps and trace
+- tb test flows/ -p ios --record  record each flow's screen, start to finish (in the reports and timeline)
 - tb replay f.yaml -d D --record --annotate  a video a person can follow (for a PR): captions, touches, no rush
 - tb mark "event {k: v}"  while a --annotate run records: show the event in the video (the app can POST $TB_EVENTS_URL)
-- tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
+- tb test flows/ -p android --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 - tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
                                   regex text ("Sign in?"), optional assertions, flows that assert nothing
 - tb a11y [--changed]             check app code (no device) for elements tb cannot detect or tap;

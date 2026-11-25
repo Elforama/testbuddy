@@ -69,11 +69,11 @@ Emulator serials change when an emulator restarts (`emulator-5554` can come back
 
 ```bash
 tb check --lint flows/                           # parse and lint, no device: after every edit
-tb test flows/                                   # a folder (uses its config.yaml if any)
+tb test flows/ -p android                        # a folder (uses its config.yaml if any); -p or a device is required
 tb test flows/login.yaml --device emulator-5554  # one flow, one device
-tb test flows/ -e APP_ID=com.example.app -e USER=qa@example.com
-tb test flows/ --json                            # machine-readable summary (best for you)
-tb test web-flow.yaml --headless                 # web flows: Chrome without a window
+tb test flows/ -p ios -e APP_ID=com.example.app -e USER=qa@example.com
+tb test flows/ -p android --json                 # machine-readable summary (best for you)
+tb test web-flow.yaml -p web --headless          # web flows: Chrome without a window
 ```
 
 - Exit status: 0 passed, 1 a flow failed, 2 bad input (bad YAML, unknown option).

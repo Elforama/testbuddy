@@ -99,7 +99,7 @@ func TestTestStartsTheEmulatorWhenNoDeviceRuns(t *testing.T) {
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--json", "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--json", "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -115,14 +115,15 @@ func TestTestStartsTheEmulatorWhenNoDeviceRuns(t *testing.T) {
 	}
 }
 
-func TestTestBootsASimulatorWhenNoEmulatorIsSetUp(t *testing.T) {
+func TestTestBootsTheSimulatorForIOS(t *testing.T) {
 	f := withFakeTools(t, true)
+	f.avds = "Pixel\n"
 	f.sims = `{"devices":{
 		"com.apple.CoreSimulator.SimRuntime.watchOS-11-0":[{"udid":"W","name":"Apple Watch","state":"Shutdown"}],
 		"com.apple.CoreSimulator.SimRuntime.iOS-17-5":[{"udid":"OLD","name":"iPhone 15","state":"Shutdown"}],
 		"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"PAD","name":"iPad Air","state":"Shutdown"},{"udid":"NEW","name":"iPhone 16","state":"Shutdown"}]}}`
 	phoneOnceStarted(t, f, device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Fake phone", Emulator: true, State: "device"})
-	if !startDevice(context.Background(), "", func(string) {}) {
+	if !startDevice(context.Background(), device.IOS, func(string) {}) {
 		t.Fatal("no device started")
 	}
 	if len(f.spawned) != 0 || len(f.booted) != 1 || f.booted[0] != "NEW" {
@@ -138,12 +139,13 @@ func TestTestStartsNothing(t *testing.T) {
 		avds     string
 		sims     string
 	}{
-		{"no emulator and not a Mac", false, "", "", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
-		{"no AVD", false, "", "INFO    | nothing here\n", ""},
+		{"no platform", true, "", "Pixel\n", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
 		{"web", true, device.Web, "Pixel\n", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
-		{"ios asked, only an emulator", true, device.IOS, "Pixel\n", ""},
-		{"android asked, only a simulator", true, device.Android, "", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
-		{"no shut-down iPhone", true, "", "", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Booted"},{"udid":"B","name":"iPad","state":"Shutdown"}]}}`},
+		{"android, no emulator", true, device.Android, "", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
+		{"android, no AVD", true, device.Android, "INFO    | nothing here\n", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
+		{"ios, not a Mac", false, device.IOS, "Pixel\n", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Shutdown"}]}}`},
+		{"ios, no simulators", true, device.IOS, "Pixel\n", ""},
+		{"ios, no shut-down iPhone", true, device.IOS, "Pixel\n", `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-2":[{"udid":"A","name":"iPhone 16","state":"Booted"},{"udid":"B","name":"iPad","state":"Shutdown"}]}}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -175,7 +177,9 @@ func TestTestStartsNoDeviceWhenNotOneAtATime(t *testing.T) {
 			phoneOnceStarted(t, f, device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Fake phone", Emulator: true, State: "device"})
 			flow := writeFlow(t, t.TempDir(), "pass.yaml", passingFlow)
 			var code int
-			capture(t, func() { code = cmdTest(append([]string{flow, "--debug-output", t.TempDir()}, c.args...)) })
+			capture(t, func() {
+				code = cmdTest(append([]string{flow, "-p", "android", "--debug-output", t.TempDir()}, c.args...))
+			})
 			if code == 0 || len(f.spawned) != 0 {
 				t.Errorf("exit %d, spawned %q; want no device started", code, f.spawned)
 			}
@@ -191,7 +195,7 @@ func TestTestSaysWhenTheEmulatorExitsAtOnce(t *testing.T) {
 	listDevices = func(ctx context.Context) []device.Info { return nil }
 	var said []string
 	start := time.Now()
-	if startDevice(context.Background(), "", func(s string) { said = append(said, s) }) {
+	if startDevice(context.Background(), device.Android, func(s string) { said = append(said, s) }) {
 		t.Fatal("reported a device started")
 	}
 	if time.Since(start) > time.Second {
@@ -225,7 +229,7 @@ func TestTestStartsNoPhoneForWebFlows(t *testing.T) {
 	phoneOnceStarted(t, f, device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Fake phone", Emulator: true, State: "device"})
 	dir := t.TempDir()
 	flow := writeFlow(t, dir, "web.yaml", "url: https://example.com\n---\n- assertVisible: Home\n")
-	capture(t, func() { cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")}) })
+	capture(t, func() { cmdTest([]string{flow, "-p", "android", "--debug-output", filepath.Join(dir, "debug")}) })
 	if len(f.spawned) != 0 {
 		t.Errorf("spawned %q for a web flow", f.spawned)
 	}

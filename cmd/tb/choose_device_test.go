@@ -50,7 +50,7 @@ func TestCmdTestSaysWhichDeviceItChose(t *testing.T) {
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -122,7 +122,7 @@ func TestCmdTestNoteOnlyWhenThereWasAChoice(t *testing.T) {
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--debug-output", filepath.Join(dir, "debug")})
 	})
 	all := out + errOut
 	if code != 0 || strings.Contains(all, "no device named") || strings.Contains(all, "not tried") {

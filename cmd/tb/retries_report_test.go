@@ -52,7 +52,7 @@ func TestCancelledRetriedFlowIsReported(t *testing.T) {
 			go func() {
 				defer close(done)
 				stdout, _ = capture(t, func() {
-					code = cmdTest([]string{flow, "--retries", "2", "--json", "--format", format, "--output", out,
+					code = cmdTest([]string{flow, "-p", "android", "--retries", "2", "--json", "--format", format, "--output", out,
 						"--debug-output", filepath.Join(dir, "debug")})
 				})
 			}()
@@ -111,7 +111,7 @@ func TestFinishedHookPanicIsReported(t *testing.T) {
 	var crashed any
 	stdout, stderr := capture(t, func() {
 		defer func() { crashed = recover() }()
-		code = cmdTest([]string{flow, "--json", "--format", "junit", "--output", out, "--debug-output", filepath.Join(dir, "debug")})
+		code = cmdTest([]string{flow, "-p", "android", "--json", "--format", "junit", "--output", out, "--debug-output", filepath.Join(dir, "debug")})
 	})
 	if crashed != nil {
 		t.Fatalf("issue #117: the hook's panic escaped tb test: %v", crashed)
@@ -206,7 +206,7 @@ func TestFailureAsCancelledKeepsItsReason(t *testing.T) {
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	out := filepath.Join(dir, "report.xml")
 	stdout, _ := capture(t, func() {
-		cmdTest([]string{flow, "--retries", "2", "--json", "--format", "junit", "--output", out, "--debug-output", filepath.Join(dir, "debug")})
+		cmdTest([]string{flow, "-p", "android", "--retries", "2", "--json", "--format", "junit", "--output", out, "--debug-output", filepath.Join(dir, "debug")})
 	})
 	sum := jsonSummary(t, stdout)
 	if len(sum.Flows) != 1 || sum.Flows[0].Status != "ERROR" || !strings.Contains(sum.Flows[0].Error, "the app crashed on launch") ||

@@ -68,6 +68,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+tb test and tb open need -p android|ios|web unless a device is named (-d, --device, TB_DEVICE).
 TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
 A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
 With one device connected, or one session open (except for tb open), -d is optional; with
@@ -408,6 +409,10 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		if len(a.pos) > 0 && args["device"] == "" {
 			args["device"] = a.pos[0]
 		}
+		if err := explicitDevice(platform, args["device"].(string)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
 	}
 	return callDaemon(cmd, args)
 }
@@ -654,6 +659,15 @@ func cmdDaemon(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+const noPlatform = "say which platform: -p android, ios or web (or name a device with -d)"
+
+func explicitDevice(platform, dev string) error {
+	if platform == "" && orEnvDevice(dev) == "" {
+		return errors.New(noPlatform)
+	}
+	return nil
 }
 
 func orEnvDevice(d string) string {

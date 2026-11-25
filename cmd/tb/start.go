@@ -40,13 +40,12 @@ var (
 )
 
 func startDevice(ctx context.Context, platform device.Platform, say func(string)) bool {
-	if platform == "" || platform == device.Android {
-		if started, tried := startEmulator(ctx, say); tried {
-			return started
-		}
-	}
-	if (platform == "" || platform == device.IOS) && hasMacSimulators() {
-		return bootSimulator(ctx, say)
+	switch platform {
+	case device.Android:
+		started, _ := startEmulator(ctx, say)
+		return started
+	case device.IOS:
+		return hasMacSimulators() && bootSimulator(ctx, say)
 	}
 	return false
 }

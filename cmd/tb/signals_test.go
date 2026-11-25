@@ -128,6 +128,6 @@ func TestTestRunClosesOnHangUp(t *testing.T) {
 	dir := t.TempDir()
 	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
 	runSignalled(t, h, syscall.SIGHUP, func() {
-		cmdTest([]string{flow, "--debug-output", filepath.Join(dir, "debug")})
+		cmdTest([]string{flow, "-p", "android", "--debug-output", filepath.Join(dir, "debug")})
 	})
 }

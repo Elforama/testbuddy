@@ -22,7 +22,7 @@ TB = os.environ.get("TB", "bin/tb")
 
 def command(platform):
     if platform == "web":
-        return [TB, "test", "bench/flows/journey-web.yaml", "--headless", "--quiet", "--keep-agents"]
+        return [TB, "test", "bench/flows/journey-web.yaml", "-p", "web", "--headless", "--quiet", "--keep-agents"]
     dev = os.environ.get("BENCH_ANDROID" if platform == "android" else "BENCH_IOS", "")
     cmd = [TB, "test", "bench/flows/journey.yaml", "--quiet", "--keep-agents", "-p", platform]
     return cmd + (["--device", dev] if dev else [])

@@ -5,6 +5,8 @@ Exit status for every command: **0** ok, **1** a command or flow failed, **2** b
 to `TB_DEVICE`; with one device connected it is optional, with several tb asks which. A flag's
 value is checked before anything runs: a number flag takes a number, an on/off flag given a
 value takes `true` or `false` (`--json=false`), and anything else is bad input.
+`tb test` and `tb open` need the platform, `-p android|ios|web`, unless a device is named (`-d`,
+`--device`, `TB_DEVICE`); tb does not pick one for you.
 
 ## Run tests
 
@@ -74,7 +76,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | Command | What it does |
 |---|---|
 | `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
-| `tb open [-d DEVICE] [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
+| `tb open -p PLATFORM \| -d DEVICE [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
 | `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements. |
 | `tb do - < steps.yaml` | Steps from stdin. |

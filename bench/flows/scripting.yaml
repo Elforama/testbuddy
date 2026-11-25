@@ -6,7 +6,7 @@
 #   tb test bench/flows/scripting.yaml -p android
 #   tb test bench/flows/scripting.yaml -p ios
 #   go run ./bench/web &   # serves http://127.0.0.1:7360/
-#   tb test bench/flows/scripting.yaml -e BENCH=http://127.0.0.1:7360/ --headless
+#   tb test bench/flows/scripting.yaml -p web -e BENCH=http://127.0.0.1:7360/ --headless
 appId: ${BENCH || 'dev.testbuddy.bench'}
 name: Scripting
 tags: [scripting]

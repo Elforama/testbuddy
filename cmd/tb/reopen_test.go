@@ -127,7 +127,7 @@ func TestCmdTestFailureShotFromTheReopenedDevice(t *testing.T) {
 	debug := filepath.Join(dir, "debug")
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{flow, "--debug-output", debug, "--flatten-debug-output"})
+		code = cmdTest([]string{flow, "-p", "android", "--debug-output", debug, "--flatten-debug-output"})
 	})
 	if code != 1 {
 		t.Fatalf("exit %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -170,7 +170,7 @@ func TestCmdTestRestoresAnimationsAfterAReopen(t *testing.T) {
 	writeFlow(t, dir, "b_passes.yaml", passingFlow)
 	var code int
 	out, errOut := capture(t, func() {
-		code = cmdTest([]string{dir, "--debug-output", filepath.Join(t.TempDir(), "debug")})
+		code = cmdTest([]string{dir, "-p", "android", "--debug-output", filepath.Join(t.TempDir(), "debug")})
 	})
 	if code != 1 {
 		t.Fatalf("exit %d, want 1 (a_dies fails, b_passes passes)\nstdout: %s\nstderr: %s", code, out, errOut)

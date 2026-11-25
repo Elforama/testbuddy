@@ -34,7 +34,8 @@ const testUsage = `Usage: tb test <flow files or folders> [options]
 
 Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Options:
   -e, --env KEY=VALUE        set a variable (repeatable)
-  -p, --platform android|ios|web  run on this platform only
+  -p, --platform android|ios|web  the platform to run on: required unless a device is named
+                             (--device, TB_DEVICE) or every flow names its devices: roles
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
                              (TB_DEVICE: the device a run of one device at a time tries first)
@@ -147,6 +148,10 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	defer cancel()
 
 	platform := strings.ToLower(a.str("platform"))
+	if platform == "" && len(a.list("device")) == 0 && strings.TrimSpace(os.Getenv("TB_DEVICE")) == "" && !onlyMultiDevice(plan) {
+		fmt.Fprintln(os.Stderr, noPlatform)
+		return 2
+	}
 	all := listDevices(ctx)
 	var devs []device.Info
 	for _, d := range all {
@@ -967,6 +972,15 @@ func preferFirst(devs []device.Info, serial string) []device.Info {
 		}
 	}
 	return out
+}
+
+func onlyMultiDevice(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if len(f.Config.Devices) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func needsPhone(plan *workspace.Plan) bool {

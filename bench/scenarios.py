@@ -50,7 +50,7 @@ def command(plat):
         ])
     cmd = [TB, "test", *flows, "--json", "--keep-agents"]
     if plat == "web":
-        return cmd + ["-e", "BENCH=" + WEB, "-e", "BENCH_NAVIGATION_URL=" + urljoin(WEB, "#/navigation/level/3"), "--headless"]
+        return cmd + ["-p", "web", "-e", "BENCH=" + WEB, "-e", "BENCH_NAVIGATION_URL=" + urljoin(WEB, "#/navigation/level/3"), "--headless"]
     dev = os.environ.get("BENCH_ANDROID" if plat == "android" else "BENCH_IOS", "")
     return cmd + ["-p", plat] + (["--device", dev] if dev else [])
 
