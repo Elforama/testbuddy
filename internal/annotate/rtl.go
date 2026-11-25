@@ -1,6 +1,7 @@
 package annotate
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -158,12 +159,23 @@ const (
 	classEN
 	classAN
 	classNSM
+	classES
+	classCS
+	classET
 )
 
 func classOf(r rune) bidiClass {
 	switch {
 	case transparent(r):
 		return classNSM
+	case r == tatweel:
+		return classAL
+	case r == '+' || r == '-' || r == 0x2212:
+		return classES
+	case r == ',' || r == '.' || r == ':' || r == '/' || r == 0x00A0 || r == 0x060C:
+		return classCS
+	case strings.ContainsRune("$%#°¢£¤¥€‰‱", r) || r == 0x066A || unicode.Is(unicode.Sc, r):
+		return classET
 	case r >= '0' && r <= '9', r >= 0x06F0 && r <= 0x06F9, r >= 0xFF10 && r <= 0xFF19:
 		return classEN
 	case r >= 0x0660 && r <= 0x0669, r == 0x066B, r == 0x066C:
@@ -176,6 +188,73 @@ func classOf(r rune) bidiClass {
 		return classL
 	}
 	return classON
+}
+
+func brackets(rs []rune, cls []bidiClass) {
+	open := map[rune]rune{'(': ')', '[': ']', '{': '}', '«': '»', '‹': '›'}
+	type pending struct {
+		at    int
+		close rune
+	}
+	var stack []pending
+	var pairs [][2]int
+	for i, r := range rs {
+		if cls[i] != classON {
+			continue
+		}
+		if c, ok := open[r]; ok {
+			stack = append(stack, pending{i, c})
+			continue
+		}
+		for k := len(stack) - 1; k >= 0; k-- {
+			if stack[k].close == r {
+				pairs = append(pairs, [2]int{stack[k].at, i})
+				stack = stack[:k]
+				break
+			}
+		}
+	}
+	sort.Slice(pairs, func(a, b int) bool { return pairs[a][0] < pairs[b][0] })
+	dir := func(c bidiClass) bidiClass {
+		switch c {
+		case classL:
+			return classL
+		case classR, classEN, classAN:
+			return classR
+		}
+		return classON
+	}
+	for _, p := range pairs {
+		inL, inR := false, false
+		for k := p[0] + 1; k < p[1]; k++ {
+			switch dir(cls[k]) {
+			case classL:
+				inL = true
+			case classR:
+				inR = true
+			}
+		}
+		set := classON
+		switch {
+		case inL:
+			set = classL
+		case inR:
+			before := classL
+			for k := p[0] - 1; k >= 0; k-- {
+				if d := dir(cls[k]); d != classON {
+					before = d
+					break
+				}
+			}
+			set = classL
+			if before == classR {
+				set = classR
+			}
+		}
+		if set != classON {
+			cls[p[0]], cls[p[1]] = set, set
+		}
+	}
 }
 
 var mirror = map[rune]rune{'(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<', '«': '»', '»': '«', '‹': '›', '›': '‹'}
@@ -194,22 +273,23 @@ func visual(s string) string {
 	if !any {
 		return s
 	}
-	last := classL
 	for i, c := range cls {
-		switch c {
-		case classNSM:
+		if c == classNSM {
 			if i > 0 {
 				cls[i] = cls[i-1]
 			} else {
 				cls[i] = classON
 			}
+		}
+	}
+	last := classL
+	for i, c := range cls {
+		switch c {
 		case classL, classR, classAL:
 			last = c
 		case classEN:
 			if last == classAL {
 				cls[i] = classAN
-			} else if last == classL {
-				cls[i] = classL
 			}
 		}
 	}
@@ -218,6 +298,47 @@ func visual(s string) string {
 			cls[i] = classR
 		}
 	}
+	for i := 1; i+1 < len(cls); i++ {
+		a, c, b := cls[i-1], cls[i], cls[i+1]
+		if c == classES && a == classEN && b == classEN {
+			cls[i] = classEN
+		} else if c == classCS && a == b && (a == classEN || a == classAN) {
+			cls[i] = a
+		}
+	}
+	for i := 0; i < len(cls); {
+		if cls[i] != classET {
+			i++
+			continue
+		}
+		j := i
+		for j < len(cls) && cls[j] == classET {
+			j++
+		}
+		if (i > 0 && cls[i-1] == classEN) || (j < len(cls) && cls[j] == classEN) {
+			for k := i; k < j; k++ {
+				cls[k] = classEN
+			}
+		}
+		i = j
+	}
+	for i, c := range cls {
+		if c == classES || c == classCS || c == classET {
+			cls[i] = classON
+		}
+	}
+	last = classL
+	for i, c := range cls {
+		switch c {
+		case classL, classR:
+			last = c
+		case classEN:
+			if last == classL {
+				cls[i] = classL
+			}
+		}
+	}
+	brackets(rs, cls)
 	strong := func(c bidiClass) (bidiClass, bool) {
 		switch c {
 		case classL:

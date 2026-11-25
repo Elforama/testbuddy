@@ -314,12 +314,40 @@ func (f *textFace) has(r rune) bool {
 	return true
 }
 
+var unshaped = func() map[rune]string {
+	m := map[rune]string{}
+	for letter, forms := range arabicForms {
+		for _, x := range forms {
+			if x != 0 {
+				m[x] = string(letter)
+			}
+		}
+	}
+	for alef, l := range lamAlef {
+		m[l[0]] = string(alef) + "\u0644"
+		m[l[1]] = string(alef) + "\u0644"
+	}
+	return m
+}()
+
+func (f *textFace) hasAll(s string) bool {
+	for _, r := range s {
+		if !f.has(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (f *textFace) show(s string) string {
 	var b strings.Builder
 	for _, r := range visual(s) {
-		if f.has(r) {
+		switch plain := unshaped[r]; {
+		case f.has(r):
 			b.WriteRune(r)
-		} else {
+		case plain != "" && f.hasAll(plain):
+			b.WriteString(plain)
+		default:
 			fmt.Fprintf(&b, "[U+%04X]", r)
 		}
 	}

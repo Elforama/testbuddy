@@ -669,6 +669,16 @@ func TestIssue412RightToLeftReadsRightToLeft(t *testing.T) {
 		{"پیام", "\uFEE1\uFE8E\uFBFF\uFB58"},
 		{"لَا", "\uFEFB\u064E"},
 		{"ب\u200Cب", "\uFE8F\uFE8F"},
+		{"שלום 1,234 עולם", "םלוע 1,234 םולש"},
+		{"שלום 1.5 עולם", "םלוע 1.5 םולש"},
+		{"שעה 12:30 היום", "םויה 12:30 העש"},
+		{"ת 25/11/2026 ת", "ת 25/11/2026 ת"},
+		{"מחיר $5 בלבד", "דבלב $5 ריחמ"},
+		{"שלום 50% עולם", "םלוע 50% םולש"},
+		{"تم 1,234", "1,234 \uFEE2\uFE97"},
+		{"شـكـر", "\uFEAE\u0640\uFEDC\u0640\uFEB7"},
+		{"שלום (עולם) abc", "(םלוע) םולש abc"},
+		{"abc (שלום) def", "abc (םולש) def"},
 	} {
 		if got := visual(c.in); got != c.want {
 			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
@@ -727,5 +737,35 @@ func TestIssue412EscapeSequences(t *testing.T) {
 		if got := cleanText(c.in); got != c.want {
 			t.Errorf("issue #412: %q is drawn as %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestIssue412JoinedFormWithNoFontFallsBackToTheLetter(t *testing.T) {
+	face := newTextFace(monoFont, 24)
+	defer face.Close()
+	face.pick['م'] = 0
+	face.pick['ا'] = 0
+	face.pick['ل'] = 0
+	fallback.Lock()
+	saved := map[rune]*sfnt.Font{}
+	for _, r := range []rune{0xFEE3, 0xFEE1, 0xFEFB} {
+		saved[r] = fallback.cover[r]
+		delete(fallback.cover, r)
+	}
+	fallback.Unlock()
+	t.Cleanup(func() {
+		fallback.Lock()
+		for r, f := range saved {
+			if f != nil {
+				fallback.cover[r] = f
+			}
+		}
+		fallback.Unlock()
+	})
+	if got := face.show("م"); got != "م" {
+		t.Errorf("issue #412: a joined form no font has is drawn as %q, want the plain letter", got)
+	}
+	if got := face.show("لا"); got != "ال" {
+		t.Errorf("issue #412: lam-alef with no font for the ligature is drawn as %q", got)
 	}
 }

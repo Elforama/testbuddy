@@ -92,6 +92,9 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 	}
 	findFallbacks(ctx, monoFont, texts...)
 	findFallbacks(ctx, mediumFont, texts...)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log := layoutEvents(events, length)
 	caps, touches := heldNotes(d.Caps, d.Touches, log.holds)
 	inputs := []string{"-i", abs}
@@ -105,6 +108,9 @@ func Burn(ctx context.Context, path string, d Drawing) error {
 	if len(caps) > 0 {
 		band = bandHeight(w, h)
 		for i, c := range caps {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			name := fmt.Sprintf("caption-%03d.png", i)
 			if err := writePNG(filepath.Join(tmp, name), captionImage(c.Text, w, band, captionSize(w, h))); err != nil {
 				return err
