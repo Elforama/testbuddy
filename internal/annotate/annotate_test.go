@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -58,26 +57,26 @@ func TestGraph(t *testing.T) {
 }
 
 func TestCaptionWrap(t *testing.T) {
-	face := fontFace(40)
+	face := newTextFace(mediumFont, 40)
 	if face == nil {
 		t.Fatal("no font")
 	}
 	defer face.Close()
 	max := fixed.I(600)
-	if got := wrap(face, "Tap on id: login", max); len(got) != 1 || got[0] != "Tap on id: login" {
+	if got := wrap(face.measure, "Tap on id: login", max); len(got) != 1 || got[0] != "Tap on id: login" {
 		t.Errorf("short: %q", got)
 	}
 	long := "Assert that \"Enter a username and password\" is visible on the login screen after the first tap on the button"
-	got := wrap(face, long, max)
+	got := wrap(face.measure, long, max)
 	if len(got) != 2 || !strings.HasSuffix(got[1], "…") {
 		t.Errorf("long: %q", got)
 	}
 	for _, l := range got {
-		if font.MeasureString(face, l) > max {
+		if face.measure(l) > max {
 			t.Errorf("line %q wider than %d", l, max.Round())
 		}
 	}
-	if got := wrap(face, strings.Repeat("x", 200), max); len(got) != 1 || !strings.HasSuffix(got[0], "…") {
+	if got := wrap(face.measure, strings.Repeat("x", 200), max); len(got) != 1 || !strings.HasSuffix(got[0], "…") {
 		t.Errorf("one long word: %q", got)
 	}
 }
