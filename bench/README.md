@@ -95,18 +95,19 @@ bench/time.py --platforms ios --runs 3
 
 Each run is the whole `tb test` command, start-up included: what a person waits for.
 
-## Results (2026-11-02, one Mac, 5 timed runs after a warm-up, whole command)
+## Results (2026-11-26, tb 0.7.0, one Mac, 5 timed runs after a warm-up, whole command)
 
 | Platform | tb |
 |---|---|
-| Android (medium_phone emulator, Android 16) | **10.7 s** (10.3–11.1) |
-| iOS (iPhone 17 simulator) | **15.4 s** (15.4–15.5) |
-| Web (headless Chrome) | **7.6 s** (7.6–7.8) |
+| Android (medium_phone emulator, Android 16) | **12.3 s** (11.9–12.5) |
+| iOS (iPhone 17 simulator) | **18.1 s** (17.8–18.5) |
+| Web (headless Chrome) | **7.4 s** (7.3–7.5) |
 
 - `tb test` turns Android animations off during a run (its default).
 - After the first run tb's agents stay warm, so later runs skip their start-up.
-- Part of the Android set overlapped a web reliability run with 4 CPU hogs on the same Mac:
-  its numbers may be a little high.
+- One run at a time, but the Mac also had other emulators and simulators running, so the
+  Android and iOS numbers are a little high. On 2026-11-02, before the scenario list was
+  added in front of the journey, they were 10.7 s and 15.4 s.
 
 Compared with Maestro and WebdriverIO on the same journey: the chart in the main
 [README](../README.md#speed).

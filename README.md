@@ -111,7 +111,7 @@ tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
   `MAESTRO_*` variables and `.maestro` flow folders (tb's own names, `tb.copiedText`,
   `TB_FILENAME` and `.tb`, work too).
   Web flows (`url:`) run in Chrome, with CSS selectors and same- and cross-origin iframes.
-- **Fast.** The same journey takes tb 10.7 s on Android and 15.4 s on iOS, against
+- **Fast.** The same journey takes tb 12.3 s on Android and 18.1 s on iOS, against
   Maestro's 4–6 minutes ([Speed](#speed)).
 - **No polling.** The on-device agents (and an in-page script on the web) push "the UI
   changed" and "the UI settled" events. `tb` waits on those; a screen is only read again
@@ -127,24 +127,25 @@ tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
 
 ## Speed
 
-![Bench journey, whole run in seconds, lower is better. Android: tb 10.7, WebdriverIO 18.7, Maestro 371.9. iOS: tb 15.4, WebdriverIO 44.6, Maestro 281.4. Web: tb 7.6, WebdriverIO 4.8, Maestro 274.6.](docs/img/bench-times.svg)
+![Bench journey, whole run in seconds, lower is better. Android: tb 12.3, WebdriverIO 24.6, Maestro 359.4. iOS: tb 18.1, WebdriverIO 43.3, Maestro 295.4. Web: tb 7.4, WebdriverIO 4.4, Maestro 236.3.](docs/img/bench-times.svg)
 
 | Platform | tb | WebdriverIO | Maestro |
 |---|---|---|---|
-| Android (emulator, Android 16) | **10.7 s** (10.3–11.1) | 18.7 s (17.0–25.4) | 371.9 s (one run) |
-| iOS (iPhone 17 simulator) | **15.4 s** (15.4–15.5) | 44.6 s (43.6–48.1) | 281.4 s (277.5–286.1) |
-| Web (headless Chrome) | 7.6 s (7.6–7.8) | **4.8 s** (4.7–5.2) | 274.6 s (264.6–308.1) |
+| Android (emulator, Android 16) | **12.3 s** (11.9–12.5) | 24.6 s (24.2–25.0) | 359.4 s (347.3–369.8) |
+| iOS (iPhone 17 simulator) | **18.1 s** (17.8–18.5) | 43.3 s (43.1–43.5) | 295.4 s (293.4–297.2) |
+| Web (headless Chrome) | 7.4 s (7.3–7.5) | **4.4 s** (4.2–4.5) | 236.3 s (231.6–239.8) |
 
 The bench journey ([bench/](bench/README.md)): sign in through a spinner, open and edit an
 item, scroll a list that loads more, and act on screens that never stop moving (a ticker, a
 per-frame stopwatch). The same app is built for Android, iOS and the web. Each number is
 the mean (min–max) of 5 timed runs of the whole command after a warm-up, start-up included,
-on one Mac on 2026-11-02, with each tool's defaults and the same 17 s element timeout.
-Versions: Maestro 2.10.0, WebdriverIO 9.32.0 (through Appium 3.9.0 on Android and iOS).
+one run at a time on one Mac on 2026-11-26, with each tool's defaults and the same 17 s
+element timeout. Versions: tb 0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0 (through Appium
+4.0.1 on Android and iOS). The Mac also had other emulators and simulators running, so
+every tool's times are a little higher than on a quiet machine.
 
 - **Maestro** waits for the screen to stop changing after each step; the bench's screens
-  never do, which most likely accounts for most of its time. Its Android figure is a single
-  run (each takes about 6 minutes), on the emulator used earlier that day.
+  never do, which most likely accounts for most of its time.
 - **WebdriverIO** is faster on the web because it does not wait for the page to settle: it
   clicks the moment an element is displayed, even while a screen is still sliding in. With
   a click instrument on the bench page, 7 of its 120 runs clicked the wrong element, 5 of
@@ -152,8 +153,9 @@ Versions: Maestro 2.10.0, WebdriverIO 9.32.0 (through Appium 3.9.0 on Android an
   during a slide-in; the same instrument did catch a scrolling race in tb (12 of 52 runs
   tapped one row off), fixed since: 0 wrong taps in the 15 runs after the fix
   ([bench/README.md](bench/README.md#tap-reliability-web)).
-  On iOS its journey needs a 1 s pause after scrolling, without which the tap only stops
-  the still-bouncing list.
+  On Android and iOS its journey needs a 1 s pause after scrolling, without which the tap
+  only stops the still-moving list: without the pause, 4 of 5 Android runs failed (on
+  WebdriverIO 9.32.0).
 
 ## How it compares
 
