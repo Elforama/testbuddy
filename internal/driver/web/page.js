@@ -166,6 +166,71 @@
   };
   window.clearTimeout = disguise(clear(nativeClearTimeout), nativeClearTimeout, 'clearTimeout');
   window.clearInterval = disguise(clear(nativeClearInterval), nativeClearInterval, 'clearInterval');
+  const REST_QUIET = 150, FLOW_CACHE = 1000;
+  let restlessLayoutAt = -1e9, lastShift = -1e9;
+  const flowSeen = new WeakMap();
+  const inFlow = (el, now) => {
+    const c = flowSeen.get(el);
+    if (c && now - c.at < FLOW_CACHE) return c.flows;
+    let flows = true;
+    try {
+      const pos = getComputedStyle(el).position;
+      flows = pos !== 'absolute' && pos !== 'fixed';
+    } catch (e) {}
+    flowSeen.set(el, { at: now, flows });
+    return flows;
+  };
+  const SHIFT_SOURCES = 5;
+  const shiftedAt = new WeakMap();
+  const noteShifts = (entries) => {
+    const now = performance.now();
+    for (const e of entries) {
+      const sources = e.sources || [];
+      if (!sources.length || sources.length >= SHIFT_SOURCES) lastShift = now;
+      for (const src of sources) {
+        let n = src.node;
+        if (n && n.nodeType === 3) n = n.parentNode;
+        if (n && n.nodeType === 1) shiftedAt.set(n, now);
+        else lastShift = now;
+      }
+    }
+  };
+  let shiftObserver = null;
+  try {
+    if (PerformanceObserver.supportedEntryTypes.includes('layout-shift')) {
+      shiftObserver = new PerformanceObserver((list) => noteShifts(list.getEntries()));
+      shiftObserver.observe({ type: 'layout-shift' });
+    }
+  } catch (e) { shiftObserver = null; }
+  const PAINT_ONLY = /color$|^(opacity|fill|stroke|boxShadow|textShadow|filter|backdropFilter|offset|easing|composite|computedOffset)$/i;
+  const movesBox = (anim) => {
+    try {
+      const frames = anim.effect.getKeyframes();
+      for (const f of frames) for (const prop in f) if (!PAINT_ONLY.test(prop)) return true;
+      return false;
+    } catch (e) { return true; }
+  };
+  tb.unrest = (i, l, t, r, b) => {
+    const el = tb.nodes[i];
+    if (!shiftObserver) return 'no layout-shift reports';
+    if (!el || !el.isConnected || el.ownerDocument !== document) return 'not in the page';
+    try { noteShifts(shiftObserver.takeRecords()); } catch (e) { return 'no layout-shift reports'; }
+    const now = performance.now();
+    if (now - lastShift < REST_QUIET) return 'much of the layout shifted';
+    if (now - restlessLayoutAt < REST_QUIET) return 'a restless element changes the layout';
+    const box = el.getBoundingClientRect();
+    const near = (a, c) => Math.abs(Math.round(a) - c) <= 1;
+    if (!near(box.left, l) || !near(box.top, t) || !near(box.right, r) || !near(box.bottom, b)) return 'moved';
+    for (let e = el; e; e = e.parentNode && e.parentNode.host ? e.parentNode.host : e.parentElement) {
+      if (restless.has(e)) return 'restless';
+      if (now - (shiftedAt.get(e) || -1e9) < REST_QUIET) return 'layout shifted';
+      try {
+        for (const anim of e.getAnimations()) if (anim.playState === 'running' && movesBox(anim)) return 'animated';
+      } catch (x) { return 'animations unknown'; }
+    }
+    return '';
+  };
+
   const onMutations = (records) => {
     const now = performance.now();
     let solid = false;
@@ -173,7 +238,10 @@
       let t = r.target;
       if (t && t.nodeType === 3) t = t.parentNode;
       if (!t || typeof t !== 'object') { solid = true; continue; }
-      if (restless.has(t)) continue;
+      if (restless.has(t)) {
+        if (r.type === 'attributes' && inFlow(t, now)) restlessLayoutAt = now;
+        continue;
+      }
       let h = changeLog.get(t);
       if (!h || now - h.last > RESTLESS_GAP || now - lastInput < RESTLESS_GAP) h = { since: now, last: now };
       h.last = now;

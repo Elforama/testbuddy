@@ -450,6 +450,26 @@ func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 	return out, nil
 }
 
+func (d *Driver) AtRest(ctx context.Context, index int, bounds ui.Rect) bool {
+	d.mu.Lock()
+	snap := -1
+	for i, n := range d.cssMap {
+		if n == index {
+			snap = i
+			break
+		}
+	}
+	calm := d.isSettled() && d.anims == 0
+	d.mu.Unlock()
+	if snap < 0 || !calm {
+		return false
+	}
+	why := "unknown"
+	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.unrest ? window.__tb.unrest(%d, %d, %d, %d, %d) : 'no helper'",
+		snap, bounds.L, bounds.T, bounds.R, bounds.B), &why)
+	return err == nil && why == ""
+}
+
 func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
 	d.mu.Lock()
 	snap := -1

@@ -254,7 +254,14 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
 	}
+	if vouch, ok := r.Drv.(restVoucher); ok && vouch.AtRest(ctx, n.Index, n.Bounds) {
+		return n, s, "", nil
+	}
 	return r.atRest(ctx, sel, n, s, from, full, span)
+}
+
+type restVoucher interface {
+	AtRest(ctx context.Context, index int, bounds ui.Rect) bool
 }
 
 func sameElement(a, b *ui.Node) bool {
