@@ -60,9 +60,37 @@ func TestTapKeepsRestReadsWithoutAVoucher(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		return []*ui.Node{{Text: "Save", Bounds: ui.Rect{L: 100, T: 100, R: 300, B: 150}, Enabled: true, Clickable: true}}
 	}
-	mustPass(t, runWith(t, f, quick, "- tapOn: Save"))
-	refused, _, _ := tapReads(t, false)
-	if got := f.reads.Load(); got != refused {
-		t.Errorf("%d screen reads with no voucher, %d with one that refuses: want the same", got, refused)
+	if _, err := run(t, f, "- tapOn: Save"); err != nil {
+		t.Fatal(err)
+	}
+	vouched, _, _ := tapReads(t, true)
+	if got := f.reads.Load(); got <= vouched {
+		t.Errorf("%d screen reads with no voucher, %d with one that vouches: want more without", got, vouched)
+	}
+}
+
+func TestTapDoesNotAskTheVoucherAboutATargetThatWent(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var reads atomic.Int64
+	f.screen = func() []*ui.Node {
+		n := reads.Add(1)
+		at := func(top int) []*ui.Node {
+			return []*ui.Node{{Text: "Save", Bounds: ui.Rect{L: 100, T: top, R: 300, B: top + 50}, Enabled: true, Clickable: true}}
+		}
+		switch {
+		case n == 1:
+			f.seq++
+			return at(100)
+		case n <= 3:
+			return []*ui.Node{{Text: "Saving", Bounds: ui.Rect{L: 100, T: 100, R: 300, B: 150}, Enabled: true, Clickable: true}}
+		default:
+			return at(400)
+		}
+	}
+	v := &vouchingDriver{fakeDriver: f, vouches: true}
+	mustPass(t, runWith(t, v, quick, "- tapOn: Save"))
+	if len(f.taps) != 1 || f.taps[0][1] < 400 {
+		t.Errorf("taps %v, want one on Save where it came back (y 400-450), not where another element took its place", f.taps)
 	}
 }

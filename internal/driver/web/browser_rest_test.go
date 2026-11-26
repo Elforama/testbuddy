@@ -15,6 +15,8 @@ const restPage = `<!doctype html><html><body style="margin:0">
   #glowing { animation: glow 400ms linear infinite alternate; }
   #drifting { animation: drift 600ms linear infinite alternate; }
   #ball { position: absolute; right: 20px; top: 20px; width: 20px; height: 20px; background: #36f; }
+  @keyframes bounce { from { left: 300px; } to { left: 500px; } }
+  #floater { position: absolute; top: 400px; width: 20px; height: 20px; animation: bounce 700ms linear infinite alternate; }
   #spacer { height: 10px; }
 </style>
 <button id="plain">Plain</button>
@@ -24,7 +26,9 @@ const restPage = `<!doctype html><html><body style="margin:0">
 <div id="jittery"><button id="shaken">Shaken</button></div>
 <div id="spacer"></div>
 <button id="pushed">Pushed</button>
+<slide-panel><button id="slotted">Slotted</button></slide-panel>
 <div id="ball"></div>
+<div id="floater"></div>
 <span id="clock">0</span>
 <script>
   let n = 0;
@@ -37,6 +41,26 @@ const restPage = `<!doctype html><html><body style="margin:0">
   };
   requestAnimationFrame(frame);
   window.push = () => { document.getElementById('spacer').style.height = '90px'; };
+  customElements.define('slide-panel', class extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div id="wrap"><slot></slot></div>';
+      this.wrap = root.getElementById('wrap');
+    }
+  });
+  window.slide = () => document.querySelector('slide-panel').wrap.animate(
+    [{ transform: 'translateX(0)' }, { transform: 'translateX(80px)' }], { duration: 60000 });
+  window.grow = () => document.getElementById('spacer').animate(
+    [{ height: '10px' }, { height: '12px' }], { duration: 60000, iterations: Infinity });
+  window.reason = (id) => {
+    const el = document.getElementById(id), box = el.getBoundingClientRect();
+    return window.__tb.unrest(window.__tb.nodes.indexOf(el), Math.round(box.left), Math.round(box.top), Math.round(box.right), Math.round(box.bottom));
+  };
+  window.reasonAfterPush = () => new Promise((done) => {
+    window.push();
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => done(window.reason('pushed')), 30)));
+  });
 </script>
 </body></html>`
 
@@ -62,7 +86,7 @@ func TestPageVouchesForRestInChrome(t *testing.T) {
 		want bool
 		why  string
 	}{
-		{"plain", true, "nothing moves it, though a clock ticks and an out-of-flow ball moves every frame"},
+		{"plain", true, "nothing moves it, though a clock ticks, an out-of-flow ball moves every frame and an absolutely positioned element animates its left"},
 		{"glowing", true, "its endless animation changes only a colour"},
 		{"pulsing", false, "its own endless animation scales it"},
 		{"carried", false, "an ancestor's endless animation carries it"},
@@ -73,17 +97,36 @@ func TestPageVouchesForRestInChrome(t *testing.T) {
 		}
 	}
 
-	if err := d.eval(ctx, "window.push(), 1", nil); err != nil {
+	if !vouched("slotted") {
+		t.Error("#slotted: not vouched while its shadow wrapper is still")
+	}
+	var why string
+	if err := d.eval(ctx, "window.reasonAfterPush()", &why); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(60 * time.Millisecond)
-	d.WaitSettled(ctx, 5*time.Second)
-	if vouched("pushed") {
-		t.Error("#pushed: vouched right after the layout above it grew and shifted it")
+	if why != "layout shifted" && why != "much of the layout shifted" {
+		t.Errorf("#pushed two frames after the layout above it grew: %q, want a layout shift named", why)
 	}
 	time.Sleep(400 * time.Millisecond)
+	d.WaitSettled(ctx, 5*time.Second)
 	if !vouched("pushed") {
 		t.Error("#pushed: not vouched 400 ms after its one shift")
+	}
+
+	if err := d.eval(ctx, "window.slide(), window.reason('slotted')", &why); err != nil {
+		t.Fatal(err)
+	}
+	if why != "animated" {
+		t.Errorf("#slotted while its shadow wrapper slides: %q, want animated", why)
+	}
+	if err := d.eval(ctx, "window.grow(), window.reason('plain')", &why); err != nil {
+		t.Fatal(err)
+	}
+	if why != "an animation changes the layout" {
+		t.Errorf("#plain while an endless animation grows an element by under 3 px: %q, want the layout animation named", why)
+	}
+	if err := d.eval(ctx, "document.getElementById('spacer').getAnimations().forEach((a) => a.cancel()), 1", nil); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := d.eval(ctx, "window.shake = true, 1", nil); err != nil {
