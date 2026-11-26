@@ -15,12 +15,14 @@
   const changeLog = new WeakMap();
   const restless = new WeakSet();
   let lastInput = -1e9;
+  let lastSolid = -1e9;
   const acted = () => { lastInput = performance.now(); };
   tb.acted = acted;
   for (const ev of ['keydown', 'mousedown', 'pointerdown', 'touchstart', 'wheel']) {
     window.addEventListener(ev, (e) => { if (e.isTrusted) acted(); }, { capture: true, passive: true });
   }
   const notify = (solid = true) => {
+    if (solid) lastSolid = performance.now();
     try { window.__tbNotify && window.__tbNotify(JSON.stringify({ a: runningCount(), s: solid ? 1 : 0 })); } catch (e) {}
   };
   tb.notify = notify;
@@ -166,6 +168,99 @@
   };
   window.clearTimeout = disguise(clear(nativeClearTimeout), nativeClearTimeout, 'clearTimeout');
   window.clearInterval = disguise(clear(nativeClearInterval), nativeClearInterval, 'clearInterval');
+  const REST_QUIET = 150, FLOW_CACHE = 1000, FRAME_GAP = 20, SHIFT_SOURCES = 5;
+  let restlessLayoutAt = -1e9, lastShift = -1e9;
+  const flowSeen = new WeakMap();
+  const inFlow = (el, now) => {
+    const c = flowSeen.get(el);
+    if (c && now - c.at < FLOW_CACHE) return c.flows;
+    let flows = true;
+    try {
+      const pos = getComputedStyle(el).position;
+      flows = pos !== 'absolute' && pos !== 'fixed';
+    } catch (e) {}
+    flowSeen.set(el, { at: now, flows });
+    return flows;
+  };
+  let shifts = [];
+  const noteShifts = (entries) => {
+    const now = performance.now();
+    for (const e of entries) {
+      const sources = e.sources || [];
+      if (!sources.length || sources.length >= SHIFT_SOURCES) lastShift = now;
+      for (const src of sources) {
+        for (const q of [src.previousRect, src.currentRect]) {
+          if (q) shifts.push({ at: now, l: q.left, t: q.top, r: q.right, b: q.bottom });
+          else lastShift = now;
+        }
+      }
+    }
+    if (shifts.length > 200) shifts = shifts.filter((q) => now - q.at < REST_QUIET);
+  };
+  let shiftObserver = null;
+  try {
+    if (PerformanceObserver.supportedEntryTypes.includes('layout-shift')) {
+      shiftObserver = new PerformanceObserver((list) => noteShifts(list.getEntries()));
+      shiftObserver.observe({ type: 'layout-shift' });
+    }
+  } catch (e) { shiftObserver = null; }
+  const PAINT_ONLY = /color$|^(opacity|fill|stroke|boxShadow|textShadow|filter|backdropFilter|offset|easing|composite|computedOffset)$/i;
+  const OWN_BOX_ONLY = /^(transform|translate|rotate|scale|perspective|transformOrigin|clipPath|visibility)$/;
+  const animates = (anim, spare) => {
+    try {
+      for (const f of anim.effect.getKeyframes()) {
+        for (const prop in f) if (!PAINT_ONLY.test(prop) && !(spare && spare.test(prop))) return true;
+      }
+      return false;
+    } catch (e) { return true; }
+  };
+  const above = (e) => {
+    if (e.assignedSlot) return e.assignedSlot;
+    const p = e.parentNode;
+    if (!p) return null;
+    if (p.nodeType === 11) return p.host || null;
+    return p.nodeType === 1 ? p : null;
+  };
+  const opaqueHost = (e) => {
+    try { return e.shadowRoot === null && e.localName.includes('-') && !!customElements.get(e.localName); } catch (x) { return true; }
+  };
+  tb.unrest = (i, l, t, r, b) => {
+    const el = tb.nodes[i];
+    if (!shiftObserver) return 'no layout-shift reports';
+    if (!el || !el.isConnected || el.ownerDocument !== document) return 'not in the page';
+    try { noteShifts(shiftObserver.takeRecords()); } catch (e) { return 'no layout-shift reports'; }
+    const now = performance.now();
+    if (now - lastSolid < FRAME_GAP) return 'the page just changed';
+    if (now - lastShift < REST_QUIET) return 'much of the layout shifted';
+    if (now - restlessLayoutAt < REST_QUIET) return 'a restless element changes the layout';
+    const box = el.getBoundingClientRect();
+    const near = (a, c) => Math.abs(Math.round(a) - c) <= 1;
+    if (!near(box.left, l) || !near(box.top, t) || !near(box.right, r) || !near(box.bottom, b)) return 'moved';
+    for (const q of shifts) {
+      if (now - q.at < REST_QUIET && q.l < box.right && q.r > box.left && q.t < box.bottom && q.b > box.top) return 'layout shifted';
+    }
+    const chain = new Set();
+    for (let e = el; e; e = above(e)) {
+      if (restless.has(e)) return 'restless';
+      if (e !== el && opaqueHost(e)) return 'inside a custom element with no open shadow tree';
+      const tag = e.localName;
+      if (tag === 'svg' || tag === 'marquee') return 'inside ' + tag;
+      chain.add(e);
+    }
+    try {
+      for (const e of chain) {
+        for (const anim of e.getAnimations()) if (anim.playState === 'running' && animates(anim, null)) return 'animated';
+      }
+      for (const anim of document.getAnimations()) {
+        if (anim.playState !== 'running') continue;
+        const target = anim.effect && anim.effect.target;
+        if (chain.has(target) || (target && !inFlow(target, now))) continue;
+        if (animates(anim, OWN_BOX_ONLY)) return 'an animation changes the layout';
+      }
+    } catch (x) { return 'animations unknown'; }
+    return '';
+  };
+
   const onMutations = (records) => {
     const now = performance.now();
     let solid = false;
@@ -173,7 +268,10 @@
       let t = r.target;
       if (t && t.nodeType === 3) t = t.parentNode;
       if (!t || typeof t !== 'object') { solid = true; continue; }
-      if (restless.has(t)) continue;
+      if (restless.has(t)) {
+        if (r.type === 'attributes' && inFlow(t, now)) restlessLayoutAt = now;
+        continue;
+      }
       let h = changeLog.get(t);
       if (!h || now - h.last > RESTLESS_GAP || now - lastInput < RESTLESS_GAP) h = { since: now, last: now };
       h.last = now;

@@ -237,6 +237,7 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
 	r.traceWait(t, "for a still screen")
+	gone := false
 	if waited || r.Drv.Seq() != s.Seq {
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err == nil {
@@ -251,10 +252,18 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 			}
 			n, s = n2, s2
 		} else {
+			gone = true
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
 	}
+	if vouch, ok := r.Drv.(restVoucher); ok && !gone && vouch.AtRest(ctx, n.Index, n.Bounds) {
+		return n, s, "", nil
+	}
 	return r.atRest(ctx, sel, n, s, from, full, span)
+}
+
+type restVoucher interface {
+	AtRest(ctx context.Context, index int, bounds ui.Rect) bool
 }
 
 func sameElement(a, b *ui.Node) bool {

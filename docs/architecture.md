@@ -408,6 +408,29 @@ cross-platform swallowed-tap rule of issue #280, which the runner does not act o
 
 ### Web
 
+Before a tap, the engine normally reads its target again at 40 ms intervals until two reads
+agree on where it is. On the web the page can vouch for that itself, and the engine then
+skips those reads (`restVoucher` in `engine/find.go`, `AtRest` in `driver/web/screen.go`,
+`tb.unrest` in `page.js`). The engine asks only about a target found in its latest read,
+never one that went while the screen settled. The page vouches only when all of this holds:
+
+- the page is settled, no finite animation is running, and no solid change was reported in
+  the last 20 ms (a frame whose events may not have arrived yet);
+- the target is in the top document, within 1 px of the bounds the engine read;
+- neither it nor an ancestor (through slots and open shadow roots) has a running animation
+  that changes more than colour or opacity, or has been marked restless; no ancestor is a
+  registered custom element without an open shadow root, an `svg` or a `marquee`, whose
+  motion the page cannot see;
+- no layout-shift report of the last 150 ms names a rectangle that overlaps the target, and
+  none was too large to attribute (five or more sources);
+- no running animation on an in-flow element elsewhere in the document changes layout
+  (anything but transforms, colour and opacity), since Chrome reports no shift under 3 px a
+  frame; an absolutely or fixed positioned element pushes nothing, so its animations pass;
+- no restless in-flow element changed its style in the last 150 ms.
+
+Anything else (an element in a frame, a pulsing button, a list still moving) falls back to
+the reads. Android and iOS have no voucher and always read.
+
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
