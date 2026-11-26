@@ -60,6 +60,7 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Bench.Scenario.Translucent" />
         <activity android:name=".SlowListActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".RelabelActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <!-- 3-5 -->
         <activity android:name=".PermissionsActivity" android:exported="false" android:screenOrientation="portrait" />

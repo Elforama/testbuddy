@@ -193,6 +193,7 @@ Everything here is late, slow or blocks the UI thread, by fixed amounts.
 | Jank button | `jank_button` | "Block UI" → blocks the main thread for **700 ms** (busy loop), then sets `jank_text` "Unblocked N" (N = taps). |
 | Jank text | `jank_text` | "Not blocked" |
 | Slow list | `slow_list_open` | "Slow list" → opens a screen with a list "Slow item 1"…"Slow item 20" (ids `slow_item_N`) that loads **2500 ms** after opening (a spinner `slow_list_spinner` until then), and more rows "Slow item 21"…"Slow item 40" **2500 ms** after scrolling to the end (spinner at the end meanwhile). Back returns. |
+| Relabel | `relabel_open` | "Relabel" → opens a screen (title `relabel_title` "Relabel") with a button `relabel_search` "Search" that, **6000 ms** after the screen opens, takes the label "Search for Roof Repair" in place, then "Search for House Cleaner", "Search for Plumber", … every **3000 ms** (issue #421: a label that changed after the caller's last look). Tap → `relabel_taps` "Search taps: N". Back returns. |
 
 ## 3. Permissions
 

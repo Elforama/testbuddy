@@ -48,6 +48,9 @@ struct SlowScenario: View {
                 Button("Slow list") { router.path.append(.slowList) }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("slow_list_open")
+                Button("Relabel") { router.path.append(.relabel) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("relabel_open")
             }
             }
 
@@ -158,6 +161,31 @@ struct SlowListView: View {
         _ = after(2500) {
             count = 40
             loadingMore = false
+        }
+    }
+}
+
+struct RelabelView: View {
+    @State private var label = "Search"
+    @State private var taps = 0
+    private static let hints = ["Roof Repair", "House Cleaner", "Plumber"]
+
+    var body: some View {
+        SubScreen(title: "Relabel", titleID: "relabel_title") {
+            Button(label) { taps += 1 }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("relabel_search")
+            status("Search taps: \(taps)", "relabel_taps")
+            Spacer()
+        }
+        .task {
+            guard (try? await Task.sleep(for: .milliseconds(6000))) != nil else { return }
+            var shown = 0
+            while !Task.isCancelled {
+                label = "Search for \(Self.hints[shown % Self.hints.count])"
+                shown += 1
+                guard (try? await Task.sleep(for: .milliseconds(3000))) != nil else { return }
+            }
         }
     }
 }

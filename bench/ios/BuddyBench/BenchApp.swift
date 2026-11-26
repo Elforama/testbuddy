@@ -41,6 +41,7 @@ enum Route: Hashable {
     case detail(Int)
     case live
     case slowList
+    case relabel
     case level(Int)
     case navForm
     case list(ListKind)
@@ -53,6 +54,7 @@ enum Route: Hashable {
         case .detail(let item): DetailView(item: item)
         case .live: LiveView()
         case .slowList: SlowListView()
+        case .relabel: RelabelView()
         case .level(let depth): LevelView(depth: depth)
         case .navForm: NavFormView()
         case .list(let kind): kind.screen
