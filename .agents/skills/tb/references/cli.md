@@ -90,6 +90,9 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. `--scale` (also on `tb look`) is from 0 to 1; 0 and 1 mean full size. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
+| `tb save --path <name> [-d alice]` | Write the steps that passed as a path to the screen the session is on: the flow `paths/<app>/<name>.yaml` under the directory tb runs in (`<app>`: the app id; for the web, the URL's host and port), plus a last `assertVisible` of the screen's first heading, else its first text. Prints that landmark (edit the line if another text is better) and the preview's warnings. Saving a name again replaces it; delete the file to remove it. |
+| `tb go <name> [-d alice] [-e K=V] [--json]` | Run that path in the open session, as `tb do 'runFlow: paths/<app>/<name>.yaml'` does: `arrived at "<landmark>"`, the step, then the screen. Recorded as one `runFlow` step, which a flow saved later points at the path file. On failure the steps before it ran: go on from the screen shown. |
+| `tb go [-d alice]` | List the paths saved for the session's app, each with its landmark. `tb open` ends with their names when there are any. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
@@ -97,7 +100,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb mark [-d DEVICE] <text>...` | Send events to a running `tb test --record --annotate` (see `--events-port`): each shows in the videos' event log at the time tb got it; several texts are one burst. `tb mark -` reads a line an event. `--url` names the endpoint (default `$TB_EVENTS_URL`, else the running run's). |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
-| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
+| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `go`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
 
 ### Preview and replay

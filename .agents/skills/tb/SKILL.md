@@ -97,3 +97,15 @@ tb replay flows/example.yaml -d DEVICE --json
 
 For a short flow, writing the YAML by hand after exploring with `tb do` is just as good:
 then `tb check --lint` and `tb test`.
+
+### Paths: get back to a screen in one call
+
+When you reach a screen you will need again (checkout, settings, the third step of a form),
+save the way there: `tb save --path checkout -d explorer`. It writes the recorded steps as
+an ordinary flow, `paths/<app>/checkout.yaml` under the directory tb runs in (`<app>` is the
+app id, or the URL's host for the web), ending with an `assertVisible` of the screen's
+heading: edit that line if another text tells the screen apart better. In any later session
+`tb go checkout` runs it and prints `arrived at "..."` and the screen; `tb go` alone lists
+the app's paths, and `tb open` names them. Start the recording with `launchApp` so the path
+works from anywhere. When the app changed and the path fails, go on by hand from the screen
+shown and save it again.

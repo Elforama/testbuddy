@@ -28,6 +28,10 @@ Explore an app:
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
+- tb save --path checkout [-d alice]   on a screen you will need again: writes them as paths/<app>/checkout.yaml,
+                                  ending with an assertVisible of the screen's heading (edit it if another text is better)
+- tb go checkout [-d alice]       in any later session: runs that path and shows the screen ("arrived at ...");
+                                  tb go alone lists the app's paths, and tb open names them
 - TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
   (not with -p; with several devices connected and none named, tb asks which)

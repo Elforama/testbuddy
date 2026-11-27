@@ -194,6 +194,7 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("look", s.look)
 	srv.Handle("locate", s.locate)
 	srv.Handle("do", s.do)
+	srv.Handle("go", s.goPath)
 	srv.Handle("watch", s.watch)
 	srv.Handle("shot", s.shot)
 	srv.Handle("log", s.log)
@@ -636,7 +637,7 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 	if name := s.nameOf(d); name != "" {
 		who = name + ": " + who
 	}
-	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond))}
+	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond)) + s.pathsLine(ctx, d, req.Cwd)}
 }
 
 func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {

@@ -99,6 +99,16 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
+A named path is a flow file and nothing more: `tb save --path <name>` writes the recording to
+`paths/<app>/<name>.yaml` under the caller's directory (the app id; for the web, the URL's
+host and port, with other characters as `_`) and adds an `assertVisible` of a landmark read
+from the current screen: the first heading, else the first text that is not a control, never
+a field's contents. `tb go <name>` is the daemon's `do` with a `runFlow` of that file, so it
+runs, reports and records as that step does; it adds the `arrived at` line from the file's
+last step. There is no index: `tb go` and `tb open` list the directory. A recorded
+`runFlow: paths/...` step is written relative to the file being saved, since a flow resolves
+`runFlow` from its own directory and `tb do` from the caller's (`internal/session/paths.go`).
+
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
 the ordinary test runner. It requires a single-device flow whose first executed step is a

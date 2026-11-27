@@ -442,6 +442,8 @@ tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save --preview -d alice --json              # inspect the export and its warnings
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
+tb save --path inbox                          # or as a path to this screen: paths/<app>/inbox.yaml
+tb go inbox                                   # any later session: back on that screen in one call
 tb close -d alice                             # release the device (tb test takes it from your own idle session by itself)
 tb replay flows/sign-in.yaml -d DEVICE --json  # verify once on a specific device
 ```
@@ -490,7 +492,7 @@ for the recording and replay lifecycle, host components, and platform agents.
 
 For any shell-capable coding agent, `tb agent-guide` prints a portable quick reference.
 See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
-For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `close`).
+For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `go`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
 Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
