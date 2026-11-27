@@ -34,6 +34,7 @@ func (s *Service) log(ctx context.Context, req daemon.Request, send func(daemon.
 type saveArgs struct {
 	devArgs
 	Path    string `json:"path"`
+	Name    string `json:"name"`
 	App     string `json:"app"`
 	Preview bool   `json:"preview"`
 }
@@ -61,6 +62,11 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		}
 	}
 	path := a.Path
+	if a.Name != "" {
+		if path, err = pathFile(req.Cwd, app, a.Name); err != nil {
+			return fail(2, "%v", err)
+		}
+	}
 	if path == "" {
 		if !a.Preview {
 			return fail(2, "a path is required to save a flow")
@@ -78,18 +84,33 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		quoted, _ := json.Marshal(app)
 		header = "url: " + string(quoted)
 	}
-	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(d.steps, "\n"))
+	steps := rebasePathSteps(d.steps, req.Cwd, filepath.Dir(path))
+	var landmark, missing string
+	if a.Name != "" {
+		if err := checkPathSave(d.steps, req.Cwd, path, a.Name); err != nil {
+			return fail(2, "%v", err)
+		}
+		var arrival string
+		if arrival, landmark, missing = s.arrivalStep(ctx, d); arrival != "" {
+			steps = append(steps, arrival)
+		}
+	}
+	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(steps, "\n"))
 	needs := d.replayNeeds(path)
 	if a.Preview {
-		return previewRecording(path, body, len(d.steps), needs)
+		return previewRecording(path, body, len(steps), needs)
 	}
+	_, statErr := os.Stat(path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fail(1, "%v", err)
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return fail(1, "%v", err)
 	}
-	text := fmt.Sprintf("saved %d commands to %s\n", len(d.steps), path)
+	if a.Name != "" {
+		return savedPath(d, a.Name, path, landmark, missing, pathSteps(d.steps, req.Cwd), len(steps), statErr == nil, recordingWarnings(path, body))
+	}
+	text := fmt.Sprintf("saved %d commands to %s\n", len(steps), path)
 	if needs != "" {
 		text += needs + "\n"
 	}
@@ -102,11 +123,8 @@ type recordingWarning struct {
 	Message string `json:"message"`
 }
 
-func previewRecording(path, body string, steps int, needs string) daemon.Response {
+func recordingWarnings(path, body string) []recordingWarning {
 	warnings := []recordingWarning{}
-	if needs != "" {
-		warnings = append(warnings, recordingWarning{Code: "secret_variables", Message: needs})
-	}
 	f, err := flow.ParseBytes(path, []byte(body))
 	if err != nil {
 		warnings = append(warnings, recordingWarning{Code: "invalid_flow", Message: err.Error()})
@@ -119,6 +137,15 @@ func previewRecording(path, body string, steps int, needs string) daemon.Respons
 			warnings = append(warnings, recordingWarning{w.Code, w.Step, w.Message})
 		}
 	}
+	return warnings
+}
+
+func previewRecording(path, body string, steps int, needs string) daemon.Response {
+	warnings := []recordingWarning{}
+	if needs != "" {
+		warnings = append(warnings, recordingWarning{Code: "secret_variables", Message: needs})
+	}
+	warnings = append(warnings, recordingWarnings(path, body)...)
 	var out strings.Builder
 	for _, w := range warnings {
 		prefix := "# Warning: "

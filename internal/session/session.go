@@ -202,7 +202,7 @@ func (s *Service) Register(srv *daemon.Server) {
 
 func (s *Service) handlers() map[string]daemon.Handler {
 	hs := map[string]daemon.Handler{"devices": s.devices, "open": s.open, "close": s.close, "look": s.look,
-		"locate": s.locate, "do": s.do, "watch": s.watch, "shot": s.shot, "log": s.log, "applog": s.applog, "save": s.save,
+		"locate": s.locate, "do": s.do, "go": s.goPath, "watch": s.watch, "shot": s.shot, "log": s.log, "applog": s.applog, "save": s.save,
 		"clear": s.clear, "yield": s.yield}
 	for cmd, h := range hs {
 		hs[cmd] = s.hiding(h)
@@ -639,7 +639,7 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 	if name := s.nameOf(d); name != "" {
 		who = name + ": " + who
 	}
-	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond))}
+	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond)) + s.pathsLine(ctx, d, req.Cwd)}
 }
 
 func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {

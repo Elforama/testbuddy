@@ -51,19 +51,26 @@ func (d *Dev) secretNames() map[string]string {
 
 func (d *Dev) replayNeeds(path string) string {
 	d.stepsMu.Lock()
-	defer d.stepsMu.Unlock()
 	steps := strings.Join(d.steps, "\n")
+	d.stepsMu.Unlock()
+	vars := d.secretVars(steps)
+	if len(vars) == 0 {
+		return ""
+	}
+	return "Secret values are not saved. Pass them on replay: tb replay " + path + " -d DEVICE" + strings.Join(vars, "")
+}
+
+func (d *Dev) secretVars(steps string) []string {
+	d.stepsMu.Lock()
+	defer d.stepsMu.Unlock()
 	var vars []string
 	for name := range d.secrets {
 		if strings.Contains(steps, "${"+name+"}") {
 			vars = append(vars, " -e "+name+"=...")
 		}
 	}
-	if len(vars) == 0 {
-		return ""
-	}
 	sort.Strings(vars)
-	return "Secret values are not saved. Pass them on replay: tb replay " + path + " -d DEVICE" + strings.Join(vars, "")
+	return vars
 }
 
 func spellings(value string) []string {

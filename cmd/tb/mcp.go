@@ -54,8 +54,11 @@ var mcpTools = []mcpTool{
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
 	{"locate", "Inspect all matches and the runner's pick for a selector on the current screen, without acting.", schema(map[string]any{
 		"device": devProp, "selector": map[string]any{"type": "string", "description": "text, @ref, or a YAML selector such as {id: login}"}}, "selector")},
-	{"save_flow", "Save the commands that passed as a flow file.", schema(map[string]any{
-		"device": devProp, "path": map[string]any{"type": "string"}}, "path")},
+	{"save_flow", "Save the commands that passed as a flow file (path), or as a named path back to this screen (name).", schema(map[string]any{
+		"device": devProp, "path": map[string]any{"type": "string"},
+		"name": map[string]any{"type": "string", "description": "instead of path: writes paths/<app>/<name>.yaml, ending with an assertVisible of this screen's heading; go runs it"}})},
+	{"go", "Run a named path (saved with save_flow name) to get back to its screen in one call; without name, list the app's paths.", schema(map[string]any{
+		"device": devProp, "name": map[string]any{"type": "string"}})},
 	{"app_log", "The app's own error log (Android, iOS simulator): a crash with its stack, then its error lines. A failed run already shows the crash and the last lines.", schema(map[string]any{
 		"device": devProp, "since": map[string]any{"type": "integer", "description": "seconds back (default 60)"}})},
 	{"close", "Disconnect a device.", schema(map[string]any{"device": devProp})},
@@ -200,7 +203,7 @@ func mcpReply(ctx context.Context, req mcpRequest) map[string]any {
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "testbuddy", "version": version},
 			"instructions": "Drive Android, iOS or Chrome: open (optional), look to read the screen (@refs), run flow commands " +
-				"(answers include what changed), wait for text, save_flow to keep a working flow. Run whole suites with the CLI: tb test.",
+				"(answers include what changed), wait for text, save_flow to keep a working flow (or, with name, a path back to this screen: go runs it). Run whole suites with the CLI: tb test.",
 		}
 	case "ping":
 		reply["result"] = map[string]any{}
@@ -312,7 +315,13 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		resp = call("do", map[string]any{"device": str("device"),
 			"commands": fmt.Sprintf("- extendedWaitUntil:\n    %s: %s\n    timeout: %d\n", key, sel, t)})
 	case "save_flow":
-		resp = call("save", map[string]any{"device": str("device"), "path": str("path")})
+		params := map[string]any{"device": str("device"), "path": str("path")}
+		if name := str("name"); name != "" {
+			params["name"] = name
+		}
+		resp = call("save", params)
+	case "go":
+		resp = call("go", map[string]any{"device": str("device"), "name": str("name")})
 	case "locate":
 		resp = call("locate", map[string]any{"device": str("device"), "selector": str("selector")})
 		if len(resp.JSON) > 0 {

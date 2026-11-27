@@ -105,6 +105,21 @@ lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Androi
 `logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
 SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
 
+A named path is a flow file and nothing more: `tb save --path <name>` writes the recording to
+`paths/<app>/<name>.yaml` under the caller's directory (the app id; for the web, the URL's
+host and port, with other characters as `_`) and adds an `assertVisible` of a landmark read
+from the current screen: the first heading, else the first text that is not a control, never
+a field's contents. `tb go <name>` is the daemon's `do` with a `runFlow` of that file, so it
+runs, reports and records as that step does; it adds the `arrived at` line from the file's
+last step when that is a required `assertVisible`. The path runs in the session's app
+whatever its header says, and restarts the app when it begins with `launchApp`. There is no
+index: `tb go` and `tb open` list the directory. Saving refuses (exit 2, nothing written) a
+path that would run itself, directly or through another path, and a recording that would
+replace an existing path without starting at `launchApp` or another path; the landmark goes
+through the secrets replacer, and is left out when it still shows a hidden value. A recorded
+`runFlow: paths/...` step is written relative to the file being saved, since a flow resolves
+`runFlow` from its own directory and `tb do` from the caller's (`internal/session/paths.go`).
+
 `tb do --secret NAME[=value]` (MCP `run`: `secrets`) defines `${NAME}` like `-e`, and the
 session keeps the value in memory only, until it closes. Two replacements keep its text out
 of what tb shows and stores (`internal/session/secrets.go`): the steps a `tb do` records get

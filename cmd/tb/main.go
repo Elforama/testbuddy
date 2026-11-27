@@ -63,6 +63,10 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          save a screenshot
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
+  tb save --path <name> [-d alice]       save them as a path to this screen: paths/<app>/<name>.yaml,
+                                         ending with an assertVisible of the screen's heading
+  tb go <name> [-d alice]                run that path in any later session, and show the screen
+  tb go [-d alice]                       list the paths saved for the session's app
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step; a failure
                                          names the step ("step 3 of 7") and how to finish
   tb replay <file.yaml> -d DEVICE --from 4
@@ -154,6 +158,8 @@ func main() {
 		code = agentCall("shot", rest, shotFlags)
 	case "save":
 		code = cmdSave(rest)
+	case "go":
+		code = cmdGo(rest)
 	case "replay":
 		code = cmdReplay(rest)
 	case "log":
@@ -602,9 +608,9 @@ func cmdWait(argv []string) int {
 }
 
 func cmdSave(argv []string) int {
-	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
+	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]\n       tb save --path <name> [-d device] [--app id]   a path for tb go: paths/<app>/<name>.yaml"
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"app", "a"}, textFlag},
-		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
+		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"path"}, textFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, saveUsage)
@@ -615,6 +621,15 @@ func cmdSave(argv []string) int {
 		return 0
 	}
 	preview := a.flag("preview")
+	if name := a.str("path"); name != "" {
+		if len(a.pos) > 0 || preview || a.flag("json") {
+			fmt.Fprintln(os.Stderr, saveUsage)
+			return 2
+		}
+		req := map[string]any{"device": a.str("device"), "app": a.str("app"), "name": name}
+		noWait(a, req)
+		return callDaemon("save", req)
+	}
 	if len(a.pos) > 1 || (!preview && (len(a.pos) != 1 || a.flag("json"))) {
 		fmt.Fprintln(os.Stderr, saveUsage)
 		return 2
