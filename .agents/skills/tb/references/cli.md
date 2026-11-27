@@ -82,7 +82,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
 | `tb open -p PLATFORM \| -d DEVICE [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
-| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements, `crash` (when the app crashed) and `log` (the app's last error lines). |
+| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`, and on the failed step a `reason`), and on failure the `screen`, the `query` that matched nothing (the selector's text, or its id when it has no text) the `similar` elements, `crash` (when the app crashed) and `log` (the app's last error lines). |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
 | `tb locate [-d alice] [--json] <text, @ref or {selector}>` | Every element a selector matches on the current screen and the one a tap would pick (`chosen`): check a selector is unambiguous before saving it. |
@@ -117,6 +117,12 @@ childOf: {containsChild: "Eggs"}}`, `{text: "Edit", below: "Eggs"}`, `{childOf: 
 "toolbar"}}`) when the last listed screen is still current; otherwise as typed. The first of
 several matches gets the same treatment: a bare `"Edit"` that finds it only by coming first
 is kept only when nothing stable tells it apart.
+
+In `tb do`, an id can be written the way `tb look` prints it: `tapOn: #login` is
+`tapOn: {id: login}`. It works as the whole value of a command or key that takes an
+element (`tapOn`, `doubleTapOn`, `longPressOn`, `assertVisible`, `assertNotVisible`,
+`copyTextFrom`, `visible`, `notVisible`, `element`); anywhere else a `#` still starts a YAML
+comment. It is saved as the id selector.
 
 Replay requires a single-device flow whose first executed command is a required
 `launchApp` with app restart enabled. `launchApp: {clearState: true}` resets app data at
@@ -193,7 +199,21 @@ The same listing as data:
 
 Each step prints `ok` or `FAILED` and its time, then the change: `+` new elements, `~`
 changed ones, `-` gone ones, or the whole new screen when most of it changed. A failed step
-prints the screen and a `similar:` line with near matches.
+prints the error, then a `similar:` line: up to 5 elements on the screen now whose text or id
+shares a word of 4+ letters with the selector that matched nothing (its text, or its id when
+it has no text), or has a word one typo away from one of its words of 5+ letters; for a tap
+as for a failed `assertVisible` or `extendedWaitUntil: {visible: ...}`. Each is a
+`tb look` line, so retry with its `@ref`, text or `#id`; `partly off-screen` and
+`covered by ...` on it say why it could not be used as it is.
+
+With `--json`, the failed step carries a `reason`:
+
+| `reason` | Means | Try |
+|---|---|---|
+| `not_found` | The selector matched nothing on the screen. | A `similar` element; else `tb look`. |
+| `screen_changed` | The element of your last look was replaced, the app left the foreground, or the screen changed while tb scrolled back to it. | `tb look`, then act on the new screen. |
+| `assertion_failed` | An assertion or `extendedWaitUntil` condition was false. | A `similar` element if it was a visibility check; else the app is in another state. |
+| `other` | Anything else (script error, device error, bad value, a screen tb could not read): read `error`. | |
 
 A failed `tb do` or `tb wait` also reads the app's own log for the time the command took
 (Android: logcat; iOS simulator: the unified log), so an app bug can be told from a test bug:

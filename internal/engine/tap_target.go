@@ -84,7 +84,7 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	if errors.As(err, &left) {
 		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
 			"Element not found: %s (it went out of sight while moving, and %s while scrolling %s to bring it back)",
-			sel.Describe(), left.why, dir)}, Screen: left.s, Query: sel.Text, left: true}
+			sel.Describe(), left.why, dir)}, Screen: left.s, Query: sel.Text, ID: sel.ID, left: true}
 	}
 	if err != nil {
 		var fe *FlowError
@@ -94,7 +94,7 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 		s, _ := r.read(ctx)
 		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
 			"Element not found: %s (it went out of sight while moving, and scrolling %s for %s did not bring it back)",
-			sel.Describe(), dir, budget)}, Screen: s, Query: sel.Text}
+			sel.Describe(), dir, budget)}, Screen: s, Query: sel.Text, ID: sel.ID}
 	}
 	n, s, _, err := r.findStableAway(ctx, sel, time.Second, settle)
 	return n, s, err

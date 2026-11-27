@@ -151,11 +151,11 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 		if replaced.reread && replaced.see(s) && time.Now().Before(deadline) {
 			msg := replaced.message(sel)
 			r.tracef("not found: %s, after %s and %d reads: %s", sel.Describe(), since(start), reads, msg)
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: msg}, Screen: s, Query: sel.Text}
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: msg}, Screen: s, Query: sel.Text, ID: sel.ID, moved: true}
 		}
 		if away.seen(s) && time.Now().Before(deadline) {
 			r.tracef("not found: %s, after %s and %d reads: %s for %s", sel.Describe(), since(start), reads, away.what, since(away.since))
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, ID: sel.ID, away: away.message()}
 		}
 		if !time.Now().Before(deadline) {
 			if r.stallGrace(&deadline, timeout, start) {
@@ -173,7 +173,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			if sim := similarDesc(s, sel.Text); sim != "" {
 				r.tracef("similar on screen: %s", sim)
 			}
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, ID: sel.ID, away: away.message()}
 		}
 		waited = true
 		silence, err := w.Wait(ctx, s.Seq, replaced.wake(away.wake(deadline)), firstChange)
@@ -505,7 +505,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	away := r.awayWatch()
 	cannotCheck := func(s *ui.Screen) error {
 		return &NotFound{FlowError: FlowError{Msg: "Could not check that " + sel.Describe() + " is not visible"},
-			Screen: s, Query: sel.Text, away: away.message()}
+			Screen: s, Query: sel.Text, ID: sel.ID, away: away.message(), blind: true}
 	}
 	for {
 		s, err := r.readUntil(ctx, deadline)
@@ -656,7 +656,10 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 		_, _, _, err = r.findWithChangeRead(ctx, sel, timeout, true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
-			return false, awayErr(nf, strict)
+			if strict {
+				return false, nf
+			}
+			return false, nil
 		}
 		if err != nil {
 			return false, err
