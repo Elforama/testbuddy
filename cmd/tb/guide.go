@@ -20,7 +20,7 @@ Explore an app:
                                   label. --json: the same as JSON, plus covered, offscreen,
                                   scroll (vertical/horizontal) and tappable per element
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
-                                  runs flow commands (refs allowed); prints ok/FAILED per command,
+                                  runs flow commands (@ref, or 'tapOn: #id' as look prints it); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
 - tb do --secret PW 'inputText: ${PW}'   types a password or code that tb never shows or saves:
                                   PW comes from the environment (or --secret PW=value) and is 6
