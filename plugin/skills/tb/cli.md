@@ -100,6 +100,13 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
 
+### Set up
+
+| Command | What it does |
+|---|---|
+| `tb doctor [--json]` | Check the setup, one line per check: `ok <what>`, or `problem <what>: <the fix>`, then `ready: android, ios, web` (with `; fix: <what is broken>` when something is) or `not ready: <why>`. Checks adb and each Android device's state (`device`, `unauthorized`, `offline`), Xcode and the booted simulators (off a Mac: `ok ios needs a Mac`; with only the command line tools: `problem xcode not installed`), the Chrome tb would drive, and the daemon (running or not, and whether it is this tb's build; another build's is an `ok` line, since the next tb command replaces it). It boots, stops and changes no device, browser or daemon; it runs `adb devices`, which starts adb's own server when none is running. Exit 0 when at least one platform is usable and nothing is broken; a platform that is not set up is a problem line but not broken; an unusable device and a failing `adb devices` are. `--json`: `ok`, `usable`, and `checks` (`name`, `ok`, `detail`, `fix`, `broken`). |
+| `tb init [--dry-run]` | Register tb's MCP server with the coding agents on PATH, each through its own command: `claude mcp add --scope user tb -- <tb> mcp`, `codex mcp add tb -- <tb> mcp`, `gemini mcp add --scope user tb <tb> mcp` (`<tb>`: the `tb` on PATH when that is the one that ran, else its full path; a temporary `go run` build is refused, exit 2). One line per client: `added`, `skipped` (not installed, or it already has an MCP server `tb`; Claude Code also when the test-buddy plugin is installed) or `failed`. Ends with the `tb doctor` checks. `--dry-run` prints the commands and changes nothing. Exit 1 only when a client's command failed. |
+
 ### Preview and replay
 
 Preview JSON contains `yaml`, `steps`, and `warnings`. Each warning has a `code` and
