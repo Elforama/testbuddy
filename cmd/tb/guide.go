@@ -20,6 +20,8 @@ Explore an app:
                                   does, and prints its screen: the launch is the first recorded step.
                                   Without --app it attaches to the device as it is, launches nothing and
                                   says what is in front. Reset app data: tb do 'launchApp: {clearState: true}'
+                                  (a second recorded launch: tb clear before it keeps the saved flow to one).
+                                  --app with another app later in the session records that launch with its app
 - tb look [-d alice]              screen as one line per element: @ref Kind "label" #id state;
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.
                                   where layout matters (unindented lines stack top to bottom);

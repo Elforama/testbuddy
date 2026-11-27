@@ -103,7 +103,8 @@ tb replay flows/save-item.yaml -d emulator-5554 --json
 1. Open the device with `--app`: that launches the app (web: loads the URL), prints its
    screen and records `launchApp` as the first step, so no `launchApp` call is needed. App
    data is kept; run `tb do 'launchApp: {clearState: true}'` only when the test needs a fresh
-   install state. Leave `--app` out to attach to the device as it is: nothing is launched,
+   install state: it records a second launch, so run `tb clear` before it to keep the saved
+   flow to one. Leave `--app` out to attach to the device as it is: nothing is launched,
    and the reply says what is in front.
 2. `tb look`, then `tb do` each action with the assertion that proves it. Read the diff
    `tb do` prints (`+` new, `~` changed, `-` gone) instead of looking again. `@refs` come

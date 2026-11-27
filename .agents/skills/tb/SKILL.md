@@ -85,7 +85,8 @@ tb replay flows/example.yaml -d DEVICE --json
    That launches the app (web: loads the URL), prints its screen and records `launchApp` as
    the first step: no `tb look` or `launchApp` is needed. App data is kept; run
    `tb do 'launchApp: {clearState: true}'` only when the test calls for clearing data on the
-   selected target. Leave `--app` out to attach to the device as it is: nothing is launched,
+   selected target: it records a second launch, so run `tb clear` before it to keep the saved
+   flow to one. Leave `--app` out to attach to the device as it is: nothing is launched,
    and the reply says what is in front.
 2. Look, then `tb do` each action with the assertion that proves it. Refs come from the
    latest listing and are saved as stable selectors. `tb locate` shows every match of a

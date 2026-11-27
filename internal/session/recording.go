@@ -54,6 +54,9 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	defer d.mu.Unlock()
 	app := a.App
 	if app == "" {
+		app = d.flowApp
+	}
+	if app == "" {
 		app = d.AppID
 	}
 	if app == "" {
@@ -176,5 +179,6 @@ func (s *Service) clear(ctx context.Context, req daemon.Request, send func(daemo
 	d.stepsMu.Lock()
 	d.steps = nil
 	d.stepsMu.Unlock()
+	d.flowApp = ""
 	return daemon.Response{OK: true, Text: "recording cleared\n"}
 }

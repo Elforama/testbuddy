@@ -507,7 +507,9 @@ android 1080x2400 com.android.settings, 11 elements
 `tb open --app` launches the app (web: loads the URL) as a `launchApp` step does and prints
 its screen; that launch is the first recorded step. Leave `--app` out to attach to the device
 as it is: nothing is launched, and the reply says what is in front. To reset app data, run
-`tb do 'launchApp: {clearState: true}'`.
+`tb do 'launchApp: {clearState: true}'`: that records a second launch, and `tb clear` before
+it keeps the saved flow to one. Opening another app later in the session records that launch
+with its app (`- launchApp: {appId: ...}`); the saved flow keeps the first app as its `appId:`.
 
 `tb do` prints a line per command (`ok` / `FAILED`, with timing), then what changed:
 `+` new elements, `~` changed, `-` gone, or the whole new screen when most of it is new.
@@ -542,8 +544,9 @@ tells it apart.
 
 `tb replay` parses one single-device flow and runs it once on an explicit device. The first
 executed step must be a required `launchApp` that restarts the app. `tb open --app` records
-that `launchApp`, which relaunches with existing app data; run
-`tb do 'launchApp: {clearState: true}'` to reset app data at launch. For a headless web flow, use `-d web --headless`. Replay uses the ordinary test
+that `launchApp`, which relaunches with existing app data; run `tb clear`, then
+`tb do 'launchApp: {clearState: true}'` to record a launch that resets app data instead
+(without `tb clear` the flow holds both launches). For a headless web flow, use `-d web --headless`. Replay uses the ordinary test
 runner and writes its usual failure artifacts. See [architecture](docs/architecture.md)
 for the recording and replay lifecycle, host components, and platform agents.
 

@@ -64,7 +64,10 @@ For role selection and synchronization, see [multi-device flows](multi-device.md
 `tb open` connects a named session. With `--app` it then runs a `launchApp` step through
 the same path as `tb do`, under the session's lock: the app is launched as a saved flow
 would launch it, the reply carries the step's result and the screen, and the step is the
-first one recorded. A launch that fails leaves the session open and exits 1. Without
+first one recorded. A launch that fails leaves the session open, with the app it had, and
+exits 1. The recording belongs to the app of its first step (the saved flow's header): a
+later `--app` with another app is recorded with that app spelled out, as is a bare
+`launchApp` run while it is the session's app, until `tb clear` starts a new recording. Without
 `--app` nothing is launched or recorded, and the reply names the app or page in front.
 `tb look` creates a compact listing with `@refs`.
 `tb do` expands refs into flow selectors against the latest listed screen, then uses the
