@@ -39,9 +39,12 @@ Run tests:
 
 Drive a device (for AI agents and people; the device stays connected between calls):
   tb devices                             list devices, and which are free or in use (and by whom)
-  tb open [-d DEVICE] [--name alice] [--app ID]
-                                         connect to a device, optionally naming it
-  tb open -p web --headless --app URL    open a headless Chrome session
+  tb open [-d DEVICE] [--name alice] --app ID
+                                         connect to a device, launch the app and show its
+                                         screen (as a launchApp step: the first one recorded)
+  tb open -p web --headless --app URL    the same in headless Chrome: loads the page
+  tb open [-d DEVICE] [--name alice]     without --app: attach to the device as it is, launch
+                                         nothing, and say what is in front
   tb look [-d alice] [--shot] [--all] [--json]
                                          what is on screen: one line per element, with @refs,
                                          indented where layout matters (rows, lists),

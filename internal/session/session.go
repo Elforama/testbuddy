@@ -628,18 +628,52 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	if a.App != "" {
-		if err := s.lockOpen(d, req, send); err != nil {
-			return fail(1, "%v", err)
-		}
-		d.AppID = a.App
-		d.mu.Unlock()
-	}
 	who := d.Info.String()
 	if name := s.nameOf(d); name != "" {
 		who = name + ": " + who
 	}
-	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond)) + s.pathsLine(ctx, d, req.Cwd)}
+	connected := fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond))
+	if a.App == "" {
+		return daemon.Response{OK: true, Text: connected + s.frontLine(ctx, d) + s.pathsLine(ctx, d, req.Cwd)}
+	}
+	if err := s.lockOpen(d, req, send); err != nil {
+		return fail(1, "%v", err)
+	}
+	d.AppID = a.App
+	d.last = nil
+	d.mu.Unlock()
+	resp := s.launch(ctx, d, a, req, send)
+	if resp.Exit != 0 {
+		if !strings.HasSuffix(resp.Text, "\n") {
+			resp.Text += "\n"
+		}
+		resp.Text += fmt.Sprintf("the session is open, but %s did not launch: fix that, then tb open --app again\n", a.App)
+	}
+	resp.Text = connected + resp.Text + s.pathsLine(ctx, d, req.Cwd)
+	return resp
+}
+
+func (s *Service) launch(ctx context.Context, d *Dev, a openArgs, req daemon.Request, send func(daemon.Response)) daemon.Response {
+	var wait struct {
+		NoWait bool `json:"no_wait"`
+	}
+	json.Unmarshal(req.Args, &wait)
+	req.Cmd = "do"
+	req.Args, _ = json.Marshal(map[string]any{"device": d.Info.Serial, "owner": a.Owner, "no_wait": wait.NoWait,
+		"app": a.App, "commands": "- launchApp\n"})
+	return s.do(ctx, req, send)
+}
+
+func (s *Service) frontLine(ctx context.Context, d *Dev) string {
+	if !d.mu.TryLock() {
+		return ""
+	}
+	front, err := d.Drv.Foreground(ctx)
+	d.mu.Unlock()
+	if err != nil || front == "" {
+		return ""
+	}
+	return fmt.Sprintf("in front: %s (nothing was launched: --app does that)\n", front)
 }
 
 func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {

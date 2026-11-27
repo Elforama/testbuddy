@@ -39,8 +39,8 @@ var devProp = map[string]any{"type": "string", "description": "device name/seria
 
 var mcpTools = []mcpTool{
 	{"devices", "List devices and open sessions.", schema(map[string]any{})},
-	{"open", "Connect to a device, optionally naming it (e.g. alice) for multi-device work.", schema(map[string]any{
-		"device": devProp, "name": map[string]any{"type": "string"}, "app": map[string]any{"type": "string", "description": "default app ID, or a URL for web"},
+	{"open", "Connect to a device, optionally naming it (e.g. alice) for multi-device work. With app: launches it (as a launchApp step does, recorded as the first step) and returns its screen, so no look or launchApp is needed. Without app: attaches to the device as it is, launches nothing, and says what is in front.", schema(map[string]any{
+		"device": devProp, "name": map[string]any{"type": "string"}, "app": map[string]any{"type": "string", "description": "app ID to launch, or the URL to load for web; leave out to keep the device as it is"},
 		"platform": map[string]any{"type": "string", "enum": []string{"android", "ios", "web"}},
 		"headless": map[string]any{"type": "boolean", "description": "start Chrome without a window; web only"}})},
 	{"look", "The screen: one line per element with @refs, indented under row:/grid:/scrollable headers where layout matters; scroll areas say what is out of view (12 more below); * marks elements new since the last look/run. json returns the same as JSON. screenshot adds a small image.", schema(map[string]any{
@@ -202,7 +202,7 @@ func mcpReply(ctx context.Context, req mcpRequest) map[string]any {
 			"protocolVersion": "2025-06-18",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "testbuddy", "version": version},
-			"instructions": "Drive Android, iOS or Chrome: open (optional), look to read the screen (@refs), run flow commands " +
+			"instructions": "Drive Android, iOS or Chrome: open with app launches the app and returns its screen (@refs), look reads the screen later, run flow commands " +
 				"(answers include what changed), wait for text, save_flow to keep a working flow (or, with name, a path back to this screen: go runs it). Run whole suites with the CLI: tb test.",
 		}
 	case "ping":

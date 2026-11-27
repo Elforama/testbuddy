@@ -73,8 +73,6 @@ several are available.
 
 ```sh
 tb open -d DEVICE --name explorer --app APP_ID
-tb do -d explorer 'launchApp'
-tb look -d explorer --json
 tb do -d explorer 'tapOn: @5' 'assertVisible: {id: status, text: "Saved"}'
 tb locate -d explorer --json '{text: "Edit"}'
 tb save --preview flows/example.yaml -d explorer --json
@@ -83,9 +81,12 @@ tb close -d explorer
 tb replay flows/example.yaml -d DEVICE --json
 ```
 
-1. Open the target (web: `tb open -p web --headless --name explorer --app URL`), then start
-   with a plain `launchApp`, which keeps app data; add `clearState: true` only when the test
-   calls for clearing data on the selected target.
+1. Open the target with `--app` (web: `tb open -p web --headless --name explorer --app URL`).
+   That launches the app (web: loads the URL), prints its screen and records `launchApp` as
+   the first step: no `tb look` or `launchApp` is needed. App data is kept; run
+   `tb do 'launchApp: {clearState: true}'` only when the test calls for clearing data on the
+   selected target. Leave `--app` out to attach to the device as it is: nothing is launched,
+   and the reply says what is in front.
 2. Look, then `tb do` each action with the assertion that proves it. Refs come from the
    latest listing and are saved as stable selectors. `tb locate` shows every match of a
    selector and which one tb picks. Type a password or code with
@@ -115,8 +116,8 @@ heading: edit that line if another text tells the screen apart better. In any la
 `tb go checkout` runs it and prints `arrived at "..."` and the screen; `tb go` alone lists
 the app's paths, and `tb open` names them.
 
-- Start the recording with `launchApp`, so the path works from anywhere. `tb go` then
-  restarts the app: anything unsaved on the screen you were on is gone.
+- The recording starts with the `launchApp` of `tb open --app`, so the path works from
+  anywhere. `tb go` then restarts the app: anything unsaved on the screen you were on is gone.
 - `tb go` runs the path in the session's app, whatever the file's `appId:` or `url:` says.
 - A path saved after `tb go other` runs `other` first: the save reply says `depends on: other`,
   and deleting or breaking `other.yaml` breaks it too.
