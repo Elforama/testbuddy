@@ -143,9 +143,11 @@ steps 4 to 7 on the app as it is: the steps before N do not run (no `launchApp`,
 from 1 to the flow's last.
 
 - On a device you hold in an open session (`-d` its serial, name or session name), the steps
-  run in that session, as `tb do` would run them: it stays open, nothing is closed or
-  restarted, and the steps join its recorded commands. `--record`, `--timeline` and
-  `--debug-output` are refused there, and `onFlowStart` / `onFlowComplete` do not run.
+  run in that session: it stays open and nothing is closed or restarted. The flow's text is
+  taken as written (no `@ref`), its `env` and `-e` apply to this run only, as in a replay, and
+  the steps are not added to the session's recorded commands. `--record`, `--annotate`,
+  `--events-port`, `--timeline`, `--debug-output` and `--headless` are refused there (exit 2),
+  and `onFlowStart` / `onFlowComplete` do not run.
 - On a phone with no session of yours, the test runner runs them, with the usual artifacts.
 - A browser replay opens its own browser, which is gone when it ends, so `--from` on the web
   needs your session: `tb open -p web --name NAME`, `tb replay <file.yaml> -d NAME --from 1`

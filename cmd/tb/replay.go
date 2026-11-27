@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/report"
+	"github.com/elforama/testbuddy/internal/session"
 	"github.com/elforama/testbuddy/internal/workspace"
 )
 
@@ -31,7 +31,9 @@ are left.
   --from N                start at the flow's Nth step, on the app as it is now: the
                           steps before N do not run (no launchApp, no clearState).
                           On a device you hold in an open session, the steps run in
-                          that session: it stays open and the app is not restarted.
+                          that session: it stays open and the app is not restarted
+                          (no --record, --annotate, --timeline, --debug-output or
+                          --headless there).
                           A browser replay needs that session (-d NAME): without one
                           each run opens a new browser. In a session, --from 1 runs
                           the whole flow and leaves the app where a step failed.
@@ -96,7 +98,7 @@ func cmdReplay(argv []string) int {
 			fmt.Fprintf(os.Stderr, "--from: %s has steps 1 to %d\n", filepath.Base(f.Path), total)
 			return 2
 		}
-		if ownSession(context.Background(), target) {
+		if ownSession(target) {
 			return replayInSession(a, f, target, from)
 		}
 		if f.Config.Web() {
@@ -137,7 +139,7 @@ func replayFailure(file, target string, n, total int, desc string, newBrowser bo
 	return b.String()
 }
 
-var ownSession = func(ctx context.Context, target string) bool {
+var ownSession = func(target string) bool {
 	cl := daemon.Dial()
 	if cl == nil {
 		return false
@@ -162,7 +164,7 @@ var ownSession = func(ctx context.Context, target string) bool {
 }
 
 func replayInSession(a *args, f *flow.Flow, target string, from int) int {
-	for _, k := range []string{"record", "timeline", "debug-output"} {
+	for _, k := range []string{"record", "timeline", "debug-output", "headless", "annotate", "events-port"} {
 		if a.flag(k) || a.str(k) != "" {
 			fmt.Fprintf(os.Stderr, "--from runs in your open session on %s, which takes no --%s: close the session (tb close -d %s) for a run of its own\n", target, k, target)
 			return 2
@@ -175,23 +177,16 @@ func replayInSession(a *args, f *flow.Flow, target string, from int) int {
 	}
 	total := len(f.Commands)
 	lines := strings.SplitAfter(string(src), "\n")
-	env := map[string]string{}
-	for _, kv := range f.Config.Env {
-		env[kv.Key] = kv.Value
-	}
+	replay := session.ReplayArgs{App: f.Config.AppID, FlowEnv: f.Config.Env}
 	for _, kv := range a.vals["env"] {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
 			fmt.Fprintf(os.Stderr, "-e needs KEY=VALUE, got %q\n", kv)
 			return 2
 		}
-		env[k] = v
+		replay.Env = append(replay.Env, flow.KV{Key: k, Value: v})
 	}
-	app := f.Config.AppID
-	if f.Config.Web() {
-		app = f.Config.URL
-	}
-	req := map[string]any{"device": target, "commands": strings.Join(lines[f.Commands[from-1].Line-1:], ""), "app": app, "env": env, "json": true}
+	req := map[string]any{"device": target, "commands": strings.Join(lines[f.Commands[from-1].Line-1:], ""), "replay": replay, "json": true}
 	withOwner(req)
 	c, err := daemon.Connect()
 	if err != nil {
@@ -216,24 +211,21 @@ func replayInSession(a *args, f *flow.Flow, target string, from int) int {
 		fmt.Fprintln(os.Stderr, strings.TrimRight(resp.Text, "\n"))
 		return max(resp.Exit, 1)
 	}
-	fr := report.Flow{Name: f.Name(), File: f.Path, Device: target, Duration: time.Since(start), Start: start,
-		Status: "SUCCESS", Steps: make([]report.Step, from-1)}
-	for i := range fr.Steps {
-		fr.Steps[i].Status = "skipped"
-	}
-	for _, s := range done.Steps {
-		fr.Steps = append(fr.Steps, report.Step{Desc: s.Description, Status: s.Status, Error: s.Error})
-	}
+	fr := report.Flow{Name: f.Name(), File: f.Path, Device: target, Duration: time.Since(start), Start: start, Status: "SUCCESS"}
+	failed, desc := 0, ""
 	if resp.Exit != 0 {
 		fr.Status, fr.Error = "ERROR", done.Error
+		if n := len(done.Steps); n > 0 && done.Steps[n-1].Status == "failed" {
+			failed, desc = from-1+n, done.Steps[n-1].Description
+		}
 	}
 	if a.flag("json") {
-		fmt.Println(string(testJSON([]report.Flow{fr}, total)))
+		fmt.Println(string(testJSON([]report.Flow{fr}, total, failed)))
 		return resp.Exit
 	}
 	fmt.Print(resp.Text)
-	if n, desc := failedStep(fr); n > 0 {
-		fmt.Print(replayFailure(a.pos[0], target, n, total, desc, false))
+	if failed > 0 {
+		fmt.Print(replayFailure(a.pos[0], target, failed, total, desc, false))
 	} else if resp.Exit == 0 {
 		fmt.Printf("Replay passed: steps %d to %d of %d\n", from, total, total)
 	}

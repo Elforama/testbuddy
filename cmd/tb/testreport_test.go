@@ -37,7 +37,7 @@ func TestTestJSONCountsSkipped(t *testing.T) {
 			Error  string `json:"error"`
 		} `json:"flows"`
 	}
-	b := testJSON(flows, 0)
+	b := testJSON(flows, 0, 0)
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, b)
 	}
@@ -54,7 +54,7 @@ func TestTestJSONCountsSkipped(t *testing.T) {
 
 func TestTestJSONSkippedZero(t *testing.T) {
 	var out map[string]any
-	json.Unmarshal(testJSON([]report.Flow{{Name: "a", Status: "SUCCESS"}}, 0), &out)
+	json.Unmarshal(testJSON([]report.Flow{{Name: "a", Status: "SUCCESS"}}, 0, 0), &out)
 	if v, ok := out["skipped"]; !ok || v != float64(0) {
 		t.Errorf("skipped = %v (present %v), want 0", v, ok)
 	}

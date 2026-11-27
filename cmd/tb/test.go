@@ -534,18 +534,17 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 
-	replaySteps := 0
-	if replay {
+	replaySteps, failedAt, failedDesc := 0, 0, ""
+	if replay && len(flows) == 1 {
 		replaySteps = len(plan.Flows[0].Commands)
+		failedAt, failedDesc = failedStep(flows[0])
 	}
 	if jsonOut {
-		fmt.Println(string(testJSON(flows, replaySteps)))
+		fmt.Println(string(testJSON(flows, replaySteps, failedAt)))
 	} else {
 		con.summary(results)
-		for _, f := range flows {
-			if n, desc := failedStep(f); replay && n > 0 {
-				fmt.Print(replayFailure(a.pos[0], a.str("device"), n, replaySteps, desc, plan.Flows[0].Config.Web()))
-			}
+		if failedAt > 0 {
+			fmt.Print(replayFailure(a.pos[0], a.str("device"), failedAt, replaySteps, failedDesc, plan.Flows[0].Config.Web()))
 		}
 	}
 	if ctx.Err() != nil {
@@ -582,7 +581,7 @@ func flowReport(r orchestrate.Result, dir, page string, videos []string) report.
 	return fr
 }
 
-func testJSON(flows []report.Flow, replaySteps int) []byte {
+func testJSON(flows []report.Flow, replaySteps, failedAt int) []byte {
 	replay := replaySteps > 0
 	type jflow struct {
 		Name       string   `json:"name"`
@@ -614,8 +613,8 @@ func testJSON(flows []report.Flow, replaySteps int) []byte {
 		}
 		jf := jflow{Name: f.Name, File: f.File, Device: f.Device, Status: f.Status, Seconds: f.Duration.Seconds(), Error: f.Error,
 			DebugDir: f.DebugDir, Timeline: f.Timeline, Videos: f.Videos}
-		if n, _ := failedStep(f); replay && n > 0 {
-			jf.FailedStep, jf.Steps = n, replaySteps
+		if failedAt > 0 {
+			jf.FailedStep, jf.Steps = failedAt, replaySteps
 		}
 		out.Flows = append(out.Flows, jf)
 	}

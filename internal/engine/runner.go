@@ -436,6 +436,23 @@ func (r *Runner) SetEnv(kvs []flow.KV) error {
 	return r.define(kvs)
 }
 
+func (r *Runner) ScopeEnv(batches ...[]flow.KV) (func(), error) {
+	if len(r.envStack) == 0 {
+		r.pushEnv()
+		r.define(r.opts.Env)
+	}
+	r.pushEnv()
+	for _, kvs := range batches {
+		if err := r.define(kvs); err != nil {
+			r.popEnv()
+			return nil, err
+		}
+	}
+	return r.popEnv, nil
+}
+
+func (r *Runner) Eval(s string) (string, error) { return r.eval(s) }
+
 func (r *Runner) SetAppID(id string) { r.appID = id }
 
 func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow) error {

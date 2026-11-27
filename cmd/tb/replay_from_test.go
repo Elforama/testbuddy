@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -103,7 +102,7 @@ func TestReplayFromRefusesAStepTheFlowDoesNotHave(t *testing.T) {
 
 func holdInSession(t *testing.T, target string) {
 	old := ownSession
-	ownSession = func(ctx context.Context, name string) bool { return name == target }
+	ownSession = func(name string) bool { return name == target }
 	t.Cleanup(func() { ownSession = old })
 }
 
@@ -123,12 +122,18 @@ func TestReplayFromRunsInTheOpenSession(t *testing.T) {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
 	cmd, args, cwd := f.last(t)
-	if cmd != "do" || args["device"] != "alice" || args["app"] != "com.example.app" || cwd != dir ||
+	if cmd != "do" || args["device"] != "alice" || cwd != dir ||
 		args["commands"] != "- tapOn: Next\n- assertVisible: Checkout\n- tapOn: Back\n" {
 		t.Errorf("asked %s %v in %s", cmd, args, cwd)
 	}
-	if env, _ := args["env"].(map[string]any); env["USER"] != "sam" || env["PASS"] != "x" {
-		t.Errorf("env %v", args["env"])
+	if got, _ := json.Marshal(args["replay"]); string(got) != `{"app":"com.example.app","env":[{"Key":"PASS","Value":"x"}],"flow_env":[{"Key":"USER","Value":"sam"}]}` {
+		t.Errorf("replay %s", got)
+	}
+	for _, flag := range []string{"--headless", "--record", "--annotate", "--events-port=0"} {
+		_, refused := capture(t, func() { code = cmdReplay([]string{path, "-d", "alice", "--from", "3", flag}) })
+		if code != 2 || !strings.Contains(refused, "takes no --"+strings.SplitN(flag[2:], "=", 2)[0]) {
+			t.Errorf("%s: exit %d, stderr %q", flag, code, refused)
+		}
 	}
 	if len(app.launched) != 0 {
 		t.Errorf("launched %v: the run did not stay in the session", app.launched)
