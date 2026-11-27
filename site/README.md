@@ -24,6 +24,14 @@ The page states what the main [README](../README.md) states, and nothing newer o
   0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0). The buttons above the chart switch between
   the Android, iOS and web builds of the demo app; each bar's width is its time as a share
   of the slowest tool's on that app (`--w` on the bar);
+- four more charts that the README does not have: tb and Maestro on the sample suites of
+  Maestro's own repository (`e2e/workspaces/wikipedia` on Android and iOS,
+  `simple_web_view` on iOS, `web` in headless Chrome), run unchanged with
+  `--include-tags passing`. Mean (min-max) of 5 timed runs after a warm-up, one at a time,
+  on 2026-11-27, tb built from main, Maestro 2.12.1: Wikipedia Android 18.8 s (18.7-18.8)
+  against 44.2 s (43.8-44.9); Wikipedia iOS 46.7 s (46.4-47.0) against 73.0 s (71.9-74.0);
+  web view app 5.6 s (4.8-6.5) against 17.6 s (17.2-18.1); web samples 13.7 s (13.3-13.9)
+  against 131.9 s (131.1-132.5). Every run of both tools passed;
 - the install commands, from the README's Install section.
 
 When a release or a new bench round changes the README, change the same numbers and
