@@ -26,8 +26,8 @@ Explore an app:
                                   <exception and the frame that threw it>", and prints the app's
                                   last error log lines ("log: ..."): an app bug, not a test bug
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
-- tb applog [-d alice] [--since 60] [--grep REGEX]   the app's error log on demand (Android, iOS
-                                  simulator): the crash with its stack, then the error lines
+- tb applog [-d alice] [--since 60]   the app's error log on demand (Android, iOS simulator):
+                                  the crash with its stack, then the error lines
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough

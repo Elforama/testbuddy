@@ -127,7 +127,7 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		if n := len(r.Steps); c.fromHint && !r.Retried && n > 0 && len(r.Job.Flow.Config.Devices) == 0 && !r.Job.Flow.Config.Web() && r.Steps[n-1].Status == engine.Failed {
 			c.printf("  failed at step %d: to run this flow from there, pass --from %d\n", n, n)
 		}
-		for _, line := range crashLines(debugDir, r.Start) {
+		for _, line := range crashLines(debugDir) {
 			c.printf("  %s\n", line)
 		}
 		c.printf("  debug: %s (log.txt: what tb did, step by step)\n", debugDir)
@@ -180,13 +180,10 @@ func (c *console) summary(results []orchestrate.Result) {
 	c.printf("\n%s in %s\n", line, dur(total))
 }
 
-func crashLines(debugDir string, since time.Time) []string {
+func crashLines(debugDir string) []string {
 	paths, _ := filepath.Glob(filepath.Join(debugDir, "app*.log"))
 	var lines []string
 	for _, p := range paths {
-		if st, err := os.Stat(p); err != nil || st.ModTime().Before(since) {
-			continue
-		}
 		b, _ := os.ReadFile(p)
 		if first, _, _ := strings.Cut(string(b), "\n"); strings.HasPrefix(first, "crashed: ") {
 			lines = append(lines, first)

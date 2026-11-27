@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
@@ -54,21 +53,13 @@ func clip(s string, width int) string {
 
 type applogArgs struct {
 	devArgs
-	App   string `json:"app"`
-	Since int    `json:"since"`
-	Grep  string `json:"grep"`
+	Since int `json:"since"`
 }
 
 func (s *Service) applog(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[applogArgs](req)
 	if err != nil {
 		return fail(2, "%v", err)
-	}
-	var keep *regexp.Regexp
-	if a.Grep != "" {
-		if keep, err = regexp.Compile(a.Grep); err != nil {
-			return fail(2, "--grep: %v", err)
-		}
 	}
 	if a.Since <= 0 {
 		a.Since = appLogSince
@@ -85,15 +76,12 @@ func (s *Service) applog(ctx context.Context, req daemon.Request, send func(daem
 	if !ok {
 		return fail(1, "tb applog reads the app log on Android and iOS simulators: %s has none", d.Drv.Platform())
 	}
-	appID := a.App
-	if appID == "" {
-		appID = d.AppID
-	}
+	appID := d.AppID
 	if appID == "" {
 		appID, _ = d.Drv.Foreground(ctx)
 	}
 	if appID == "" {
-		return fail(1, "no app to read the log of: pass --app APP_ID")
+		return fail(1, "no app to read the log of: open the session with --app APP_ID")
 	}
 	ctx, cancel := context.WithTimeout(ctx, appLogTimeout)
 	defer cancel()
@@ -101,13 +89,7 @@ func (s *Service) applog(ctx context.Context, req daemon.Request, send func(daem
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	var lines []string
-	for _, l := range log.Lines {
-		if keep == nil || keep.MatchString(l) {
-			lines = append(lines, l)
-		}
-	}
-	log.Lines = lastLines(lines, appLogLines)
+	log.Lines = lastLines(log.Lines, appLogLines)
 	text := log.Text(appID)
 	if text == "" {
 		text = fmt.Sprintf("no error lines from %s in the last %ds\n", appID, a.Since)

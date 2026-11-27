@@ -24,7 +24,7 @@ func (d *Driver) AppLog(ctx context.Context, appID string, last time.Duration) (
 	}
 	predicate := fmt.Sprintf(`(process == "%s" AND messageType >= 16) OR `+
 		`(process == "SpringBoard" AND eventMessage CONTAINS "[app<%s>:" AND eventMessage CONTAINS "Process exited")`, process, appID)
-	out, err := d.simctl(ctx, "spawn", d.info.Serial, "log", "show", "--last", fmt.Sprintf("%ds", driver.AppLogSeconds(last)),
+	out, err := d.simctlOwnSession(ctx, "spawn", d.info.Serial, "log", "show", "--last", fmt.Sprintf("%ds", driver.AppLogSeconds(last)),
 		"--style", "compact", "--predicate", predicate)
 	if err != nil {
 		return driver.AppLog{}, err
@@ -59,7 +59,7 @@ func parseLogShow(out, appID string) driver.AppLog {
 			}
 			continue
 		}
-		if level == "E" || level == "F" {
+		if (level == "E" || level == "F") && !strings.HasPrefix(msg, "[com.apple.") {
 			log.Lines = append(log.Lines, fmt.Sprintf("%s %s %s: %s", at, level, process, msg))
 		}
 	}

@@ -92,7 +92,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
-| `tb applog [-d alice] [--since SECONDS] [--grep REGEX] [--app ID]` | The app's own error log, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`), filtered by `--grep`. The app is the session's (`--app` for another). |
+| `tb applog [-d alice] [--since SECONDS]` | The error log of the session's app, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`). |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
 | `tb release [-d DEVICE \| all] [-p ios] [--force]` | Free devices for other test tools (other agents' sessions, by `TB_SESSION_OWNER`, only with `--force`): stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
@@ -225,11 +225,14 @@ crashed: com.shop: java.lang.IllegalStateException: cart is empty at com.shop.Ca
 log: 09:10:01.100 E Net: request failed: timeout
 ```
 
-`crashed:` names the exception and the frame that threw it (the root cause's, on Android; on
-iOS the signal the app exited on, with what the app logged in the `log:` lines). `log:` shows
-up to 10 error lines, the latest last. A passing `tb do` reads no log. `tb applog` prints the
-whole stack and every error line; `tb test` writes the same to `app.log` in a failed flow's
-debug directory. Web sessions have no app log.
+On Android `crashed:` names the exception and the frame that threw it (the root cause's). On
+iOS it gives only the signal the app exited on (`exited on signal SIGABRT`): what the app
+logged before it is in the `log:` lines. `log:` shows up to 10 error lines, the latest last;
+on iOS, lines of Apple's own frameworks (subsystem `com.apple.*`) are left out, and two apps
+with the same executable name share their lines. An app that stopped responding (ANR) is not
+reported as a crash. A passing `tb do` reads no log. `tb applog` prints the whole stack and
+every error line; `tb test` writes the same to `app.log` in a failed flow's debug directory.
+Web sessions have no app log.
 
 ## Environment variables
 

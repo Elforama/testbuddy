@@ -182,23 +182,14 @@ func TestAppLogCommand(t *testing.T) {
 		t.Errorf("text:\n%s", resp.Text)
 	}
 
-	resp, _ = call(t, s.applog, map[string]any{"grep": "Db|request 3 ", "app": "com.other"}, "")
-	if resp.Text != "crashed: com.other: "+boom+trace+"12:00:03.000 E Net: request 3 failed\n12:00:13.000 E Db: locked\n" {
-		t.Errorf("grep text:\n%s", resp.Text)
-	}
-	if len(f.apps) != 2 || f.apps[1] != "com.other" || f.lasts[1] != 60*time.Second {
-		t.Errorf("read %q %v", f.apps, f.lasts)
-	}
-
-	if resp, _ = call(t, s.applog, map[string]any{"grep": "("}, ""); resp.Exit != 2 {
-		t.Errorf("bad regex: %+v", resp)
-	}
-
 	f.lmu.Lock()
 	f.log = driver.AppLog{}
 	f.lmu.Unlock()
 	if resp, _ = call(t, s.applog, nil, ""); !resp.OK || resp.Text != "no error lines from com.app in the last 60s\n" {
 		t.Errorf("empty: %+v", resp)
+	}
+	if len(f.apps) != 2 || f.lasts[1] != 60*time.Second {
+		t.Errorf("read %q %v, want the last 60 s by default", f.apps, f.lasts)
 	}
 }
 

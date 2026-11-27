@@ -53,14 +53,6 @@ func TestFailedFlowKeepsTheAppLogAndSaysItCrashed(t *testing.T) {
 	if !strings.Contains(out.String(), "\n  crashed: com.app: java.lang.IllegalStateException: boom at com.app.Main.onClick(Main.kt:12)\n  debug: ") {
 		t.Errorf("no crashed line before the debug line:\n%s", out.String())
 	}
-
-	old := time.Now().Add(-time.Hour)
-	os.Chtimes(filepath.Join(dir, "app.log"), old, old)
-	con, out = plainConsole(false, false)
-	con.flowEnd(r, dir)
-	if strings.Contains(out.String(), "crashed:") {
-		t.Errorf("an app.log from before this run was reported:\n%s", out.String())
-	}
 }
 
 func TestFailedFlowWithAQuietAppWritesNoAppLog(t *testing.T) {

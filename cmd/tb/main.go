@@ -61,7 +61,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
-  tb applog [-d alice] [--since SECONDS] [--grep REGEX] [--app ID]
+  tb applog [-d alice] [--since SECONDS]
                                          the app's own error log (Android, iOS simulator): a crash
                                          with its stack, then error lines (default: last 60 s)
   tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
@@ -343,7 +343,7 @@ var (
 		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
 	watchFlags  = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
 	shotFlags   = []flagSpec{{[]string{"scale"}, fractionFlag}}
-	appLogFlags = []flagSpec{{[]string{"since"}, intFlag}, {[]string{"grep"}, textFlag}, {[]string{"app", "a"}, textFlag}}
+	appLogFlags = []flagSpec{{[]string{"since"}, intFlag}}
 )
 
 func platformFlag(a *args) (string, error) {

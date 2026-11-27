@@ -1,6 +1,7 @@
 package ios
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ const logShowAbort = `getpwuid_r did not find a match for uid 501
 Timestamp               Ty Process[PID:TID]
 2026-11-27 01:57:25.791 E  BuddyBench[72147:43a1762] [com.apple.coreanimation:API] cannot add handler to 0 from 0 - dropping
 2026-11-27 01:57:25.797 E  BuddyBench[72147:43a1762] [com.apple.BoardServices:XPCErrors] non-launching port is incompatible with service identifier "com.apple.PointerUI.pointeruid.default-service"
+2026-11-27 01:57:26.001 E  BuddyBench[72147:43a1762] [dev.testbuddy.bench:net] request failed: timeout
 2026-11-27 01:57:26.125 Df BuddyBench[72147:43a1762] [com.apple.Accessibility:AXCommon] Read Per-App on Init: Smart invert = (null)
 2026-11-27 01:57:39.410 F  BuddyBench[72147:43a1762] BuddyBench/CartView.swift:41: Fatal error: Index out of range
 second line of the same message
@@ -61,8 +63,7 @@ func TestParseLogShowCrash(t *testing.T) {
 	want := driver.AppLog{
 		Crash: "exited on signal SIGABRT",
 		Lines: []string{
-			"01:57:25.791 E BuddyBench: [com.apple.coreanimation:API] cannot add handler to 0 from 0 - dropping",
-			`01:57:25.797 E BuddyBench: [com.apple.BoardServices:XPCErrors] non-launching port is incompatible with service identifier "com.apple.PointerUI.pointeruid.default-service"`,
+			"01:57:26.001 E BuddyBench: [dev.testbuddy.bench:net] request failed: timeout",
 			"01:57:39.410 F BuddyBench: BuddyBench/CartView.swift:41: Fatal error: Index out of range",
 		},
 	}
@@ -76,7 +77,7 @@ func TestParseLogShowAStoppedAppDidNotCrash(t *testing.T) {
 		t.Errorf("parseLogShow = %+v", got)
 	}
 	other := strings.ReplaceAll(logShowAbort, "app<"+benchApp+">", "app<com.other>")
-	if got := parseLogShow(other, benchApp); got.Crash != "" || len(got.Lines) != 3 {
+	if got := parseLogShow(other, benchApp); got.Crash != "" || len(got.Lines) != 2 {
 		t.Errorf("another app's exit read as this one's crash: %+v", got)
 	}
 }
@@ -90,7 +91,7 @@ func TestAppLogReadsTheAppsErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if log.Crash != "exited on signal SIGABRT" || len(log.Lines) != 3 {
+	if log.Crash != "exited on signal SIGABRT" || len(log.Lines) != 2 {
 		t.Errorf("log = %+v", log)
 	}
 	calls := ts.simctl()
@@ -102,6 +103,27 @@ func TestAppLogReadsTheAppsErrors(t *testing.T) {
 		if !strings.Contains(calls[1], want) {
 			t.Errorf("no %q in %q", want, calls[1])
 		}
+	}
+}
+
+func TestParseLogShowLeavesOutSystemFrameworkLines(t *testing.T) {
+	for _, l := range parseLogShow(logShowAbort, benchApp).Lines {
+		if strings.Contains(l, ": [com.apple.") {
+			t.Errorf("a system framework's line among the app's: %q", l)
+		}
+	}
+}
+
+func TestAppLogStopsAtItsDeadline(t *testing.T) {
+	ts := stubTools(t)
+	ts.set("xcrun", []stubRule{{match: "listapps", out: listApps}, {match: "log show", sh: "/bin/sleep 6;"}})
+	d := newIOSDriver(t, newFakeRunner(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := d.AppLog(ctx, benchApp, time.Second)
+	if took := time.Since(start); err == nil || took > 3500*time.Millisecond {
+		t.Errorf("AppLog returned %v after %s, want an error soon after the 500 ms deadline", err, took.Round(100*time.Millisecond))
 	}
 }
 

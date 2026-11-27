@@ -459,12 +459,9 @@ android 1080x2400 com.android.settings, 11 elements
 A background daemon keeps devices connected, so these calls take milliseconds. With several
 devices, add `-d alice`. Exit status: 0 ok, 1 failed, 2 bad input.
 
-When a step fails, `tb do` and `tb wait` also read the app's own log for the time the command
-took (Android and iOS simulators), so an app bug can be told from a test bug: a
-`crashed: <app>: <exception and the frame that threw it>` line if the app crashed, then up to
-10 `log:` lines with its latest errors (`crash` and `log` with `--json`). A passing command
-reads no log. `tb applog [--since SECONDS] [--grep REGEX]` prints the crash with its whole stack
-and every error line on demand, and `tb test` keeps the same in a failed flow's `app.log`.
+When a step fails on Android or an iOS simulator, `tb do` also prints a `crashed:` line if the
+app crashed during the command and the app's last error log lines (`log:`); `tb applog` prints
+them on demand.
 
 `tb do --json` and MCP `run` with `json: true` return the executed steps with their status
 and duration in milliseconds, the final screen when available, and similar elements on a

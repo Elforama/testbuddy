@@ -99,18 +99,11 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
-A `tb do` with a failed step reads the app's own log once, for the time that `tb do` took, and
-prints a `crashed:` line when the app crashed in it and the app's last error lines (`log:`);
-a `tb do` whose steps all passed reads nothing. The driver reads it from the host, without
-the on-device agent (`driver.AppLogReader`, an optional interface the session checks for):
-Android runs one `adb shell` that looks up the app's uid and reads `logcat -d --uid` at error
-level, where the crash buffer holds the exception (the crash line names the root cause and
-its first frame); the iOS simulator reads `log show` for the app's executable (named by
-`simctl listapps`, since the log keeps an image path from an earlier install) at error and
-fault level, plus SpringBoard's line for the app's exit, which names the signal of a crash
-and none for an app that was stopped. `tb applog` reads the same on demand, and `tb test`
-writes it to `app.log` in a failed flow's debug directory. The web driver collects no console
-errors and has no app log.
+A `tb do` with a failed step (never a passing one) reads the app's own log for the time it took,
+through the optional `driver.AppLogReader`, and prints a `crashed:` line and the last error
+lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Android reads
+`logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
+SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
 
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
