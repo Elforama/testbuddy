@@ -1,73 +1,50 @@
-const state = { platform: 'android', timing: 'Flow', data: null };
-const failureReasons = {
-  'Buddy Bench · native': 'App did not stop in time.',
-  'Everyday · Flutter': 'App did not stop in time.',
-  'Everyday · native': 'Could not hide the keyboard.'
-};
+const copyStatus = document.querySelector('#copy-status');
 
-function renderBenchmarks() {
-  if (!state.data) return;
-  const rows = state.data.results.filter(row => row.platform === state.platform);
-  const body = document.querySelector('#benchmark-rows');
-  body.replaceChildren();
-  for (const row of rows) {
-    const tr = document.createElement('tr');
-    const values = [row.workload, `${row[`tb${state.timing}`].toFixed(2)} s · pass`, `${row[`other${state.timing}`].toFixed(2)} s · ${row.otherPassed ? 'pass' : 'failed'}`, row.otherPassed ? `${(row[`other${state.timing}`] / row[`tb${state.timing}`]).toFixed(1)}×` : 'Other: time to failure'];
-    values.forEach((value, index) => {
-      const td = document.createElement('td');
-      td.textContent = value;
-      if (index === 1) td.className = 'passed';
-      if (index === 2 && !row.otherPassed) td.className = 'failed';
-      if (index === 3 && !row.otherPassed) {
-        const note = document.createElement('span');
-        note.className = 'result-note';
-        note.textContent = failureReasons[row.workload];
-        td.append(note);
-      }
-      tr.append(td);
-    });
-    body.append(tr);
-  }
-}
-
-document.querySelectorAll('[data-platform]').forEach(button => button.addEventListener('click', () => {
-  state.platform = button.dataset.platform;
-  document.querySelectorAll('[data-platform]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-  renderBenchmarks();
-}));
-document.querySelector('#timing').addEventListener('change', event => {
-  state.timing = event.target.value;
-  renderBenchmarks();
-});
-fetch('./data/comparison.json').then(response => {
-  if (!response.ok) throw new Error('Benchmark data unavailable');
-  return response.json();
-}).then(data => { state.data = data; renderBenchmarks(); }).catch(() => {
-  document.querySelector('#benchmark-rows').innerHTML = '<tr><td colspan="4">Results are available in the downloadable dataset.</td></tr>';
-});
-
-function installCommand() {
-  const platform = document.querySelector('#install-platform').value;
-  const base = 'https://github.com/Elforama/testbuddy/releases/latest/download/';
-  if (platform.startsWith('windows')) {
-    return `Invoke-WebRequest ${base}tb_${platform}.zip -OutFile tb.zip\nExpand-Archive tb.zip -DestinationPath .\n.\\tb_${platform}\\tb.exe version`;
-  }
-  return `curl -fsSL ${base}tb_${platform}.tar.gz | tar -xz\n./tb_${platform}/tb version`;
-}
-function renderInstall() { document.querySelector('#install-command').textContent = installCommand(); }
-document.querySelector('#install-platform').addEventListener('change', renderInstall);
-renderInstall();
-
-async function copyText(button, value) {
+async function copyText(button, text) {
+  const original = button.textContent;
   try {
-    await navigator.clipboard.writeText(value);
-    const original = button.textContent;
-    button.textContent = 'Copied ✓';
-    document.querySelector('#copy-status').textContent = 'Copied to clipboard.';
-    setTimeout(() => { button.textContent = original; }, 1800);
+    await navigator.clipboard.writeText(text);
+    button.textContent = 'Copied';
+    copyStatus.textContent = 'Copied to clipboard.';
   } catch {
-    document.querySelector('#copy-status').textContent = 'Clipboard unavailable. Select and copy the displayed command.';
     button.textContent = 'Select to copy';
+    copyStatus.textContent = 'Clipboard unavailable. Select the command and copy it.';
   }
+  setTimeout(() => { button.textContent = original; }, 1800);
 }
-document.querySelector('#copy-install').addEventListener('click', event => copyText(event.currentTarget, installCommand()));
+
+document.querySelectorAll('.copy').forEach(button => {
+  button.addEventListener('click', () => {
+    const source = button.dataset.copyFrom && document.getElementById(button.dataset.copyFrom);
+    copyText(button, source ? source.textContent : button.dataset.copy);
+  });
+});
+
+document.querySelectorAll('[data-tabs]').forEach(group => {
+  const tabs = [...group.querySelectorAll('[role="tab"]')];
+
+  function select(tab, focus) {
+    tabs.forEach(item => {
+      const active = item === tab;
+      item.setAttribute('aria-selected', String(active));
+      item.tabIndex = active ? 0 : -1;
+      document.getElementById(item.getAttribute('aria-controls')).hidden = !active;
+    });
+    if (focus) tab.focus();
+  }
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => select(tab, false));
+    tab.addEventListener('keydown', event => {
+      const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      select(tabs[(index + step + tabs.length) % tabs.length], true);
+    });
+  });
+
+  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const match = /win/i.test(platform) ? 'tab-windows' : /linux/i.test(platform) ? 'tab-linux' : null;
+  const preferred = match && document.getElementById(match);
+  if (tabs.includes(preferred)) select(preferred, false);
+});

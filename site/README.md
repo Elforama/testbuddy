@@ -1,4 +1,4 @@
-# TestBuddy website
+# Test Buddy website
 
 A buildless GitHub Pages site: HTML, CSS, and a small JavaScript file. No npm
 dependencies, analytics, or runtime API. Uses system sans-serif text and monospace code; no external font requests.
@@ -12,28 +12,23 @@ From the repository root:
 python3 -m http.server 8077 --bind 127.0.0.1 --directory site
 ```
 
-Open `http://127.0.0.1:8077`. Check desktop and mobile layouts, all three benchmark
-platforms, both timing modes, the plugin disclosure, and the six install targets.
+Open `http://127.0.0.1:8077`. Check desktop and mobile layouts, light and dark themes, the
+benchmark charts, the install tabs and the copy buttons.
 
-## Evidence
+## Content
 
-- `data/comparison.json`: nine matched journey observations from the local comparison
-  report, using TestBuddy 0.5.1 working tree at base `44485d1` and Other 2.12.1.
-  Values retain both JUnit flow durations and complete command durations. Each
-  runner's observation is one run, not an average. Three failed journeys are retained
-  and excluded from speedup calculations. Retry/watchdog caveats accompany the data.
-- `data/validation.json`: the final 0.5.2 local release validation matrix, one round,
-  zero whole-flow retries. 53 Android + 54 iOS + 17 web = 124 passing scenarios.
-  This is separate from the older comparison and does not claim a population pass rate.
-- Original local sources: `build/maestro-comparison/REPORT.md` and
-  `build/release-052-scroll/summary.json`. Build directories are not published.
+The page states what the main [README](../README.md) states, and nothing newer or older:
 
-The comparison runner is labeled **Other** in the public site and dataset. The flow
-compatibility section names the supported YAML format. CLI and multi-device snippets are usage examples.
+- the version label (`v0.7.0`, in the hero);
+- the benchmark chart, from the README's Speed section (run of 2026-11-26: tb
+  0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0). The buttons above the chart switch between
+  the Android, iOS and web builds of the demo app; each bar's width is its time as a share
+  of the slowest tool's on that app (`--w` on the bar);
+- the install commands, from the README's Install section.
 
-When updating evidence, replace the datasets and update the matching static release
-validation totals, version labels, and methodology in `index.html`.
-Do not mix old comparison timings with a newer runner version label.
+When a release or a new bench round changes the README, change the same numbers and
+commands in `index.html`. Other runners are named only where the README names them: Maestro
+for flow compatibility, and Maestro and WebdriverIO in the benchmark section.
 
 ## Publish
 
