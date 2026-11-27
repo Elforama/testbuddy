@@ -39,6 +39,8 @@ type actionResult struct {
 	Steps       []actionStep    `json:"steps"`
 	Error       string          `json:"error,omitempty"`
 	Notes       []string        `json:"notes,omitempty"`
+	Crash       string          `json:"crash,omitempty"`
+	Log         []string        `json:"log,omitempty"`
 	Screen      *look.Listing   `json:"screen,omitempty"`
 	ScreenError string          `json:"screen_error,omitempty"`
 	Query       string          `json:"query,omitempty"`
@@ -114,6 +116,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if d.last != nil {
 		runner.SetSeen(d.last.Screen)
 	}
+	started := time.Now()
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
 		notes := dialogNotes(d)
 		if a.JSON {
@@ -152,6 +155,16 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	for _, n := range after {
 		fmt.Fprintf(&out, "note: %s\n", n)
 	}
+	if exit != 0 || runErr != nil {
+		result.Crash, result.Log = failureLog(ctx, d, appID, started)
+	}
+	var appLog strings.Builder
+	if result.Crash != "" {
+		fmt.Fprintf(&appLog, "crashed: %s\n", result.Crash)
+	}
+	for _, l := range result.Log {
+		fmt.Fprintf(&appLog, "log: %s\n", l)
+	}
 	scr, serr := readNow(ctx, d)
 	if serr == nil {
 		now := look.Build(scr, d.refs)
@@ -166,11 +179,13 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 				fmt.Fprintf(&out, "  similar: %s\n", strings.Join(parts, "; "))
 			}
 		}
+		out.WriteString(appLog.String())
 		out.WriteString(look.Diff(d.last, now))
 		d.last = now
 		d.lastDoEnd = now
 		result.Screen = now
 	} else {
+		out.WriteString(appLog.String())
 		result.ScreenError = serr.Error()
 	}
 	resp := daemon.Response{OK: exit == 0, Exit: exit, Text: out.String()}

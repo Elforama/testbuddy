@@ -66,7 +66,8 @@ Never fix a failure with sleeps or retries: find which step left the app in the 
 ```bash
 tb open -d <device>          # optional
 tb look                      # where are we?
-tb do '<the failing step>'   # does it work now? what changed?
+tb do '<the failing step>'   # does it work now? what changed? "crashed:" / "log:" lines: the app's own errors
+tb applog --since 120        # the app's error log: a crash with its stack, then its error lines
 tb locate '{text: "Edit"}'   # every match of a selector and which one tb picks
 tb look --all                # every raw node, if the element seems missing
 tb hierarchy --json          # full JSON: ids, classes, bounds, flags
