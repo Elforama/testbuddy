@@ -7,6 +7,12 @@ const agentGuide = `## UI testing with tb (Test Buddy)
 tb drives Android emulators and devices, iOS simulators, and Chrome from the shell.
 Interactive sessions stay connected between calls through a background daemon.
 
+Set up:
+- tb doctor [--json]              what is ready and what to fix: "ok ..." or "problem ...: <fix>" per
+                                  check (adb, devices, Xcode, simulators, Chrome, the daemon); changes no device
+- tb init [--dry-run]             registers tb's MCP server with Claude Code, Codex and Gemini CLI
+                                  where installed; --dry-run prints the commands and changes nothing
+
 Explore an app:
 - tb devices                      list devices: free, in use (by whom), or your session
 - tb open -p android|ios|web [--name alice] [--app APP_ID]   or -d DEVICE instead of -p; --name for multi-device work
@@ -22,12 +28,27 @@ Explore an app:
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
                                   runs flow commands (@ref, or 'tapOn: #id' as look prints it); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
+                                  a FAILED step also says if the app crashed, "crashed: <app>:
+                                  <exception and the frame that threw it>", and prints the app's
+                                  last error log lines ("log: ..."): an app bug, not a test bug
+- tb do --secret PW 'inputText: ${PW}'   types a password or code that tb never shows or saves:
+                                  PW comes from the environment (or --secret PW=value) and is 6
+                                  characters or more; output and listings show ••• in its place,
+                                  tb save writes ${PW} and says to replay with -e PW=...
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
+- tb applog [-d alice] [--since 60]   the app's error log on demand (Android, iOS simulator):
+                                  the crash with its stack, then the error lines
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
+- tb save --path checkout [-d alice]   on a screen you will need again: writes them as paths/<app>/checkout.yaml,
+                                  ending with an assertVisible of the screen's heading (edit it if another text is better)
+- tb go checkout [-d alice]       in any later session: runs that path and shows the screen ("arrived at ...");
+                                  it restarts the app (the path begins with launchApp) and runs in the session's app.
+                                  tb go alone lists the app's paths, and tb open names them. If it fails, go on by
+                                  hand and edit the failing step in the file: do not save over it from that session
 - TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
   (not with -p; with several devices connected and none named, tb asks which)
@@ -36,11 +57,16 @@ Explore an app:
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
                                   start with a required launchApp and close the session after saving
                                   use the device serial, simulator UDID or unique name, or -d web --headless
+- tb replay flows/name.yaml -d alice --from 4   after a replay failed at "step 3 of 7" and you did that step
+                                  yourself (tb do): runs steps 4 to 7 on the app as it is, no launchApp.
+                                  On a device you hold in an open session they run in that session (it stays
+                                  open); a browser needs it: -d NAME --from 1 runs the whole flow there
 
 Run tests:
 - tb test flows/ -p android       run YAML flows; Maestro flows run unchanged (tb test -h); -p or a device is required
 - tb test flows/ -p ios --json    machine-readable results: each flow's status, seconds and error; a
-                                  failed flow's debugDir (log.txt: what tb did; screen.txt: the screen)
+                                  failed flow's debugDir (log.txt: what tb did; screen.txt: the screen;
+                                  app.log: a "crashed:" line if the app crashed, and its error log)
 - tb test flows/ -p ios --timeline also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ -p ios --record  record each flow's screen, start to finish (in the reports and timeline)
 - tb replay f.yaml -d D --record --annotate  a video a person can follow (for a PR): captions, touches, no rush

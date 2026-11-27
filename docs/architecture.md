@@ -99,6 +99,44 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
+A `tb do` with a failed step (never a passing one) reads the app's own log for the time it took,
+through the optional `driver.AppLogReader`, and prints a `crashed:` line and the last error
+lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Android reads
+`logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
+SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
+
+A named path is a flow file and nothing more: `tb save --path <name>` writes the recording to
+`paths/<app>/<name>.yaml` under the caller's directory (the app id; for the web, the URL's
+host and port, with other characters as `_`) and adds an `assertVisible` of a landmark read
+from the current screen: the first heading, else the first text that is not a control, never
+a field's contents. `tb go <name>` is the daemon's `do` with a `runFlow` of that file, so it
+runs, reports and records as that step does; it adds the `arrived at` line from the file's
+last step when that is a required `assertVisible`. The path runs in the session's app
+whatever its header says, and restarts the app when it begins with `launchApp`. There is no
+index: `tb go` and `tb open` list the directory. Saving refuses (exit 2, nothing written) a
+path that would run itself, directly or through another path, and a recording that would
+replace an existing path without starting at `launchApp` or another path; the landmark goes
+through the secrets replacer, and is left out when it still shows a hidden value. A recorded
+`runFlow: paths/...` step is written relative to the file being saved, since a flow resolves
+`runFlow` from its own directory and `tb do` from the caller's (`internal/session/paths.go`).
+
+`tb do --secret NAME[=value]` (MCP `run`: `secrets`) defines `${NAME}` like `-e`, and the
+session keeps the value in memory only, until it closes. Two replacements keep its text out
+of what tb shows and stores (`internal/session/secrets.go`): the steps a `tb do` records get
+`${NAME}` where the value stands (a typed literal, or a selector built from a ref whose label
+is the value), so `tb log` and `tb save` never hold it; and every session command's reply
+passes through one wrapper (`Service.hiding`) that prints `•••` for every value given as a
+secret in the session the command resolved (never another session's: a reply must not tell
+one agent what another typed), in text and inside the JSON's strings: step errors, hints,
+the screen diff, `tb look`, `tb locate`, `tb watch`. A name given a new value keeps its old
+values hidden. The match is on the text as written, with its whitespace collapsed as the
+listing does, regex-escaped and quoted; and since the listing cuts long labels, the start of
+a value (4 characters or more) standing right before a `…` is hidden too. A value needs at
+least 6 characters: a shorter one would blank refs, sizes and timings. A value an app shows
+reformatted, or one character per box, is not hidden, and
+screenshots and `tb hierarchy` (its own read of the device) are not masked. A session's runner writes no trace or timeline, and the daemon
+log holds no command text.
+
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
 the ordinary test runner. It requires a single-device flow whose first executed step is a

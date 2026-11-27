@@ -534,10 +534,18 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 
+	replaySteps, failedAt, failedDesc := 0, 0, ""
+	if replay && len(flows) == 1 {
+		replaySteps = len(plan.Flows[0].Commands)
+		failedAt, failedDesc = failedStep(flows[0])
+	}
 	if jsonOut {
-		fmt.Println(string(testJSON(flows, replay)))
+		fmt.Println(string(testJSON(flows, replaySteps, failedAt)))
 	} else {
 		con.summary(results)
+		if failedAt > 0 {
+			fmt.Print(replayFailure(a.pos[0], a.str("device"), failedAt, replaySteps, failedDesc, plan.Flows[0].Config.Web()))
+		}
 	}
 	if ctx.Err() != nil {
 		return 130
@@ -573,17 +581,20 @@ func flowReport(r orchestrate.Result, dir, page string, videos []string) report.
 	return fr
 }
 
-func testJSON(flows []report.Flow, replay bool) []byte {
+func testJSON(flows []report.Flow, replaySteps, failedAt int) []byte {
+	replay := replaySteps > 0
 	type jflow struct {
-		Name     string   `json:"name"`
-		File     string   `json:"file"`
-		Device   string   `json:"device"`
-		Status   string   `json:"status"`
-		Seconds  float64  `json:"seconds"`
-		Error    string   `json:"error,omitempty"`
-		DebugDir string   `json:"debugDir,omitempty"`
-		Timeline string   `json:"timeline,omitempty"`
-		Videos   []string `json:"videos,omitempty"`
+		Name       string   `json:"name"`
+		File       string   `json:"file"`
+		Device     string   `json:"device"`
+		Status     string   `json:"status"`
+		Seconds    float64  `json:"seconds"`
+		Error      string   `json:"error,omitempty"`
+		FailedStep int      `json:"failedStep,omitempty"`
+		Steps      int      `json:"steps,omitempty"`
+		DebugDir   string   `json:"debugDir,omitempty"`
+		Timeline   string   `json:"timeline,omitempty"`
+		Videos     []string `json:"videos,omitempty"`
 	}
 	var out struct {
 		Passed  int     `json:"passed"`
@@ -600,7 +611,12 @@ func testJSON(flows []report.Flow, replay bool) []byte {
 		default:
 			out.Passed++
 		}
-		out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline, f.Videos})
+		jf := jflow{Name: f.Name, File: f.File, Device: f.Device, Status: f.Status, Seconds: f.Duration.Seconds(), Error: f.Error,
+			DebugDir: f.DebugDir, Timeline: f.Timeline, Videos: f.Videos}
+		if failedAt > 0 {
+			jf.FailedStep, jf.Steps = failedAt, replaySteps
+		}
+		out.Flows = append(out.Flows, jf)
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return b
@@ -783,6 +799,16 @@ func saveFailure(dir string, r orchestrate.Result, drivers map[string]driver.Dri
 			}
 		}
 		cancel()
+		if logs, ok := drv.(driver.AppLogReader); ok && r.Job != nil && r.Job.Flow.Config.AppID != "" {
+			appID := r.Job.Flow.Config.AppID
+			c, cancel = context.WithTimeout(context.Background(), failureArtifactTimeout)
+			if log, err := logs.AppLog(c, appID, time.Since(r.Start)); err == nil {
+				if text := log.Text(appID); text != "" {
+					os.WriteFile(filepath.Join(dir, "app"+suffix+".log"), []byte(text), 0o644)
+				}
+			}
+			cancel()
+		}
 	}
 	var steps []map[string]any
 	for _, s := range r.Steps {

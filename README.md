@@ -74,6 +74,54 @@ it running (not on CI, where devices are set up on purpose). `tb test` and `tb o
 platform: `-p android`, `ios` or `web`, unless a device is named (`-d`, `--device`, `TB_DEVICE`)
 or the flows name it (`url:` for the web, `devices:` roles); `tb open --app` with a URL is web.
 
+## Getting started
+
+With `tb` on PATH, two commands set a machine up:
+
+```sh
+tb doctor            # what is ready, and the fix for what is not
+tb init              # offer tb to the coding agents installed here, then run the doctor checks
+```
+
+`tb doctor` boots, stops and changes no device, browser or daemon. It does run
+`adb devices`, which starts adb's own server when none is running. It prints one line per
+check, `ok <what>` or `problem <what>: <the fix>`, then the platforms that are ready:
+
+```
+ok adb /Users/me/Library/Android/sdk/platform-tools/adb
+problem android R58M unauthorized: unlock it and accept its "Allow USB debugging" prompt (replug the cable if none shows)
+ok xcode /Applications/Xcode.app/Contents/Developer
+problem ios simulators none booted: boot one (xcrun simctl boot "<name>"; xcrun simctl list devices names them), or let tb test -p ios boot one
+ok chrome /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+ok daemon not running (tb starts it when needed)
+ready: web; fix: android R58M
+```
+
+It exits 0 when at least one platform is usable and nothing is broken. A platform that is
+not set up (no adb, no booted simulator, no Chrome) is a problem line with its fix, but only
+something broken fails the check: a device adb lists as `unauthorized` or `offline`, or an
+`adb devices` that fails. A daemon left running by another tb build is an `ok` line: the
+next tb command replaces it (and closes its sessions). A Mac with only the command line
+tools has no simulators: `problem xcode not installed`. Off a Mac, iOS is an
+`ok ios needs a Mac` line. `--json` gives the same as one object (`ok`, `usable`,
+`checks`).
+
+`tb init` registers tb's MCP server (`tb mcp`) with each coding agent it finds on PATH,
+through that client's own command, and writes no file itself:
+
+| Client | Command `tb init` runs | Skipped when |
+|---|---|---|
+| Claude Code | `claude mcp add --scope user tb -- <tb> mcp` | `~/.claude.json` has an MCP server `tb`, or the test-buddy plugin is installed |
+| Codex | `codex mcp add tb -- <tb> mcp` | `~/.codex/config.toml` has `[mcp_servers.tb]` |
+| Gemini CLI | `gemini mcp add --scope user tb <tb> mcp` | `~/.gemini/settings.json` has an MCP server `tb` |
+
+`<tb>` is the `tb` on PATH when that is the one that ran, else the full path of the one
+that ran; a temporary build (`go run ./cmd/tb init`) is refused, since agents could not
+start it later. It prints one line per client (`added`,
+`skipped` with the reason, or `failed` with what the client said). `tb init --dry-run`
+prints the commands instead of running them. For Cursor, GitHub Copilot and other clients,
+set tb up by hand: see [Use with AI coding agents](#use-with-ai-coding-agents).
+
 ## Quick start
 
 ```sh
@@ -442,6 +490,8 @@ tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save --preview -d alice --json              # inspect the export and its warnings
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
+tb save --path inbox                          # or as a path to this screen: paths/<app>/inbox.yaml
+tb go inbox                                   # any later session: back on that screen in one call
 tb close -d alice                             # release the device (tb test takes it from your own idle session by itself)
 tb replay flows/sign-in.yaml -d DEVICE --json  # verify once on a specific device
 ```
@@ -458,6 +508,10 @@ android 1080x2400 com.android.settings, 11 elements
 `+` new elements, `~` changed, `-` gone, or the whole new screen when most of it is new.
 A background daemon keeps devices connected, so these calls take milliseconds. With several
 devices, add `-d alice`. Exit status: 0 ok, 1 failed, 2 bad input.
+
+When a step fails on Android or an iOS simulator, `tb do` also prints a `crashed:` line if the
+app crashed during the command and the app's last error log lines (`log:`); `tb applog` prints
+them on demand.
 
 `tb do --json` and MCP `run` with `json: true` return the executed steps with their status
 and duration in milliseconds, the final screen when available, and similar elements on a
@@ -490,7 +544,7 @@ for the recording and replay lifecycle, host components, and platform agents.
 
 For any shell-capable coding agent, `tb agent-guide` prints a portable quick reference.
 See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
-For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `close`).
+For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `go`, `app_log`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
 Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
@@ -509,6 +563,11 @@ with `tb` and the required device tools or browser.
 | Cursor | Open this repo and select `tb` from the skill menu, or let Cursor discover it when relevant. [Cursor skill directories](https://cursor.com/docs/skills#skill-directories) |
 | GitHub Copilot in VS Code | Open this repo with Agent Skills enabled. VS Code can discover `.agents/skills` as a project skill location. [VS Code Agent Skills settings](https://code.visualstudio.com/docs/agents/reference/ai-settings#_agent-skills-settings) |
 | Claude Code | Use the bundled plugin below. |
+
+`tb init` sets up Claude Code, Codex and Gemini CLI with tb's MCP server
+([Getting started](#getting-started)). The clients it does not cover are manual: load the
+skill as in the table (Cursor, GitHub Copilot), or add an MCP server whose command is `tb`
+with the argument `mcp` in the client's own MCP settings.
 
 To use the skill in another repo, copy the whole `tb` skill folder, including
 `references/`, into that project's skill directory and put the CLI on PATH. The folder

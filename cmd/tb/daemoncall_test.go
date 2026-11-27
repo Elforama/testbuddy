@@ -53,7 +53,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	srv.Handle("ping", func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response {
 		return daemon.Response{OK: true, Text: daemon.BuildID()}
 	})
-	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop", "yield"} {
+	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "applog", "clear", "do", "go", "save", "devices", "stop", "yield"} {
 		cmd := cmd
 		srv.Handle(cmd, func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 			f.mu.Lock()
@@ -115,6 +115,8 @@ func TestAgentCallArgs(t *testing.T) {
 			map[string]any{"device": "", "platform": "", "until": "Done", "timeout": float64(3000)}},
 		{"shot path", "shot", []string{"out.png", "--scale", "0.25"}, shotFlags,
 			map[string]any{"device": "", "platform": "", "path": "out.png", "scale": 0.25}},
+		{"applog flags", "applog", []string{"-d", "alice", "--since", "30"}, appLogFlags,
+			map[string]any{"device": "alice", "platform": "", "since": float64(30)}},
 		{"close all", "close", []string{"all"}, nil, map[string]any{"device": "all", "platform": ""}},
 		{"close one", "close", []string{"-d", "bob"}, nil, map[string]any{"device": "bob", "platform": ""}},
 		{"open positional device", "open", []string{"Pixel 9", "--name", "alice", "--app", "com.app"},
@@ -299,6 +301,8 @@ func TestMCPCallTools(t *testing.T) {
 		{"wait", map[string]any{"text": "Hi"}, "do",
 			map[string]any{"device": "", "commands": "- extendedWaitUntil:\n    visible: \"Hi\"\n    timeout: 17000\n"}},
 		{"save_flow", map[string]any{"path": "f.yaml", "device": "bob"}, "save", map[string]any{"device": "bob", "path": "f.yaml"}},
+		{"app_log", map[string]any{"device": "bob", "since": float64(30)}, "applog",
+			map[string]any{"device": "bob", "since": float64(30)}},
 		{"close", map[string]any{"device": "bob"}, "close", map[string]any{"device": "bob"}},
 	}
 	for _, c := range cases {
