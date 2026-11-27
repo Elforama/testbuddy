@@ -105,7 +105,12 @@ host and port, with other characters as `_`) and adds an `assertVisible` of a la
 from the current screen: the first heading, else the first text that is not a control, never
 a field's contents. `tb go <name>` is the daemon's `do` with a `runFlow` of that file, so it
 runs, reports and records as that step does; it adds the `arrived at` line from the file's
-last step. There is no index: `tb go` and `tb open` list the directory. A recorded
+last step when that is a required `assertVisible`. The path runs in the session's app
+whatever its header says, and restarts the app when it begins with `launchApp`. There is no
+index: `tb go` and `tb open` list the directory. Saving refuses (exit 2, nothing written) a
+path that would run itself, directly or through another path, and a recording that would
+replace an existing path without starting at `launchApp` or another path; the landmark goes
+through the secrets replacer, and is left out when it still shows a hidden value. A recorded
 `runFlow: paths/...` step is written relative to the file being saved, since a flow resolves
 `runFlow` from its own directory and `tb do` from the caller's (`internal/session/paths.go`).
 

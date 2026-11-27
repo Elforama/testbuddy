@@ -105,6 +105,9 @@ func TestPathLandmark(t *testing.T) {
 		{"else the first text that is not a control", device.Android,
 			[]item{button("Back", 10), field, label("Your cart", 200), label("2 items", 300)},
 			`- assertVisible: "Your cart"`},
+		{"with its id when it has one", device.Android,
+			[]item{button("Live", 10), {text: "Live", id: "com.app:id/title", top: 100}},
+			`- assertVisible: {id: "title", text: "Live"}`},
 		{"regex characters are escaped", device.Android,
 			[]item{label("Total (2)", 100)}, `- assertVisible: "Total \\(2\\)"`},
 		{"never what a field holds", device.Android, []item{field, button("Save", 200)}, ""},
@@ -191,7 +194,7 @@ func TestGoRunsThePathAndReportsArrival(t *testing.T) {
 	}
 	next, _ := call(t, s.save, map[string]any{"name": "further"}, cwd)
 	b, _ = os.ReadFile(filepath.Join(cwd, "paths", "com.app", "further.yaml"))
-	if !next.OK || !strings.Contains(string(b), "- runFlow: sign-in.yaml\n") {
+	if !next.OK || !strings.Contains(string(b), "- runFlow: sign-in.yaml\n") || !strings.Contains(next.Text, "\ndepends on: sign-in\n") {
 		t.Errorf("save path %+v file\n%s", next, b)
 	}
 }
@@ -207,7 +210,7 @@ func TestGoFailureSaysHowToGoOn(t *testing.T) {
 	if resp.Exit != 1 || !strings.Contains(resp.Text, "FAILED Run gone") || strings.Contains(resp.Text, "arrived") {
 		t.Fatalf("resp %+v", resp)
 	}
-	want := "path gone: the steps before the failure ran. Go on from the screen shown; if the app changed, save the path again (tb save --path gone)\n"
+	want := "path gone: the steps before the failure ran. Go on from the screen shown; if the app changed, edit the failing step in paths/com.app/gone.yaml\n"
 	if !strings.HasSuffix(resp.Text, want) {
 		t.Errorf("reply ends\n%s", resp.Text)
 	}
@@ -264,5 +267,120 @@ func TestOpenListsTheAppsPaths(t *testing.T) {
 	resp, _ = call(t, s.open, map[string]any{"device": "emulator-5554", "app": "com.chat"}, cwd)
 	if !resp.OK || !strings.HasPrefix(resp.Text, "connected ") || !strings.HasSuffix(resp.Text, "\npaths: checkout, settings (tb go <name>)\n") {
 		t.Errorf("resp %+v", resp)
+	}
+}
+
+func TestSavePathKeepsAWorkingPath(t *testing.T) {
+	s := New()
+	f := newFake("e", "E", device.Android)
+	f.show(loginScreen()...)
+	d := addDev(s, f, "")
+	cwd := t.TempDir()
+	working := "- launchApp\n- tapOn: Menu\n- tapOn: \"Sign in\"\n- assertVisible: \"Welcome back\"\n"
+	file := writePath(t, cwd, "com.app", "home", working)
+	writePath(t, cwd, "com.app", "menu", "- launchApp\n- tapOn: Menu\n")
+	for _, steps := range [][]string{nil, {"- tapOn: \"Sign in\""}, {"- runFlow: flows/setup.yaml", "- tapOn: \"Sign in\""}} {
+		d.steps = steps
+		resp, _ := call(t, s.save, map[string]any{"name": "home"}, cwd)
+		if resp.Exit != 2 || !strings.Contains(resp.Text, "does not start with launchApp") ||
+			!strings.Contains(resp.Text, "edit the failing step in "+file) {
+			t.Errorf("steps %q: %+v", steps, resp)
+		}
+		if b, _ := os.ReadFile(file); string(b) != "appId: com.app\n---\n"+working {
+			t.Fatalf("steps %q: the working path was replaced by\n%s", steps, b)
+		}
+	}
+	for _, steps := range [][]string{{"- launchApp", "- tapOn: \"Sign in\""}, {"- launchApp:\n    clearState: true"}, {"- runFlow: paths/com.app/menu.yaml", "- tapOn: \"Sign in\""}} {
+		d.steps = steps
+		if resp, _ := call(t, s.save, map[string]any{"name": "home"}, cwd); !resp.OK || !strings.HasPrefix(resp.Text, "replaced path home") {
+			t.Errorf("steps %q: %+v", steps, resp)
+		}
+	}
+	d.steps = []string{"- tapOn: \"Sign in\""}
+	if resp, _ := call(t, s.save, map[string]any{"name": "new-one"}, cwd); !resp.OK {
+		t.Errorf("a new path may start anywhere: %+v", resp)
+	}
+}
+
+func TestSavePathRefusesAPathThatRunsItself(t *testing.T) {
+	s := New()
+	f := newFake("e", "E", device.Android)
+	f.show(loginScreen()...)
+	d := addDev(s, f, "")
+	cwd := t.TempDir()
+	working := "- tapOn: \"Sign in\"\n- assertVisible: \"Welcome back\"\n"
+	file := writePath(t, cwd, "com.app", "home", working)
+	if resp, _ := call(t, s.goPath, map[string]any{"name": "home"}, cwd); !resp.OK {
+		t.Fatalf("go: %+v", resp)
+	}
+	resp, _ := call(t, s.save, map[string]any{"name": "home"}, cwd)
+	if resp.Exit != 2 || !strings.Contains(resp.Text, "would run itself") {
+		t.Errorf("save over itself: %+v", resp)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "appId: com.app\n---\n"+working {
+		t.Fatalf("the path was replaced by\n%s", b)
+	}
+	writePath(t, cwd, "com.app", "further", "- runFlow: home.yaml\n- tapOn: \"Sign in\"\n")
+	d.steps = []string{"- runFlow: paths/com.app/further.yaml"}
+	resp, _ = call(t, s.save, map[string]any{"name": "home"}, cwd)
+	if resp.Exit != 2 || !strings.Contains(resp.Text, "would run itself") {
+		t.Errorf("save over a path this one runs through: %+v", resp)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "appId: com.app\n---\n"+working {
+		t.Fatalf("the path was replaced by\n%s", b)
+	}
+}
+
+func TestGoDoesNotClaimArrivalOnAnOptionalAssert(t *testing.T) {
+	s := New()
+	f := newFake("e", "E", device.Android)
+	f.show(loginScreen()...)
+	addDev(s, f, "")
+	cwd := t.TempDir()
+	writePath(t, cwd, "com.app", "maybe", "- tapOn: \"Sign in\"\n- assertVisible:\n    text: \"Order summary\"\n    optional: true\n")
+	resp, _ := call(t, s.goPath, map[string]any{"name": "maybe"}, cwd)
+	if !resp.OK || strings.Contains(resp.Text, "arrived") || !strings.HasPrefix(resp.Text, "ran maybe: its last step is not a required assertVisible, so check the screen\n") {
+		t.Errorf("resp %+v", resp)
+	}
+	if list, _ := call(t, s.goPath, map[string]any{}, cwd); list.Text != "maybe -> (no landmark)\n" {
+		t.Errorf("list %q", list.Text)
+	}
+}
+
+func TestPathsInADirectoryWithBrackets(t *testing.T) {
+	s := New()
+	addDev(s, newFake("e", "E", device.Android), "")
+	cwd := filepath.Join(t.TempDir(), "app [v2]")
+	writePath(t, cwd, "com.app", "home", "- assertVisible: Home\n")
+	if resp, _ := call(t, s.goPath, map[string]any{}, cwd); resp.Text != "home -> \"Home\"\n" {
+		t.Errorf("list %+v", resp)
+	}
+}
+
+func TestSavePathWritesNoSecret(t *testing.T) {
+	s, f := secretSession(t)
+	h := s.handlers()
+	cwd := t.TempDir()
+	call(t, h["do"], map[string]any{"secrets": map[string]string{"PW": fakeSecret}, "commands": "- launchApp\n- inputText: ${PW}\n"}, cwd)
+	resp, _ := call(t, h["save"], map[string]any{"name": "signed-in"}, cwd)
+	b, err := os.ReadFile(filepath.Join(cwd, "paths", "com.app", "signed-in.yaml"))
+	if err != nil || !resp.OK {
+		t.Fatalf("save %+v: %v", resp, err)
+	}
+	leaks(t, "the path file", string(b))
+	leaks(t, "the save reply", resp.Text)
+	if !strings.HasSuffix(string(b), "- inputText: ${PW}\n- assertVisible: \"${PW}\"\n") {
+		t.Errorf("file\n%s", b)
+	}
+	if !strings.Contains(resp.Text, "Secret values are not saved. Pass them when you run it: tb go signed-in -e PW=...\n") {
+		t.Errorf("reply\n%s", resp.Text)
+	}
+	call(t, h["do"], map[string]any{"secrets": map[string]string{"PW": "fake-second-02"}, "commands": "- inputText: ${PW}\n"}, cwd)
+	f.show(label(fakeSecret, 100))
+	resp, _ = call(t, h["save"], map[string]any{"name": "old-value"}, cwd)
+	b, _ = os.ReadFile(filepath.Join(cwd, "paths", "com.app", "old-value.yaml"))
+	leaks(t, "the path file", string(b))
+	if !resp.OK || strings.Contains(string(b), "assertVisible") || !strings.Contains(resp.Text, "no landmark: the screen's heading or first text shows a secret") {
+		t.Errorf("reply\n%s\nfile\n%s", resp.Text, b)
 	}
 }

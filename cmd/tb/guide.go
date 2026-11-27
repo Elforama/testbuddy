@@ -41,7 +41,9 @@ Explore an app:
 - tb save --path checkout [-d alice]   on a screen you will need again: writes them as paths/<app>/checkout.yaml,
                                   ending with an assertVisible of the screen's heading (edit it if another text is better)
 - tb go checkout [-d alice]       in any later session: runs that path and shows the screen ("arrived at ...");
-                                  tb go alone lists the app's paths, and tb open names them
+                                  it restarts the app (the path begins with launchApp) and runs in the session's app.
+                                  tb go alone lists the app's paths, and tb open names them. If it fails, go on by
+                                  hand and edit the failing step in the file: do not save over it from that session
 - TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
   (not with -p; with several devices connected and none named, tb asks which)

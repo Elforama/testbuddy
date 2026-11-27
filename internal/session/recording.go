@@ -85,10 +85,13 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		header = "url: " + string(quoted)
 	}
 	steps := rebasePathSteps(d.steps, req.Cwd, filepath.Dir(path))
-	landmark := ""
+	var landmark, missing string
 	if a.Name != "" {
+		if err := checkPathSave(d.steps, req.Cwd, path, a.Name); err != nil {
+			return fail(2, "%v", err)
+		}
 		var arrival string
-		if arrival, landmark = s.arrivalStep(ctx, d); arrival != "" {
+		if arrival, landmark, missing = s.arrivalStep(ctx, d); arrival != "" {
 			steps = append(steps, arrival)
 		}
 	}
@@ -105,7 +108,7 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	if a.Name != "" {
-		return savedPath(a.Name, path, landmark, len(steps), statErr == nil, recordingWarnings(path, body))
+		return savedPath(d, a.Name, path, landmark, missing, pathSteps(d.steps, req.Cwd), len(steps), statErr == nil, recordingWarnings(path, body))
 	}
 	text := fmt.Sprintf("saved %d commands to %s\n", len(steps), path)
 	if needs != "" {

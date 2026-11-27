@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -60,10 +61,10 @@ func pathNames(cwd, app string) []string {
 	if err != nil {
 		return nil
 	}
-	found, _ := filepath.Glob(filepath.Join(filepath.Dir(file), "*.yaml"))
+	found, _ := os.ReadDir(filepath.Dir(file))
 	var names []string
 	for _, f := range found {
-		if name := strings.TrimSuffix(filepath.Base(f), ".yaml"); pathName.MatchString(name) {
+		if name, ok := strings.CutSuffix(f.Name(), ".yaml"); ok && !f.IsDir() && pathName.MatchString(name) {
 			names = append(names, name)
 		}
 	}
@@ -72,25 +73,29 @@ func pathNames(cwd, app string) []string {
 }
 
 func landmarkStep(l *look.Listing) (step, text string) {
-	pick := func(kind string) string {
+	pick := func(kind string) *look.Element {
 		for _, e := range l.Elements {
 			if e.Kind != kind || e.Tappable || e.Covered != "" || e.Offscreen || e.Node == nil || e.Node.Editable {
 				continue
 			}
 			if t := e.Node.Text; t != "" && t == e.Label {
-				return t
+				return e
 			}
 		}
-		return ""
+		return nil
 	}
-	text = pick("Heading")
-	if text == "" {
-		text = pick("Text")
+	e := pick("Heading")
+	if e == nil {
+		e = pick("Text")
 	}
-	if text == "" {
+	if e == nil {
 		return "", ""
 	}
-	return "- assertVisible: " + strconv.Quote(regexp.QuoteMeta(text)), text
+	quoted := strconv.Quote(regexp.QuoteMeta(e.Label))
+	if e.Node.ID != "" {
+		return fmt.Sprintf("- assertVisible: {id: %s, text: %s}", strconv.Quote(regexp.QuoteMeta(look.ShortID(e.Node.ID))), quoted), e.Label
+	}
+	return "- assertVisible: " + quoted, e.Label
 }
 
 func pathLandmark(file string) string {
@@ -99,7 +104,7 @@ func pathLandmark(file string) string {
 		return ""
 	}
 	last := f.Commands[len(f.Commands)-1]
-	if last.Name != "assertVisible" || last.Selector == nil {
+	if last.Name != "assertVisible" || last.Selector == nil || last.Optional {
 		return ""
 	}
 	if last.Selector.Text != "" {
@@ -125,15 +130,88 @@ func rebasePathSteps(steps []string, cwd, dir string) []string {
 	return out
 }
 
-func (s *Service) arrivalStep(ctx context.Context, d *Dev) (step, text string) {
+const (
+	noLandmark     = "this screen shows no heading or text"
+	secretLandmark = "the screen's heading or first text shows a secret that no ${NAME} of this session stands for"
+)
+
+func (s *Service) arrivalStep(ctx context.Context, d *Dev) (step, text, missing string) {
 	scr, err := readNow(ctx, d)
 	if err != nil {
-		return "", ""
+		return "", "", noLandmark
 	}
-	return landmarkStep(look.Build(scr, look.NewRefs()))
+	step, text = landmarkStep(look.Build(scr, look.NewRefs()))
+	if step == "" {
+		return "", "", noLandmark
+	}
+	if named := replacer(d.secretNames()); named != nil {
+		step = named.Replace(step)
+	}
+	if hidden := d.hider(); hidden != nil && hidden(step) != step {
+		return "", "", secretLandmark
+	}
+	return step, text, ""
 }
 
-func savedPath(name, file, landmark string, steps int, replaced bool, warnings []recordingWarning) daemon.Response {
+func pathSteps(steps []string, cwd string) []string {
+	var files []string
+	for _, st := range steps {
+		if rel, ok := strings.CutPrefix(st, "- runFlow: paths/"); ok && !strings.ContainsAny(rel, "\n ") {
+			files = append(files, filepath.Join(cwd, "paths", filepath.FromSlash(rel)))
+		}
+	}
+	return files
+}
+
+func runsFlow(file, target string, seen map[string]bool) bool {
+	if file == target {
+		return true
+	}
+	if seen[file] {
+		return false
+	}
+	seen[file] = true
+	f, err := flow.ParseFile(file)
+	if err != nil {
+		return false
+	}
+	var within func(cmds []*flow.Command) bool
+	within = func(cmds []*flow.Command) bool {
+		for _, c := range cmds {
+			if c.SubFlow != nil && runsFlow(c.SubFlow.Path, target, seen) {
+				return true
+			}
+			if within(c.Commands) {
+				return true
+			}
+		}
+		return false
+	}
+	return within(f.Commands)
+}
+
+func checkPathSave(steps []string, cwd, file, name string) error {
+	for _, dep := range pathSteps(steps, cwd) {
+		if runsFlow(dep, file, map[string]bool{}) {
+			return fmt.Errorf("path %s would run itself: this session got here with tb go %s, which runs %s. Nothing was written. To change the path edit %s; to record it anew, tb clear, then start with launchApp",
+				name, strings.TrimSuffix(filepath.Base(dep), ".yaml"), file, file)
+		}
+	}
+	if _, err := os.Stat(file); err != nil {
+		return nil
+	}
+	first := "nothing"
+	if len(steps) > 0 {
+		first = strings.SplitN(steps[0], "\n", 2)[0]
+		if strings.HasPrefix(first, "- launchApp") || strings.HasPrefix(first, "- runFlow: paths/") {
+			return nil
+		}
+	}
+	return fmt.Errorf("path %s exists, and this recording does not start with launchApp or another path (it starts with %s): saving it would replace the whole way there with these last steps. Nothing was written. To repair the path edit the failing step in %s; to record it anew, tb clear, then start with launchApp",
+		name, first, file)
+}
+
+func savedPath(d *Dev, name, file, landmark, missing string, deps []string, steps int, replaced bool, warnings []recordingWarning) daemon.Response {
 	var out strings.Builder
 	if replaced {
 		fmt.Fprintf(&out, "replaced path %s (%d commands) in %s\n", name, steps, file)
@@ -143,7 +221,14 @@ func savedPath(name, file, landmark string, steps int, replaced bool, warnings [
 	if landmark != "" {
 		fmt.Fprintf(&out, "landmark: %q is the last step (assertVisible): edit that line if another text tells this screen apart better\n", landmark)
 	} else {
-		out.WriteString("no landmark: this screen shows no heading or text. Add an assertVisible of something only this screen has as the last step\n")
+		fmt.Fprintf(&out, "no landmark: %s. Add an assertVisible of something only this screen has as the last step\n", missing)
+	}
+	if len(deps) > 0 {
+		var names []string
+		for _, dep := range deps {
+			names = append(names, strings.TrimSuffix(filepath.Base(dep), ".yaml"))
+		}
+		fmt.Fprintf(&out, "depends on: %s\n", strings.Join(names, ", "))
 	}
 	for _, w := range warnings {
 		prefix := "warning: "
@@ -152,7 +237,11 @@ func savedPath(name, file, landmark string, steps int, replaced bool, warnings [
 		}
 		out.WriteString(prefix + w.Message + "\n")
 	}
-	fmt.Fprintf(&out, "get back here in any session on this app: tb go %s\n", name)
+	body, _ := os.ReadFile(file)
+	if vars := d.secretVars(string(body)); len(vars) > 0 {
+		fmt.Fprintf(&out, "Secret values are not saved. Pass them when you run it: tb go %s%s\n", name, strings.Join(vars, ""))
+	}
+	fmt.Fprintf(&out, "get back here in any session on this app (it restarts the app when it begins with launchApp): tb go %s\n", name)
 	return daemon.Response{OK: true, Text: out.String()}
 }
 
@@ -194,7 +283,11 @@ func (s *Service) goPath(ctx context.Context, req daemon.Request, send func(daem
 		var out strings.Builder
 		for _, n := range names {
 			file, _ := pathFile(req.Cwd, app, n)
-			fmt.Fprintf(&out, "%s -> %s\n", n, pathLandmark(file))
+			lm := pathLandmark(file)
+			if lm == "" {
+				lm = "(no landmark)"
+			}
+			fmt.Fprintf(&out, "%s -> %s\n", n, lm)
 		}
 		return daemon.Response{OK: true, Text: out.String()}
 	}
@@ -221,13 +314,13 @@ func (s *Service) goPath(ctx context.Context, req daemon.Request, send func(daem
 		if lm := pathLandmark(file); lm != "" {
 			resp.Text = "arrived at " + lm + "\n" + resp.Text
 		} else {
-			resp.Text = "arrived (the path ends without an assertVisible)\n" + resp.Text
+			resp.Text = fmt.Sprintf("ran %s: its last step is not a required assertVisible, so check the screen\n", a.Name) + resp.Text
 		}
 	case 1:
 		if !strings.HasSuffix(resp.Text, "\n") {
 			resp.Text += "\n"
 		}
-		resp.Text += fmt.Sprintf("path %s: the steps before the failure ran. Go on from the screen shown; if the app changed, save the path again (tb save --path %s)\n", a.Name, a.Name)
+		resp.Text += fmt.Sprintf("path %s: the steps before the failure ran. Go on from the screen shown; if the app changed, edit the failing step in %s\n", a.Name, filepath.ToSlash(rel))
 	}
 	return resp
 }
