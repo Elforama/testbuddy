@@ -786,22 +786,69 @@ func Diff(prev, l *Listing) string {
 	return b.String()
 }
 
+const maxSimilar = 5
+
 func (l *Listing) Similar(text string) []*Element {
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	var out []*Element
-	for _, e := range l.Elements {
-		lab := strings.ToLower(e.Label + " " + e.ID)
-		for _, w := range words {
-			if len([]rune(w)) >= 4 && strings.Contains(lab, w) {
-				out = append(out, e)
-				break
+	var words, typoWords []string
+	for _, w := range similarWords(text) {
+		if n := len([]rune(w)); n >= 4 {
+			words = append(words, w)
+			if n >= 5 && !strings.ContainsFunc(w, unicode.IsDigit) {
+				typoWords = append(typoWords, w)
 			}
 		}
-		if len(out) == 5 {
-			break
+	}
+	var out, typos []*Element
+	for _, e := range l.Elements {
+		lab := strings.ToLower(e.Label + " " + e.ID)
+		switch {
+		case containsAny(lab, words):
+			out = append(out, e)
+		case len(typos) < maxSimilar && typoOfAny(similarWords(lab), typoWords):
+			typos = append(typos, e)
+		}
+		if len(out) == maxSimilar {
+			return out
 		}
 	}
-	return out
+	return append(out, typos[:min(len(typos), maxSimilar-len(out))]...)
+}
+
+func similarWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+func containsAny(lab string, words []string) bool {
+	for _, w := range words {
+		if strings.Contains(lab, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func typoOfAny(have, words []string) bool {
+	for _, w := range words {
+		for _, h := range have {
+			if oneEditApart([]rune(w), []rune(h)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func oneEditApart(a, b []rune) bool {
+	for len(a) > 0 && len(b) > 0 && a[0] == b[0] {
+		a, b = a[1:], b[1:]
+	}
+	for len(a) > 0 && len(b) > 0 && a[len(a)-1] == b[len(b)-1] {
+		a, b = a[:len(a)-1], b[:len(b)-1]
+	}
+	if len(a) == 2 && len(b) == 2 {
+		return a[0] == b[1] && a[1] == b[0]
+	}
+	return len(a) <= 1 && len(b) <= 1
 }
 
 func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {

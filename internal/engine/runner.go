@@ -144,18 +144,53 @@ func New(drv driver.Driver, opts Options) *Runner {
 type FlowError struct {
 	Msg          string
 	stallChecked bool
+	assertion    bool
 }
 
 func (e *FlowError) Error() string { return e.Msg }
 
 func failf(format string, args ...any) error { return &FlowError{Msg: fmt.Sprintf(format, args...)} }
 
+func assertionFalsef(format string, args ...any) error {
+	return &FlowError{Msg: "Assertion is false: " + fmt.Sprintf(format, args...), assertion: true}
+}
+
 type NotFound struct {
 	FlowError
 	Screen *ui.Screen
 	Query  string
+	ID     string
 	left   bool
 	away   string
+	moved  bool
+	blind  bool
+}
+
+const (
+	ReasonNotFound        = "not_found"
+	ReasonScreenChanged   = "screen_changed"
+	ReasonAssertionFailed = "assertion_failed"
+	ReasonOther           = "other"
+)
+
+func Reason(err error) string {
+	var nf *NotFound
+	var fe *FlowError
+	switch {
+	case errors.As(err, &nf):
+		switch {
+		case nf.moved || nf.left:
+			return ReasonScreenChanged
+		case nf.assertion:
+			return ReasonAssertionFailed
+		case nf.blind:
+			return ReasonOther
+		}
+		return ReasonNotFound
+	case errors.As(err, &fe) && fe.assertion:
+		return ReasonAssertionFailed
+	}
+	return ReasonOther
 }
 
 func isFlowError(err error) bool {
@@ -287,6 +322,7 @@ type StepResult struct {
 	Err      string
 	Duration time.Duration
 	Hints    []string
+	Reason   string
 }
 
 func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
@@ -435,6 +471,9 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints}
 			if err != nil {
 				sr.Err = err.Error()
+			}
+			if status == Failed {
+				sr.Reason = Reason(err)
 			}
 			onStep(sr)
 		}

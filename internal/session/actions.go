@@ -29,6 +29,7 @@ type actionStep struct {
 	Status      engine.Status `json:"status"`
 	DurationMS  int64         `json:"duration_ms"`
 	Error       string        `json:"error,omitempty"`
+	Reason      string        `json:"reason,omitempty"`
 	Hints       []string      `json:"hints,omitempty"`
 	Notes       []string      `json:"notes,omitempty"`
 }
@@ -116,7 +117,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
 		notes := dialogNotes(d)
 		if a.JSON {
-			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints, notes})
+			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Reason, st.Hints, notes})
 		}
 		mark := "ok"
 		switch st.Status {
@@ -145,7 +146,6 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		}
 		idx++
 	})
-	var nf *engine.NotFound
 	d.Drv.WaitSettled(ctx, 3*time.Second)
 	after := dialogNotes(d)
 	result.Notes = append(result.Notes, after...)
@@ -155,9 +155,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	scr, serr := readNow(ctx, d)
 	if serr == nil {
 		now := look.Build(scr, d.refs)
-		if errors.As(runErr, &nf) && nf.Query != "" {
-			sim := now.Similar(nf.Query)
-			result.Query, result.Similar = nf.Query, sim
+		if query := missedQuery(runErr); query != "" {
+			sim := now.Similar(query)
+			result.Query, result.Similar = query, sim
 			if len(sim) > 0 {
 				var parts []string
 				for _, e := range sim {
@@ -182,6 +182,17 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		resp.JSON, _ = json.Marshal(result)
 	}
 	return resp
+}
+
+func missedQuery(runErr error) string {
+	var nf *engine.NotFound
+	if !errors.As(runErr, &nf) {
+		return ""
+	}
+	if nf.Query != "" {
+		return nf.Query
+	}
+	return nf.ID
 }
 
 func splitItems(text string) ([]string, error) {
