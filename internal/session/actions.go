@@ -21,6 +21,7 @@ type doArgs struct {
 	Commands string            `json:"commands"`
 	App      string            `json:"app"`
 	Env      map[string]string `json:"env"`
+	Secrets  map[string]string `json:"secrets"`
 	JSON     bool              `json:"json"`
 }
 
@@ -72,6 +73,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		return resp
 	}
 	defer d.mu.Unlock()
+	if err := d.keepSecrets(a.Secrets); err != nil {
+		return badInput(err)
+	}
 	if a.App != "" {
 		d.AppID = a.App
 	}
@@ -92,6 +96,11 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	items, _ := splitItems(text)
 	fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
 	record := stableItems(lastScreen, fresh, cmds, items)
+	if named := replacer(d.secretNames()); named != nil {
+		for i := range record {
+			record[i] = named.Replace(record[i])
+		}
+	}
 	appID := d.AppID
 	if appID == "" {
 		if fg, err := d.Drv.Foreground(ctx); err == nil {
@@ -104,6 +113,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	idx := 0
 	var env []flow.KV
 	for k, v := range a.Env {
+		env = append(env, flow.KV{Key: k, Value: v})
+	}
+	for k, v := range a.Secrets {
 		env = append(env, flow.KV{Key: k, Value: v})
 	}
 	runner.SetEnv(env)

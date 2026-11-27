@@ -99,6 +99,18 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
+`tb do --secret NAME[=value]` (MCP `run`: `secrets`) defines `${NAME}` like `-e`, and the
+session keeps the value in memory only, until it closes. Two replacements keep its text out
+of what tb shows and stores (`internal/session/secrets.go`): the steps a `tb do` records get
+`${NAME}` where the value stands (a typed literal, or a selector built from a ref whose label
+is the value), so `tb log` and `tb save` never hold it; and every session command's reply
+passes through one wrapper (`Service.hiding`) that prints `•••` for the value of any open
+session's secret, in text and inside the JSON's strings: step errors, hints, the screen diff,
+`tb look`, `tb locate`, `tb watch`. The match is on the text as written (also regex-escaped
+and quoted), so a value an app shows reformatted, or one character per box, is not hidden, and
+screenshots and `tb hierarchy` (its own read of the device) are not masked. A session's runner writes no trace or timeline, and the daemon
+log holds no command text.
+
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
 the ordinary test runner. It requires a single-device flow whose first executed step is a
