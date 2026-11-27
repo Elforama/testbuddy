@@ -180,6 +180,7 @@ func nameAway(err error) error {
 	}
 	nf.Msg = nf.away + ": " + nf.Msg
 	nf.away = ""
+	nf.moved = true
 	return err
 }
 

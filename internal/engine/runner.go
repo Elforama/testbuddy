@@ -154,8 +154,41 @@ type NotFound struct {
 	FlowError
 	Screen *ui.Screen
 	Query  string
+	ID     string
 	left   bool
 	away   string
+	moved  bool
+}
+
+const (
+	ReasonNotFound        = "not_found"
+	ReasonScreenChanged   = "screen_changed"
+	ReasonAssertionFailed = "assertion_failed"
+	ReasonOther           = "other"
+)
+
+func Reason(err error) string {
+	var nf *NotFound
+	var fe *FlowError
+	msg := ""
+	switch {
+	case errors.As(err, &nf):
+		if nf.moved || nf.left || nf.away != "" {
+			return ReasonScreenChanged
+		}
+		msg = nf.Msg
+	case errors.As(err, &fe):
+		msg = fe.Msg
+	default:
+		return ReasonOther
+	}
+	if strings.HasPrefix(msg, "Assertion is false") {
+		return ReasonAssertionFailed
+	}
+	if nf != nil {
+		return ReasonNotFound
+	}
+	return ReasonOther
 }
 
 func isFlowError(err error) bool {
@@ -287,6 +320,7 @@ type StepResult struct {
 	Err      string
 	Duration time.Duration
 	Hints    []string
+	Reason   string
 }
 
 func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
@@ -435,6 +469,9 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints}
 			if err != nil {
 				sr.Err = err.Error()
+			}
+			if status == Failed {
+				sr.Reason = Reason(err)
 			}
 			onStep(sr)
 		}

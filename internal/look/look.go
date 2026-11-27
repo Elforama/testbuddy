@@ -786,22 +786,91 @@ func Diff(prev, l *Listing) string {
 	return b.String()
 }
 
+const maxSimilar = 5
+
 func (l *Listing) Similar(text string) []*Element {
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	var out []*Element
-	for _, e := range l.Elements {
-		lab := strings.ToLower(e.Label + " " + e.ID)
-		for _, w := range words {
-			if len([]rune(w)) >= 4 && strings.Contains(lab, w) {
-				out = append(out, e)
-				break
-			}
-		}
-		if len(out) == 5 {
-			break
+	var words [][]rune
+	for _, w := range similarWords(text) {
+		if len(w) >= 4 {
+			words = append(words, w)
 		}
 	}
+	if len(words) == 0 {
+		return nil
+	}
+	var out, typos []*Element
+	for _, e := range l.Elements {
+		lab := strings.ToLower(e.Label + " " + e.ID)
+		switch {
+		case containsAny(lab, words):
+			out = append(out, e)
+		case len(typos) < maxSimilar && typoOfAny(similarWords(lab), words):
+			typos = append(typos, e)
+		}
+		if len(out) == maxSimilar {
+			return out
+		}
+	}
+	return append(out, typos[:min(len(typos), maxSimilar-len(out))]...)
+}
+
+func similarWords(text string) [][]rune {
+	var out [][]rune
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		out = append(out, []rune(w))
+	}
 	return out
+}
+
+func containsAny(lab string, words [][]rune) bool {
+	for _, w := range words {
+		if strings.Contains(lab, string(w)) {
+			return true
+		}
+	}
+	return false
+}
+
+func typoOfAny(have, words [][]rune) bool {
+	for _, w := range words {
+		allowed := 1
+		if len(w) >= 8 {
+			allowed = 2
+		}
+		for _, h := range have {
+			if typoDistance(w, h, allowed) <= allowed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func typoDistance(a, b []rune, limit int) int {
+	if d := len(a) - len(b); d > limit || -d > limit {
+		return limit + 1
+	}
+	prev2 := make([]int, len(b)+1)
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				cur[j] = min(cur[j], prev2[j-2]+1)
+			}
+		}
+		prev2, prev, cur = prev, cur, prev2
+	}
+	return prev[len(b)]
 }
 
 func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {
