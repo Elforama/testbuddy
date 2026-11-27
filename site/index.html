@@ -211,14 +211,19 @@ tb check --lint flows/    <span class="m"># no device needed</span></code></pre>
       <div class="wrap">
         <p class="eyebrow">Benchmarks</p>
         <h2>Speed compared with WebdriverIO and Maestro</h2>
-        <p class="section-lede">Each tool ran the same test on the same demo app: sign in, open and edit an item, scroll a list that loads more, and use screens that never stop moving. Seconds for the whole command, start-up included. Lower is better.</p>
-        <p class="section-lede">Benchmark: <a href="https://github.com/Elforama/testbuddy/blob/main/bench/README.md">Buddy Bench</a>, the demo app in this repository, built for Android, iOS and the web. Mean of 5 runs on one Mac on 2026-11-26 with tb 0.7.0, WebdriverIO 10.2.0 and Maestro 2.12.1.</p>
+        <p class="section-lede">Seconds for the whole command, start-up included. Lower is better. Each tool ran the same test files on the same app and device, one run at a time on one Mac.</p>
+        <p class="section-lede"><a href="https://github.com/Elforama/testbuddy/blob/main/bench/README.md">Buddy Bench</a> is the demo app in this repository, built for Android, iOS and the web: sign in, open and edit an item, scroll a list that loads more, and use screens that never stop moving. Measured on 2026-11-26 with tb 0.7.0, WebdriverIO 10.2.0 and Maestro 2.12.1.</p>
+        <p class="section-lede">The other four are the sample suites from <a href="https://github.com/mobile-dev-inc/Maestro/tree/main/e2e">Maestro's own repository</a>, run unchanged. They are Maestro flow files, which WebdriverIO does not run. Measured on 2026-11-27 with tb built from main and Maestro 2.12.1.</p>
 
         <div class="tabs bench" data-tabs>
           <div class="tablist" role="tablist" aria-label="Benchmark app">
             <button type="button" role="tab" id="tab-bench-android" aria-controls="panel-bench-android" aria-selected="true">Buddy Bench · Android</button>
             <button type="button" role="tab" id="tab-bench-ios" aria-controls="panel-bench-ios" aria-selected="false" tabindex="-1">Buddy Bench · iOS</button>
             <button type="button" role="tab" id="tab-bench-web" aria-controls="panel-bench-web" aria-selected="false" tabindex="-1">Buddy Bench · Web</button>
+            <button type="button" role="tab" id="tab-bench-wiki-android" aria-controls="panel-bench-wiki-android" aria-selected="false" tabindex="-1">Wikipedia · Android</button>
+            <button type="button" role="tab" id="tab-bench-wiki-ios" aria-controls="panel-bench-wiki-ios" aria-selected="false" tabindex="-1">Wikipedia · iOS</button>
+            <button type="button" role="tab" id="tab-bench-webview-ios" aria-controls="panel-bench-webview-ios" aria-selected="false" tabindex="-1">Web view app · iOS</button>
+            <button type="button" role="tab" id="tab-bench-maestro-web" aria-controls="panel-bench-maestro-web" aria-selected="false" tabindex="-1">Maestro web samples</button>
           </div>
           <figure class="chart" role="tabpanel" id="panel-bench-android" aria-labelledby="tab-bench-android">
             <figcaption><strong>Buddy Bench · Android</strong><span>Emulator, Android 16 · mean of 5 runs, with the fastest and slowest</span></figcaption>
@@ -237,6 +242,26 @@ tb check --lint flows/    <span class="m"># no device needed</span></code></pre>
             <div class="row mine"><span class="tool">tb</span><span class="track"><i style="--w:3.1%"></i></span><span class="value">7.4 s <small>7.3–7.5</small></span></div>
             <div class="row"><span class="tool">WebdriverIO</span><span class="track"><i style="--w:1.9%"></i></span><span class="value">4.4 s <small>4.2–4.5</small></span></div>
             <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">236.3 s <small>231.6–239.8</small></span></div>
+          </figure>
+          <figure class="chart" role="tabpanel" id="panel-bench-wiki-android" aria-labelledby="tab-bench-wiki-android" hidden>
+            <figcaption><strong>Wikipedia · Android</strong><span>Maestro's Wikipedia sample, 2 flows · Android 16 emulator · mean of 5 runs, with the fastest and slowest</span></figcaption>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:42.5%"></i></span><span class="value">18.8 s <small>18.7–18.8</small></span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">44.2 s <small>43.8–44.9</small></span></div>
+          </figure>
+          <figure class="chart" role="tabpanel" id="panel-bench-wiki-ios" aria-labelledby="tab-bench-wiki-ios" hidden>
+            <figcaption><strong>Wikipedia · iOS</strong><span>Maestro's Wikipedia sample, 2 flows · iPhone 17 simulator · mean of 5 runs, with the fastest and slowest</span></figcaption>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:64.0%"></i></span><span class="value">46.7 s <small>46.4–47.0</small></span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">73.0 s <small>71.9–74.0</small></span></div>
+          </figure>
+          <figure class="chart" role="tabpanel" id="panel-bench-webview-ios" aria-labelledby="tab-bench-webview-ios" hidden>
+            <figcaption><strong>Web view app · iOS</strong><span>Maestro's web view sample app, 1 flow · iPhone 17 simulator · mean of 5 runs, with the fastest and slowest</span></figcaption>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:31.8%"></i></span><span class="value">5.6 s <small>4.8–6.5</small></span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">17.6 s <small>17.2–18.1</small></span></div>
+          </figure>
+          <figure class="chart" role="tabpanel" id="panel-bench-maestro-web" aria-labelledby="tab-bench-maestro-web" hidden>
+            <figcaption><strong>Maestro web samples</strong><span>Maestro's web page samples, 14 flows · headless Chrome · mean of 5 runs, with the fastest and slowest</span></figcaption>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:10.4%"></i></span><span class="value">13.7 s <small>13.3–13.9</small></span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">131.9 s <small>131.1–132.5</small></span></div>
           </figure>
         </div>
       </div>
