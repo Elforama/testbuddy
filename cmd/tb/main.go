@@ -63,7 +63,12 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          save a screenshot
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
-  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
+  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step; a failure
+                                         names the step ("step 3 of 7") and how to finish
+  tb replay <file.yaml> -d DEVICE --from 4
+                                         run the steps that are left, on the app as it is: in
+                                         your open session on DEVICE (or -d alice) when you
+                                         hold one, which stays open (tb replay -h)
   tb log | tb clear [-d alice]           show or reset the recorded commands
   tb applog [-d alice] [--since SECONDS]
                                          the app's own error log (Android, iOS simulator): a crash

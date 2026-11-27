@@ -91,7 +91,8 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. `--scale` (also on `tb look`) is from 0 to 1; 0 and 1 mean full size. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
-| `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
+| `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. A failure names the step ("step 3 of 7"). |
+| `tb replay <file.yaml> -d DEVICE --from N` | Run the flow from its Nth step on the app as it is now: the steps that are left after you did a failed one yourself. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
 | `tb applog [-d alice] [--since SECONDS]` | The error log of the session's app, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`). |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
@@ -141,6 +142,26 @@ Replay accepts `-e KEY=VALUE` for variables, `--headless` for Chrome, `--debug-o
 for traces and failure artifacts, and `--json` for the test summary. On a failing replay,
 read the error and open the artifacts in `flows[].debugDir` before deciding whether to
 change the flow or the starting state. Replay uses zero retries.
+
+A failed replay ends with the step that failed, counted over the flow's top-level steps
+("Replay failed at step 3 of 7: ..."), and how to finish; with `--json` the flow has
+`failedStep` and `steps` (how many steps the flow has). To finish, do that step yourself in
+a session (`tb do -d DEVICE '...'`), then `tb replay <file.yaml> -d DEVICE --from 4` runs
+steps 4 to 7 on the app as it is: the steps before N do not run (no `launchApp`, no
+`clearState`), and the flow's `appId`, `url` and `env` still apply. `--from` takes a step
+from 1 to the flow's last.
+
+- On a device you hold in an open session (`-d` its serial, name or session name), the steps
+  run in that session: it stays open and nothing is closed or restarted. The flow's text is
+  taken as written (no `@ref`), its `env` and `-e` apply to this run only, as in a replay, and
+  the steps are not added to the session's recorded commands. `--record`, `--annotate`,
+  `--events-port`, `--timeline`, `--debug-output` and `--headless` are refused there (exit 2),
+  and `onFlowStart` / `onFlowComplete` do not run.
+- On a phone with no session of yours, the test runner runs them, with the usual artifacts.
+- A browser replay opens its own browser, which is gone when it ends, so `--from` on the web
+  needs your session: `tb open -p web --name NAME`, `tb replay <file.yaml> -d NAME --from 1`
+  (the whole flow, in the session, which stays where a step failed), `tb do -d NAME '...'`,
+  then `--from` with the next step.
 
 ### Reading `tb look`
 
