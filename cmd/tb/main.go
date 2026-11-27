@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -48,7 +49,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb do [-d alice] [--json] '<command>' ...  run flow commands and report the outcome
   tb do - < steps.yaml                   commands from stdin
   tb do --secret PW 'inputText: ${PW}'   type a password or code without tb showing or saving
-                                         it (PW from the environment, or --secret PW=value)
+                                         it (PW from the environment, or --secret PW=value;
+                                         6 characters or more)
   tb wait [-d alice] <text> [--gone] [--timeout ms]
                                          wait (event-driven) until text appears or goes
   tb locate [-d alice] [--json] <selector>
@@ -508,12 +510,14 @@ func cmdDo(argv []string) int {
 	return callDaemon("do", req)
 }
 
+var secretName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func secretsFrom(specs []string) (map[string]string, error) {
 	secrets := map[string]string{}
 	for _, spec := range specs {
 		name, value, given := strings.Cut(spec, "=")
-		if name == "" {
-			return nil, fmt.Errorf("--secret takes NAME=value or NAME (the value is then read from the environment), not %q", spec)
+		if !secretName.MatchString(name) {
+			return nil, errors.New("--secret takes NAME=value or NAME (the value is then read from the environment); NAME is letters, digits and _, not starting with a digit")
 		}
 		if !given {
 			if value, given = os.LookupEnv(name); !given {

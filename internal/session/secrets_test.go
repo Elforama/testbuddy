@@ -130,28 +130,71 @@ func TestSecretIsRecordedByName(t *testing.T) {
 	}
 }
 
-func TestSecretsEndWithTheSession(t *testing.T) {
-	s, _ := secretSession(t)
+func TestLongSecretIsHiddenWhereTheListingCutsIt(t *testing.T) {
+	s, f := secretSession(t)
 	h := s.handlers()
-	call(t, h["do"], map[string]any{"secrets": map[string]string{"PW": "fake"}, "commands": "- inputText: ${PW}\n"}, "")
-	if resp, _ := call(t, h["look"], nil, ""); strings.Contains(resp.Text, `"fake"`) {
-		t.Fatalf("look in the session: %+v", resp)
-	}
-	if resp, _ := call(t, h["close"], nil, ""); !resp.OK {
-		t.Fatalf("close: %+v", resp)
-	}
-	again := newFake("e2", "E2", device.Android)
-	again.show(label("fake", 100))
-	addDev(s, again, "")
-	if resp, _ := call(t, h["look"], nil, ""); !strings.Contains(resp.Text, `"fake"`) {
-		t.Errorf("look on another session: %+v", resp)
+	long := "zzFakeTok" + strings.Repeat("0123456789", 10)
+	call(t, h["do"], map[string]any{"secrets": map[string]string{"TOK": long, "PW": fakeSecret}, "commands": "- inputText: ${TOK}\n"}, "")
+	f.show(label(long, 100), label(strings.Repeat("x", 70)+" "+fakeSecret, 200))
+	for _, args := range []map[string]any{{}, {"json": true}} {
+		resp, _ := call(t, h["look"], args, "")
+		out := resp.Text + string(resp.JSON)
+		if strings.Contains(out, "zzFa") || strings.Contains(out, "fake.") || !strings.Contains(out, "•••…") {
+			t.Errorf("look %v shows the start of a secret the listing cut:\n%s", args, out)
+		}
 	}
 }
 
-func TestEmptySecretIsRefused(t *testing.T) {
+func TestSecretWithSpacesIsHidden(t *testing.T) {
+	s, _ := secretSession(t)
+	h := s.handlers()
+	resp, _ := call(t, h["do"], map[string]any{"secrets": map[string]string{"PH": "zzfake  horse"}, "commands": "- inputText: ${PH}\n"}, "")
+	look, _ := call(t, h["look"], nil, "")
+	if out := resp.Text + look.Text; strings.Contains(out, "horse") || !strings.Contains(out, "•••") {
+		t.Errorf("the listing shows the secret with its spaces collapsed:\n%s", out)
+	}
+}
+
+func TestRedefinedSecretStaysHidden(t *testing.T) {
 	s, f := secretSession(t)
-	resp, _ := call(t, s.handlers()["do"], map[string]any{"secrets": map[string]string{"PW": ""}, "commands": "- inputText: ${PW}\n"}, "")
-	if resp.Exit != 2 || !strings.Contains(resp.Text, "PW") || len(f.typed) != 0 {
-		t.Errorf("resp %+v, typed %q", resp, f.typed)
+	h := s.handlers()
+	call(t, h["do"], map[string]any{"secrets": map[string]string{"OLD": "fake-first-01"}, "commands": "- inputText: ${OLD}\n"}, "")
+	call(t, h["do"], map[string]any{"secrets": map[string]string{"OLD": "fake-second-02"}, "commands": "- inputText: ${OLD}\n"}, "")
+	f.show(label("fake-first-01", 100), label("fake-second-02", 200))
+	if resp, _ := call(t, h["look"], nil, ""); strings.Contains(resp.Text, "fake-") {
+		t.Errorf("look shows a value the name had before:\n%s", resp.Text)
+	}
+	if resp, _ := call(t, h["log"], nil, ""); resp.Text != "- inputText: ${OLD}\n- inputText: ${OLD}\n" {
+		t.Errorf("log:\n%s", resp.Text)
+	}
+}
+
+func TestShortSecretIsRefused(t *testing.T) {
+	for _, value := range []string{"", "1", "12345"} {
+		s, f := secretSession(t)
+		resp, _ := call(t, s.handlers()["do"], map[string]any{"secrets": map[string]string{"PIN": value}, "commands": "- inputText: a${PIN}b\n"}, "")
+		if resp.Exit != 2 || !strings.Contains(resp.Text, "PIN") || !strings.Contains(resp.Text, "at least 6 characters") || len(f.typed) != 0 {
+			t.Errorf("secret %q: resp %+v, typed %q", value, resp, f.typed)
+		}
+		if value != "" && strings.Contains(resp.Text, value) {
+			t.Errorf("the refusal shows the value: %s", resp.Text)
+		}
+	}
+}
+
+func TestSecretsHideOnlyInTheirSession(t *testing.T) {
+	s := New()
+	a, b := newFake("a", "A", device.Android), newFake("b", "B", device.Android)
+	a.show(label(fakeSecret, 100))
+	b.show(label(fakeSecret, 100))
+	addDev(s, a, "alice")
+	addDev(s, b, "bob")
+	h := s.handlers()
+	call(t, h["do"], map[string]any{"device": "alice", "secrets": map[string]string{"PW": fakeSecret}, "commands": "- inputText: ${PW}\n"}, "")
+	if resp, _ := call(t, h["look"], map[string]any{"device": "alice"}, ""); strings.Contains(resp.Text, fakeSecret) {
+		t.Errorf("alice's look shows her secret:\n%s", resp.Text)
+	}
+	if resp, _ := call(t, h["look"], map[string]any{"device": "bob"}, ""); !strings.Contains(resp.Text, fakeSecret) {
+		t.Errorf("bob's look is masked with alice's secret:\n%s", resp.Text)
 	}
 }

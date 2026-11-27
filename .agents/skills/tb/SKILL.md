@@ -89,7 +89,7 @@ tb replay flows/example.yaml -d DEVICE --json
 2. Look, then `tb do` each action with the assertion that proves it. Refs come from the
    latest listing and are saved as stable selectors. `tb locate` shows every match of a
    selector and which one tb picks. Type a password or code with
-   `tb do --secret PW 'inputText: ${PW}'` (PW from the environment): tb shows `•••` for it
+   `tb do --secret PW 'inputText: ${PW}'` (PW from the environment, 6+ characters): tb shows `•••` for it
    and saves `${PW}`, to replay with `-e PW=...`.
 3. Preview, fix its `warnings`, then save. Preview leaves the filesystem alone.
 4. Close the session (it releases the device lock; `tb close` waits for a running command:

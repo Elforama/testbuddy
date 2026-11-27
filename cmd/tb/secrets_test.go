@@ -33,15 +33,22 @@ func TestDoSecretFlag(t *testing.T) {
 func TestDoSecretFlagNeedsAValue(t *testing.T) {
 	startFakeDaemon(t)
 	for spec, want := range map[string]string{
-		"TB_TEST_UNSET": "TB_TEST_UNSET is not set in the environment",
-		"PW=":           "--secret PW has no value",
-		"=x":            "--secret takes NAME=value or NAME",
+		"TB_TEST_UNSET":           "TB_TEST_UNSET is not set in the environment",
+		"PW=":                     "--secret PW has no value",
+		"=" + fakeSecret:          "--secret takes NAME=value or NAME",
+		"my-pw=" + fakeSecret:     "NAME is letters, digits and _",
+		fakeSecret + "=x":         "--secret takes NAME=value or NAME",
+		"1PW=" + fakeSecret + "x": "--secret takes NAME=value or NAME",
 	} {
 		var code int
 		_, stderr := capture(t, func() { code = cmdDo([]string{"--secret", spec, "inputText: ${PW}"}) })
-		if code != 2 || !strings.Contains(stderr, want) {
+		if code != 2 || !strings.Contains(stderr, want) || strings.Contains(stderr, fakeSecret) {
 			t.Errorf("--secret %s: exit %d, stderr %q", spec, code, stderr)
 		}
+	}
+	r := mcpCall(context.Background(), "run", map[string]any{"commands": "inputText: hi", "secrets": []any{"=" + fakeSecret}})
+	if text := r["content"].([]map[string]any)[0]["text"].(string); r["isError"] != true || strings.Contains(text, fakeSecret) {
+		t.Errorf("MCP run with a nameless secret: %v", r)
 	}
 }
 

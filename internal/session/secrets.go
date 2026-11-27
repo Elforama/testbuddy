@@ -8,25 +8,33 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/elforama/testbuddy/internal/daemon"
 )
 
-const hiddenText = "•••"
+const (
+	hiddenText   = "•••"
+	cutMark      = "…"
+	minSecret    = 6
+	minCutPrefix = 4
+)
 
 func (d *Dev) keepSecrets(secrets map[string]string) error {
 	for name, value := range secrets {
-		if name == "" || value == "" {
-			return fmt.Errorf("secret %q has no value", name)
+		if utf8.RuneCountInString(value) < minSecret {
+			return fmt.Errorf("secret %s is too short to hide: a secret needs at least %d characters, so that hiding it cannot blank unrelated text", name, minSecret)
 		}
 	}
 	d.stepsMu.Lock()
 	defer d.stepsMu.Unlock()
+	if d.secrets == nil && len(secrets) > 0 {
+		d.secrets, d.hidden = map[string]string{}, map[string]bool{}
+	}
 	for name, value := range secrets {
-		if d.secrets == nil {
-			d.secrets = map[string]string{}
-		}
 		d.secrets[name] = value
+		d.hidden[value] = true
 	}
 	return nil
 }
@@ -58,12 +66,22 @@ func (d *Dev) replayNeeds(path string) string {
 	return "Secret values are not saved. Pass them on replay: tb replay " + path + " -d DEVICE" + strings.Join(vars, "")
 }
 
+func spellings(value string) []string {
+	var out []string
+	for _, spaced := range []string{value, strings.Join(strings.Fields(value), " ")} {
+		for _, spelled := range []string{spaced, regexp.QuoteMeta(spaced)} {
+			quoted := strconv.Quote(spelled)
+			out = append(out, spelled, quoted[1:len(quoted)-1])
+		}
+	}
+	return out
+}
+
 func replacer(shown map[string]string) *strings.Replacer {
 	var pairs [][2]string
 	for value, as := range shown {
-		for _, spelled := range []string{value, regexp.QuoteMeta(value)} {
-			quoted := strconv.Quote(spelled)
-			pairs = append(pairs, [2]string{spelled, as}, [2]string{quoted[1 : len(quoted)-1], as})
+		for _, spelled := range spellings(value) {
+			pairs = append(pairs, [2]string{spelled, as})
 		}
 	}
 	if len(pairs) == 0 {
@@ -82,49 +100,89 @@ func replacer(shown map[string]string) *strings.Replacer {
 	return strings.NewReplacer(flat...)
 }
 
-func (s *Service) hider() *strings.Replacer {
-	s.mu.Lock()
-	devs := make([]*Dev, 0, len(s.devs))
-	for _, d := range s.devs {
-		devs = append(devs, d)
-	}
-	s.mu.Unlock()
+func (d *Dev) hider() func(string) string {
+	d.stepsMu.Lock()
 	shown := map[string]string{}
-	for _, d := range devs {
-		for value := range d.secretNames() {
-			shown[value] = hiddenText
+	var spelled []string
+	for value := range d.hidden {
+		shown[value] = hiddenText
+		spelled = append(spelled, spellings(value)...)
+	}
+	d.stepsMu.Unlock()
+	whole := replacer(shown)
+	if whole == nil {
+		return nil
+	}
+	return func(text string) string {
+		parts := strings.Split(whole.Replace(text), cutMark)
+		for i := range parts[:len(parts)-1] {
+			parts[i] = hideCutSecret(parts[i], spelled)
+		}
+		return strings.Join(parts, cutMark)
+	}
+}
+
+func hideCutSecret(text string, spelled []string) string {
+	longest := 0
+	for _, s := range spelled {
+		runes := []rune(s)
+		for n := len(runes) - 1; n >= minCutPrefix; n-- {
+			if start := string(runes[:n]); strings.HasSuffix(text, start) {
+				longest = max(longest, len(start))
+				break
+			}
 		}
 	}
-	return replacer(shown)
+	if longest == 0 {
+		return text
+	}
+	return text[:len(text)-longest] + hiddenText
 }
 
 var jsonString = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
 
-func (s *Service) hide(r daemon.Response) daemon.Response {
-	h := s.hider()
-	if h == nil {
+func (d *Dev) hide(r daemon.Response) daemon.Response {
+	hidden := d.hider()
+	if hidden == nil {
 		return r
 	}
-	r.Text = h.Replace(r.Text)
+	r.Text = hidden(r.Text)
 	if len(r.JSON) > 0 {
 		r.JSON = jsonString.ReplaceAllFunc(r.JSON, func(lit []byte) []byte {
 			var text string
 			if json.Unmarshal(lit, &text) != nil {
 				return lit
 			}
-			out, _ := json.Marshal(h.Replace(text))
+			out, _ := json.Marshal(hidden(text))
 			return out
 		})
 	}
 	return r
 }
 
+type askedDev struct{}
+
+func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
+	d, err := s.resolveDev(ctx, a)
+	if asked, ok := ctx.Value(askedDev{}).(*atomic.Pointer[Dev]); ok && d != nil {
+		asked.Store(d)
+	}
+	return d, err
+}
+
 func (s *Service) hiding(h daemon.Handler) daemon.Handler {
 	return func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
+		var asked atomic.Pointer[Dev]
+		hide := func(r daemon.Response) daemon.Response {
+			if d := asked.Load(); d != nil {
+				return d.hide(r)
+			}
+			return r
+		}
 		out := send
 		if send != nil {
-			out = func(r daemon.Response) { send(s.hide(r)) }
+			out = func(r daemon.Response) { send(hide(r)) }
 		}
-		return s.hide(h(ctx, req, out))
+		return hide(h(context.WithValue(ctx, askedDev{}, &asked), req, out))
 	}
 }

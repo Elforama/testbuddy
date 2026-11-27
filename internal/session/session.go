@@ -35,6 +35,7 @@ type Dev struct {
 	AppID        string
 	steps        []string
 	secrets      map[string]string
+	hidden       map[string]bool
 	lastDoEnd    *look.Listing
 	lock         *devlock.Lock
 	closed       bool
@@ -310,7 +311,7 @@ func onPlatform(m map[string]*Dev, platform string) []*Dev {
 	return found
 }
 
-func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
+func (s *Service) resolveDev(ctx context.Context, a devArgs) (*Dev, error) {
 	a.Force = false
 	s.mu.Lock()
 	if d, err := s.openDev(a); d != nil || err != nil {
