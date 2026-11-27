@@ -90,9 +90,8 @@ line of near matches. Read those before anything else. Then [debugging.md](debug
 ## Record a flow from the shell
 
 ```bash
-tb open -d emulator-5554 --name rec --app com.example.app
-tb do -d rec 'launchApp'
-tb look -d rec                   # the screen: one line per element, @refs, layout
+tb open -d emulator-5554 --name rec --app com.example.app   # launches the app, prints its screen
+tb look -d rec                   # the screen again: one line per element, @refs, layout
 tb do -d rec 'tapOn: @5' 'assertVisible: {id: status, text: "Saved"}'
 tb locate -d rec '{text: "Edit"}'   # every match and which one tb would pick
 tb save --preview flows/save-item.yaml -d rec --json
@@ -101,8 +100,12 @@ tb close -d rec
 tb replay flows/save-item.yaml -d emulator-5554 --json
 ```
 
-1. Open the device, then start with a plain `launchApp` (it keeps app data); add
-   `clearState: true` only when the test needs a fresh install state.
+1. Open the device with `--app`: that launches the app (web: loads the URL), prints its
+   screen and records `launchApp` as the first step, so no `launchApp` call is needed. App
+   data is kept; run `tb do 'launchApp: {clearState: true}'` only when the test needs a fresh
+   install state: it records a second launch, so run `tb clear` before it to keep the saved
+   flow to one. Leave `--app` out to attach to the device as it is: nothing is launched,
+   and the reply says what is in front.
 2. `tb look`, then `tb do` each action with the assertion that proves it. Read the diff
    `tb do` prints (`+` new, `~` changed, `-` gone) instead of looking again. `@refs` come
    from the latest output; they are saved as stable selectors. Type a password or code with
@@ -127,8 +130,8 @@ heading: edit that line if another text tells the screen apart better. In any la
 `tb go checkout` runs it and prints `arrived at "..."` and the screen; `tb go` alone lists
 the app's paths, and `tb open` names them.
 
-- Start the recording with `launchApp`, so the path works from anywhere. `tb go` then
-  restarts the app: anything unsaved on the screen you were on is gone.
+- The recording starts with the `launchApp` of `tb open --app`, so the path works from
+  anywhere. `tb go` then restarts the app: anything unsaved on the screen you were on is gone.
 - `tb go` runs the path in the session's app, whatever the file's `appId:` or `url:` says.
 - A path saved after `tb go other` runs `other` first: the save reply says `depends on: other`,
   and deleting or breaking `other.yaml` breaks it too.

@@ -481,8 +481,8 @@ one. `tb look` on a device is the final word.
 ## Drive a device (agents and people)
 
 ```sh
-tb open -p android --name alice --app com.example.app  # -p or -d is required
-tb look                                       # what is on screen
+tb open -p android --name alice --app com.example.app  # launches the app, prints its screen
+tb look                                       # what is on screen now
 tb do 'tapOn: @7' 'inputText: "user@example.com"' 'tapOn: "Next"'
 tb wait "Welcome"                             # waits on device events, not a loop
 tb locate '{id: next}' --json                 # find matches and the runner's pick without tapping
@@ -505,6 +505,13 @@ android 1080x2400 com.android.settings, 11 elements
 @16 Switch #switchWidget unchecked
 ...
 ```
+
+`tb open --app` launches the app (web: loads the URL) as a `launchApp` step does and prints
+its screen; that launch is the first recorded step. Leave `--app` out to attach to the device
+as it is: nothing is launched, and the reply says what is in front. To reset app data, run
+`tb do 'launchApp: {clearState: true}'`: that records a second launch, and `tb clear` before
+it keeps the saved flow to one. Opening another app later in the session records that launch
+with its app (`- launchApp: {appId: ...}`); the saved flow keeps the first app as its `appId:`.
 
 `tb do` prints a line per command (`ok` / `FAILED`, with timing), then what changed:
 `+` new elements, `~` changed, `-` gone, or the whole new screen when most of it is new.
@@ -538,9 +545,10 @@ command is kept as typed. The first of several matches is treated like the other
 tells it apart.
 
 `tb replay` parses one single-device flow and runs it once on an explicit device. The first
-executed step must be a required `launchApp` that restarts the app. Record `launchApp` to
-relaunch with existing app data, or `launchApp: {clearState: true}` to reset app data at
-launch. For a headless web flow, use `-d web --headless`. Replay uses the ordinary test
+executed step must be a required `launchApp` that restarts the app. `tb open --app` records
+that `launchApp`, which relaunches with existing app data; run `tb clear`, then
+`tb do 'launchApp: {clearState: true}'` to record a launch that resets app data instead
+(without `tb clear` the flow holds both launches). For a headless web flow, use `-d web --headless`. Replay uses the ordinary test
 runner and writes its usual failure artifacts. See [architecture](docs/architecture.md)
 for the recording and replay lifecycle, host components, and platform agents.
 
@@ -549,8 +557,8 @@ See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
 For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `read`, `collect`, `run`, `wait`, `save_flow`, `go`, `app_log`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
-Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
-The shell equivalent is `tb open -p web --headless --app URL`, followed by `tb do launchApp`.
+`open` loads the page and returns its screen. `save_flow` records the session as a web flow.
+The shell equivalent is `tb open -p web --headless --app URL`.
 
 ## Use with AI coding agents
 

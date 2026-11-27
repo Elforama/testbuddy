@@ -79,6 +79,8 @@ type fakeDriver struct {
 	taps             [][2]int
 	typed            []string
 	launched         []string
+	launchErr        error
+	onLaunch         func()
 	waits            int
 	closed           int
 	released         int
@@ -239,9 +241,15 @@ func (f *fakeDriver) Screenshot(ctx context.Context, scale float64, format strin
 }
 func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpts) error {
 	f.mu.Lock()
+	hook := f.onLaunch
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.launched = append(f.launched, a)
-	return nil
+	return f.launchErr
 }
 func (f *fakeDriver) StopApp(ctx context.Context, a string) error    { return nil }
 func (f *fakeDriver) KillApp(ctx context.Context, a string) error    { return nil }

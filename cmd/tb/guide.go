@@ -15,7 +15,13 @@ Set up:
 
 Explore an app:
 - tb devices                      list devices: free, in use (by whom), or your session
-- tb open -p android|ios|web [--name alice] [--app APP_ID]   or -d DEVICE instead of -p; --name for multi-device work
+- tb open -p android|ios|web [--name alice] --app APP_ID   or -d DEVICE instead of -p; --name for multi-device work
+                                  connects, launches the app (web: loads the URL) as a launchApp step
+                                  does, and prints its screen: the launch is the first recorded step.
+                                  Without --app it attaches to the device as it is, launches nothing and
+                                  says what is in front. Reset app data: tb do 'launchApp: {clearState: true}'
+                                  (a second recorded launch: tb clear before it keeps the saved flow to one).
+                                  --app with another app later in the session records that launch with its app
 - tb look [-d alice]              screen as one line per element: @ref Kind "label" #id state;
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.
                                   where layout matters (unindented lines stack top to bottom);
@@ -78,7 +84,8 @@ Explore an app:
 - tb close -d alice               releases the device (tb test/replay take it from your own idle session)
                                   (Ctrl-C that command, or tb daemon stop, to end a stuck one)
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
-                                  start with a required launchApp and close the session after saving
+                                  the flow starts with a required launchApp (tb open --app records it);
+                                  close the session after saving
                                   use the device serial, simulator UDID or unique name, or -d web --headless
 - tb replay flows/name.yaml -d alice --from 4   after a replay failed at "step 3 of 7" and you did that step
                                   yourself (tb do): runs steps 4 to 7 on the app as it is, no launchApp.

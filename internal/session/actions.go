@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
+	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/engine"
 	"github.com/elforama/testbuddy/internal/flow"
@@ -128,6 +129,13 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if a.App != "" {
 		d.AppID = a.App
 	}
+	if d.flowApp != "" && d.AppID != d.flowApp && len(record) == len(cmds) {
+		for i, c := range cmds {
+			if c.Name == "launchApp" && record[i] == "- launchApp" {
+				record[i] = launchItem(d.AppID)
+			}
+		}
+	}
 	appID := d.AppID
 	if appID == "" {
 		if fg, err := d.Drv.Foreground(ctx); err == nil {
@@ -233,6 +241,15 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		resp.JSON, _ = json.Marshal(result)
 	}
 	return resp
+}
+
+func launchItem(app string) string {
+	key := "appId"
+	if device.IsURL(app) {
+		key = "url"
+	}
+	quoted, _ := json.Marshal(app)
+	return fmt.Sprintf("- launchApp: {%s: %s}", key, quoted)
 }
 
 func missedQuery(runErr error) string {
