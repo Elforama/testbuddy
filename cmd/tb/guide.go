@@ -31,6 +31,10 @@ Explore an app:
                                   a FAILED step also says if the app crashed, "crashed: <app>:
                                   <exception and the frame that threw it>", and prints the app's
                                   last error log lines ("log: ..."): an app bug, not a test bug
+- tb do --secret PW 'inputText: ${PW}'   types a password or code that tb never shows or saves:
+                                  PW comes from the environment (or --secret PW=value) and is 6
+                                  characters or more; output and listings show ••• in its place,
+                                  tb save writes ${PW} and says to replay with -e PW=...
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb applog [-d alice] [--since 60]   the app's error log on demand (Android, iOS simulator):
                                   the crash with its stack, then the error lines

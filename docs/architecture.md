@@ -105,6 +105,23 @@ lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Androi
 `logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
 SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
 
+`tb do --secret NAME[=value]` (MCP `run`: `secrets`) defines `${NAME}` like `-e`, and the
+session keeps the value in memory only, until it closes. Two replacements keep its text out
+of what tb shows and stores (`internal/session/secrets.go`): the steps a `tb do` records get
+`${NAME}` where the value stands (a typed literal, or a selector built from a ref whose label
+is the value), so `tb log` and `tb save` never hold it; and every session command's reply
+passes through one wrapper (`Service.hiding`) that prints `•••` for every value given as a
+secret in the session the command resolved (never another session's: a reply must not tell
+one agent what another typed), in text and inside the JSON's strings: step errors, hints,
+the screen diff, `tb look`, `tb locate`, `tb watch`. A name given a new value keeps its old
+values hidden. The match is on the text as written, with its whitespace collapsed as the
+listing does, regex-escaped and quoted; and since the listing cuts long labels, the start of
+a value (4 characters or more) standing right before a `…` is hidden too. A value needs at
+least 6 characters: a shorter one would blank refs, sizes and timings. A value an app shows
+reformatted, or one character per box, is not hidden, and
+screenshots and `tb hierarchy` (its own read of the device) are not masked. A session's runner writes no trace or timeline, and the daemon
+log holds no command text.
+
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
 the ordinary test runner. It requires a single-device flow whose first executed step is a

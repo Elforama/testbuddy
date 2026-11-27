@@ -79,8 +79,9 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		header = "url: " + string(quoted)
 	}
 	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(d.steps, "\n"))
+	needs := d.replayNeeds(path)
 	if a.Preview {
-		return previewRecording(path, body, len(d.steps))
+		return previewRecording(path, body, len(d.steps), needs)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fail(1, "%v", err)
@@ -88,7 +89,11 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return fail(1, "%v", err)
 	}
-	return daemon.Response{OK: true, Text: fmt.Sprintf("saved %d commands to %s\n", len(d.steps), path)}
+	text := fmt.Sprintf("saved %d commands to %s\n", len(d.steps), path)
+	if needs != "" {
+		text += needs + "\n"
+	}
+	return daemon.Response{OK: true, Text: text}
 }
 
 type recordingWarning struct {
@@ -97,8 +102,11 @@ type recordingWarning struct {
 	Message string `json:"message"`
 }
 
-func previewRecording(path, body string, steps int) daemon.Response {
+func previewRecording(path, body string, steps int, needs string) daemon.Response {
 	warnings := []recordingWarning{}
+	if needs != "" {
+		warnings = append(warnings, recordingWarning{Code: "secret_variables", Message: needs})
+	}
 	f, err := flow.ParseBytes(path, []byte(body))
 	if err != nil {
 		warnings = append(warnings, recordingWarning{Code: "invalid_flow", Message: err.Error()})

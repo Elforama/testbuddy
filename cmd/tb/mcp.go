@@ -47,7 +47,8 @@ var mcpTools = []mcpTool{
 		"device": devProp, "screenshot": map[string]any{"type": "boolean"}, "all": map[string]any{"type": "boolean"}, "json": map[string]any{"type": "boolean"}})},
 	{"run", "Run flow commands (YAML; @refs from look allowed). Returns each result and what changed on screen.", schema(map[string]any{
 		"device": devProp, "commands": map[string]any{"type": "string", "description": "e.g. \"- tapOn: @3\\n- inputText: hi\""},
-		"json": map[string]any{"type": "boolean", "description": "return structured steps and the resulting screen"}}, "commands")},
+		"secrets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "passwords and codes to type as ${NAME}: \"NAME=value\", or \"NAME\" to read it from the server's environment; never shown in results, recordings or saved flows"},
+		"json":    map[string]any{"type": "boolean", "description": "return structured steps and the resulting screen"}}, "commands")},
 	{"wait", "Wait (event-driven) until text appears, or is gone.", schema(map[string]any{
 		"device": devProp, "text": map[string]any{"type": "string"}, "gone": map[string]any{"type": "boolean"},
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
@@ -279,6 +280,19 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		params := map[string]any{"device": str("device"), "commands": toCommandList([]string{str("commands")})}
 		if asJSON, _ := args["json"].(bool); asJSON {
 			params["json"] = true
+		}
+		var specs []string
+		list, _ := args["secrets"].([]any)
+		for _, x := range list {
+			specs = append(specs, fmt.Sprint(x))
+		}
+		secrets, err := secretsFrom(specs)
+		if err != nil {
+			resp = daemon.Response{Exit: 2, Text: err.Error()}
+			break
+		}
+		if len(secrets) > 0 {
+			params["secrets"] = secrets
 		}
 		resp = call("do", params)
 		if params["json"] == true && len(resp.JSON) > 0 {

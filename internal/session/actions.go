@@ -21,6 +21,7 @@ type doArgs struct {
 	Commands string            `json:"commands"`
 	App      string            `json:"app"`
 	Env      map[string]string `json:"env"`
+	Secrets  map[string]string `json:"secrets"`
 	JSON     bool              `json:"json"`
 	Replay   *ReplayArgs       `json:"replay,omitempty"`
 }
@@ -81,6 +82,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		return resp
 	}
 	defer d.mu.Unlock()
+	if err := d.keepSecrets(a.Secrets); err != nil {
+		return badInput(err)
+	}
 	var lastScreen = d.last
 	text := a.Commands
 	if a.Replay != nil {
@@ -115,6 +119,11 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		items, _ := splitItems(text)
 		fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
 		record = stableItems(lastScreen, fresh, cmds, items)
+		if named := replacer(d.secretNames()); named != nil {
+			for i := range record {
+				record[i] = named.Replace(record[i])
+			}
+		}
 	}
 	if a.App != "" {
 		d.AppID = a.App
@@ -130,6 +139,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	idx := 0
 	var env []flow.KV
 	for k, v := range a.Env {
+		env = append(env, flow.KV{Key: k, Value: v})
+	}
+	for k, v := range a.Secrets {
 		env = append(env, flow.KV{Key: k, Value: v})
 	}
 	runner.SetEnv(env)
