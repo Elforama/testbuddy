@@ -1,0 +1,2 @@
+recording.mp4 is timed by tb's own clock, so in sync: not checked
+drew 37 captions, 27 touches and 0 events on recording.mp4 in 2876 ms
