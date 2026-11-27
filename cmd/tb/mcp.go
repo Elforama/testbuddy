@@ -59,6 +59,8 @@ var mcpTools = []mcpTool{
 		"name": map[string]any{"type": "string", "description": "instead of path: writes paths/<app>/<name>.yaml, ending with an assertVisible of this screen's heading; go runs it"}})},
 	{"go", "Run a named path (saved with save_flow name) to get back to its screen in one call; without name, list the app's paths.", schema(map[string]any{
 		"device": devProp, "name": map[string]any{"type": "string"}})},
+	{"app_log", "The app's own error log (Android, iOS simulator): a crash with its stack, then its error lines. A failed run already shows the crash and the last lines.", schema(map[string]any{
+		"device": devProp, "since": map[string]any{"type": "integer", "description": "seconds back (default 60)"}})},
 	{"close", "Disconnect a device.", schema(map[string]any{"device": devProp})},
 }
 
@@ -326,6 +328,9 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 			structured = resp.JSON
 			resp.Text = string(structured)
 		}
+	case "app_log":
+		since, _ := args["since"].(float64)
+		resp = call("applog", map[string]any{"device": str("device"), "since": int(since)})
 	case "close":
 		resp = call("close", map[string]any{"device": str("device")})
 	default:

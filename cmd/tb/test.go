@@ -799,6 +799,16 @@ func saveFailure(dir string, r orchestrate.Result, drivers map[string]driver.Dri
 			}
 		}
 		cancel()
+		if logs, ok := drv.(driver.AppLogReader); ok && r.Job != nil && r.Job.Flow.Config.AppID != "" {
+			appID := r.Job.Flow.Config.AppID
+			c, cancel = context.WithTimeout(context.Background(), failureArtifactTimeout)
+			if log, err := logs.AppLog(c, appID, time.Since(r.Start)); err == nil {
+				if text := log.Text(appID); text != "" {
+					os.WriteFile(filepath.Join(dir, "app"+suffix+".log"), []byte(text), 0o644)
+				}
+			}
+			cancel()
+		}
 	}
 	var steps []map[string]any
 	for _, s := range r.Steps {
