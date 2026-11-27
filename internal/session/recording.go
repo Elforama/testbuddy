@@ -93,8 +93,9 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		}
 	}
 	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(steps, "\n"))
+	needs := d.replayNeeds(path)
 	if a.Preview {
-		return previewRecording(path, body, len(steps))
+		return previewRecording(path, body, len(steps), needs)
 	}
 	_, statErr := os.Stat(path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -106,7 +107,11 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	if a.Name != "" {
 		return savedPath(a.Name, path, landmark, len(steps), statErr == nil, recordingWarnings(path, body))
 	}
-	return daemon.Response{OK: true, Text: fmt.Sprintf("saved %d commands to %s\n", len(steps), path)}
+	text := fmt.Sprintf("saved %d commands to %s\n", len(steps), path)
+	if needs != "" {
+		text += needs + "\n"
+	}
+	return daemon.Response{OK: true, Text: text}
 }
 
 type recordingWarning struct {
@@ -132,8 +137,12 @@ func recordingWarnings(path, body string) []recordingWarning {
 	return warnings
 }
 
-func previewRecording(path, body string, steps int) daemon.Response {
-	warnings := recordingWarnings(path, body)
+func previewRecording(path, body string, steps int, needs string) daemon.Response {
+	warnings := []recordingWarning{}
+	if needs != "" {
+		warnings = append(warnings, recordingWarning{Code: "secret_variables", Message: needs})
+	}
+	warnings = append(warnings, recordingWarnings(path, body)...)
 	var out strings.Builder
 	for _, w := range warnings {
 		prefix := "# Warning: "

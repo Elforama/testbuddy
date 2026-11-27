@@ -105,7 +105,9 @@ tb replay flows/save-item.yaml -d emulator-5554 --json
    `clearState: true` only when the test needs a fresh install state.
 2. `tb look`, then `tb do` each action with the assertion that proves it. Read the diff
    `tb do` prints (`+` new, `~` changed, `-` gone) instead of looking again. `@refs` come
-   from the latest output; they are saved as stable selectors.
+   from the latest output; they are saved as stable selectors. Type a password or code with
+   `tb do --secret PW 'inputText: ${PW}'` (PW from the environment, 6+ characters): tb shows `•••` for it
+   and saves `${PW}`, to replay with `-e PW=...`.
 3. `tb save --preview ... --json`: fix its `warnings` (selectors that depend on order,
    accidental regex, a missing assertion), then save. Preview writes nothing.
 4. Close the session, then replay once on the device serial, UDID or name from `tb devices`

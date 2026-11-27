@@ -28,6 +28,10 @@ Explore an app:
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
                                   runs flow commands (@ref, or 'tapOn: #id' as look prints it); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
+- tb do --secret PW 'inputText: ${PW}'   types a password or code that tb never shows or saves:
+                                  PW comes from the environment (or --secret PW=value) and is 6
+                                  characters or more; output and listings show ••• in its place,
+                                  tb save writes ${PW} and says to replay with -e PW=...
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen

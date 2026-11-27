@@ -34,6 +34,8 @@ type Dev struct {
 	last         *look.Listing
 	AppID        string
 	steps        []string
+	secrets      map[string]string
+	hidden       map[string]bool
 	lastDoEnd    *look.Listing
 	lock         *devlock.Lock
 	closed       bool
@@ -188,24 +190,24 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("ping", func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 		return daemon.Response{OK: true, Text: daemon.BuildID()}
 	})
-	srv.Handle("devices", s.devices)
-	srv.Handle("open", s.open)
-	srv.Handle("close", s.close)
-	srv.Handle("look", s.look)
-	srv.Handle("locate", s.locate)
-	srv.Handle("do", s.do)
-	srv.Handle("go", s.goPath)
-	srv.Handle("watch", s.watch)
-	srv.Handle("shot", s.shot)
-	srv.Handle("log", s.log)
-	srv.Handle("save", s.save)
-	srv.Handle("clear", s.clear)
-	srv.Handle("yield", s.yield)
+	for cmd, h := range s.handlers() {
+		srv.Handle(cmd, h)
+	}
 	srv.Handle("stop", func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 		daemon.StopAfterReply(ctx)
 		return daemon.Response{OK: true, Text: "tb daemon stopped"}
 	})
 	srv.OnStop(s.CloseAll)
+}
+
+func (s *Service) handlers() map[string]daemon.Handler {
+	hs := map[string]daemon.Handler{"devices": s.devices, "open": s.open, "close": s.close, "look": s.look,
+		"locate": s.locate, "do": s.do, "go": s.goPath, "watch": s.watch, "shot": s.shot, "log": s.log, "save": s.save,
+		"clear": s.clear, "yield": s.yield}
+	for cmd, h := range hs {
+		hs[cmd] = s.hiding(h)
+	}
+	return hs
 }
 
 func (s *Service) CloseAll(ctx context.Context) {
@@ -309,7 +311,7 @@ func onPlatform(m map[string]*Dev, platform string) []*Dev {
 	return found
 }
 
-func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
+func (s *Service) resolveDev(ctx context.Context, a devArgs) (*Dev, error) {
 	a.Force = false
 	s.mu.Lock()
 	if d, err := s.openDev(a); d != nil || err != nil {
