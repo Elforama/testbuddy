@@ -61,7 +61,12 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          ending with an assertVisible of the screen's heading
   tb go <name> [-d alice]                run that path in any later session, and show the screen
   tb go [-d alice]                       list the paths saved for the session's app
-  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
+  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step; a failure
+                                         names the step ("step 3 of 7") and how to finish
+  tb replay <file.yaml> -d DEVICE --from 4
+                                         run the steps that are left, on the app as it is: in
+                                         your open session on DEVICE (or -d alice) when you
+                                         hold one, which stays open (tb replay -h)
   tb log | tb clear [-d alice]           show or reset the recorded commands
   tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
   tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
