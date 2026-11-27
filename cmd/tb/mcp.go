@@ -61,6 +61,8 @@ var mcpTools = []mcpTool{
 		"rows": map[string]any{"type": "integer"}, "max_scrolls": map[string]any{"type": "integer"}})},
 	{"save_flow", "Save the commands that passed as a flow file.", schema(map[string]any{
 		"device": devProp, "path": map[string]any{"type": "string"}}, "path")},
+	{"app_log", "The app's own error log (Android, iOS simulator): a crash with its stack, then its error lines. A failed run already shows the crash and the last lines.", schema(map[string]any{
+		"device": devProp, "since": map[string]any{"type": "integer", "description": "seconds back (default 60)"}})},
 	{"close", "Disconnect a device.", schema(map[string]any{"device": devProp})},
 }
 
@@ -324,6 +326,9 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 			}
 		}
 		resp = call("collect", params)
+	case "app_log":
+		since, _ := args["since"].(float64)
+		resp = call("applog", map[string]any{"device": str("device"), "since": int(since)})
 	case "close":
 		resp = call("close", map[string]any{"device": str("device")})
 	default:

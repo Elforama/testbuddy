@@ -3,6 +3,8 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
@@ -143,6 +145,34 @@ type Dialog struct {
 
 type DialogLog interface {
 	Dialogs(since int) ([]Dialog, int)
+}
+
+type AppLog struct {
+	Crash string
+	Trace []string
+	Lines []string
+}
+
+func (l AppLog) Text(appID string) string {
+	var b strings.Builder
+	if l.Crash != "" {
+		fmt.Fprintf(&b, "crashed: %s: %s\n", appID, l.Crash)
+		for _, t := range l.Trace {
+			b.WriteString("  " + t + "\n")
+		}
+	}
+	for _, line := range l.Lines {
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+func AppLogSeconds(last time.Duration) int {
+	return int((last+time.Second-1)/time.Second) + 1
+}
+
+type AppLogReader interface {
+	AppLog(ctx context.Context, appID string, last time.Duration) (AppLog, error)
 }
 
 type RecordingParts interface {

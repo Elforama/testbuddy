@@ -82,7 +82,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
 | `tb open -p PLATFORM \| -d DEVICE [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
-| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`, and on the failed step a `reason`), and on failure the `screen`, the `query` that matched nothing (the selector's text, or its id when it has no text) and the `similar` elements. |
+| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`, and on the failed step a `reason`), and on failure the `screen`, the `query` that matched nothing (the selector's text, or its id when it has no text) the `similar` elements, `crash` (when the app crashed) and `log` (the app's last error lines). |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
 | `tb locate [-d alice] [--json] <text, @ref or {selector}>` | Every element a selector matches on the current screen and the one a tap would pick (`chosen`): check a selector is unambiguous before saving it. |
@@ -94,12 +94,13 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
+| `tb applog [-d alice] [--since SECONDS]` | The error log of the session's app, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`). |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
 | `tb release [-d DEVICE \| all] [-p ios] [--force]` | Free devices for other test tools (other agents' sessions, by `TB_SESSION_OWNER`, only with `--force`): stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb mark [-d DEVICE] <text>...` | Send events to a running `tb test --record --annotate` (see `--events-port`): each shows in the videos' event log at the time tb got it; several texts are one burst. `tb mark -` reads a line an event. `--url` names the endpoint (default `$TB_EVENTS_URL`, else the running run's). |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
-| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `locate`, `read`, `collect`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
+| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `locate`, `read`, `collect`, `save_flow`, `app_log`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
 
 ### Set up
@@ -222,6 +223,25 @@ With `--json`, the failed step carries a `reason`:
 | `screen_changed` | The element of your last look was replaced, the app left the foreground, or the screen changed while tb scrolled back to it. | `tb look`, then act on the new screen. |
 | `assertion_failed` | An assertion or `extendedWaitUntil` condition was false. | A `similar` element if it was a visibility check; else the app is in another state. |
 | `other` | Anything else (script error, device error, bad value, a screen tb could not read): read `error`. | |
+
+A failed `tb do` or `tb wait` also reads the app's own log for the time the command took
+(Android: logcat; iOS simulator: the unified log), so an app bug can be told from a test bug:
+
+```
+FAILED Assert visible "Saved"  17.0s
+  Element not found: "Saved"
+crashed: com.shop: java.lang.IllegalStateException: cart is empty at com.shop.CartActivity.onCreate(CartActivity.kt:41)
+log: 09:10:01.100 E Net: request failed: timeout
+```
+
+On Android `crashed:` names the exception and the frame that threw it (the root cause's). On
+iOS it gives only the signal the app exited on (`exited on signal SIGABRT`): what the app
+logged before it is in the `log:` lines. `log:` shows up to 10 error lines, the latest last;
+on iOS, lines of Apple's own frameworks (subsystem `com.apple.*`) are left out, and two apps
+with the same executable name share their lines. An app that stopped responding (ANR) is not
+reported as a crash. A passing `tb do` reads no log. `tb applog` prints the whole stack and
+every error line; `tb test` writes the same to `app.log` in a failed flow's debug directory.
+Web sessions have no app log.
 
 ## Environment variables
 

@@ -47,6 +47,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          what scroll areas hide, * on new elements
   tb do [-d alice] [--json] '<command>' ...  run flow commands and report the outcome
   tb do - < steps.yaml                   commands from stdin
+                                         a failed step adds "crashed: <app>: <exception and frame>"
+                                         if the app crashed, and its last error log lines ("log:")
   tb wait [-d alice] <text> [--gone] [--timeout ms]
                                          wait (event-driven) until text appears or goes
   tb locate [-d alice] [--json] <selector>
@@ -70,6 +72,9 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
+  tb applog [-d alice] [--since SECONDS]
+                                         the app's own error log (Android, iOS simulator): a crash
+                                         with its stack, then error lines (default: last 60 s)
   tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
   tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
                                          (other agents' sessions only with --force)
@@ -159,6 +164,8 @@ func main() {
 		code = cmdReplay(rest)
 	case "log":
 		code = agentCall("log", rest, nil)
+	case "applog":
+		code = agentCall("applog", rest, appLogFlags)
 	case "clear":
 		code = agentCall("clear", rest, nil)
 	case "hierarchy":
@@ -361,9 +368,10 @@ func cmdDevices(argv []string) int {
 var (
 	lookFlags = []flagSpec{{[]string{"shot"}, boolFlag}, {[]string{"all"}, boolFlag},
 		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
-	watchFlags = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
-	shotFlags  = []flagSpec{{[]string{"scale"}, fractionFlag}}
-	readFlags  = []flagSpec{{[]string{"equals"}, textFlag}, {[]string{"json"}, boolFlag}}
+	watchFlags  = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
+	shotFlags   = []flagSpec{{[]string{"scale"}, fractionFlag}}
+	appLogFlags = []flagSpec{{[]string{"since"}, intFlag}}
+	readFlags   = []flagSpec{{[]string{"equals"}, textFlag}, {[]string{"json"}, boolFlag}}
 
 	collectFlags = []flagSpec{{[]string{"direction"}, textFlag}, {[]string{"rows"}, intFlag},
 		{[]string{"max-scrolls"}, intFlag}, {[]string{"json"}, boolFlag}}

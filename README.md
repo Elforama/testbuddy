@@ -509,6 +509,10 @@ android 1080x2400 com.android.settings, 11 elements
 A background daemon keeps devices connected, so these calls take milliseconds. With several
 devices, add `-d alice`. Exit status: 0 ok, 1 failed, 2 bad input.
 
+When a step fails on Android or an iOS simulator, `tb do` also prints a `crashed:` line if the
+app crashed during the command and the app's last error log lines (`log:`); `tb applog` prints
+them on demand.
+
 `tb do --json` and MCP `run` with `json: true` return the executed steps with their status
 and duration in milliseconds, the final screen when available, and similar elements on a
 lookup failure. MCP clients can read the object from `structuredContent`.
@@ -540,7 +544,7 @@ for the recording and replay lifecycle, host components, and platform agents.
 
 For any shell-capable coding agent, `tb agent-guide` prints a portable quick reference.
 See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
-For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `read`, `collect`, `run`, `wait`, `save_flow`, `close`).
+For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `read`, `collect`, `run`, `wait`, `save_flow`, `app_log`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
 Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.

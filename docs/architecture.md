@@ -106,6 +106,12 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
+A `tb do` with a failed step (never a passing one) reads the app's own log for the time it took,
+through the optional `driver.AppLogReader`, and prints a `crashed:` line and the last error
+lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Android reads
+`logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
+SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
+
 After saving, close the interactive session on the replay target so the test runner can
 take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
 the ordinary test runner. It requires a single-device flow whose first executed step is a

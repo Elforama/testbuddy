@@ -28,7 +28,12 @@ Explore an app:
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
                                   runs flow commands (@ref, or 'tapOn: #id' as look prints it); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
+                                  a FAILED step also says if the app crashed, "crashed: <app>:
+                                  <exception and the frame that threw it>", and prints the app's
+                                  last error log lines ("log: ..."): an app bug, not a test bug
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
+- tb applog [-d alice] [--since 60]   the app's error log on demand (Android, iOS simulator):
+                                  the crash with its stack, then the error lines
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
 - tb read [-d alice] "Total" [--equals "€24.99"]   one value instead of a look: prints ok "Total" = "€24.99"
                                   and touches nothing. The value is a switch's or checkbox's on/off, a
@@ -69,7 +74,8 @@ Explore an app:
 Run tests:
 - tb test flows/ -p android       run YAML flows; Maestro flows run unchanged (tb test -h); -p or a device is required
 - tb test flows/ -p ios --json    machine-readable results: each flow's status, seconds and error; a
-                                  failed flow's debugDir (log.txt: what tb did; screen.txt: the screen)
+                                  failed flow's debugDir (log.txt: what tb did; screen.txt: the screen;
+                                  app.log: a "crashed:" line if the app crashed, and its error log)
 - tb test flows/ -p ios --timeline also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ -p ios --record  record each flow's screen, start to finish (in the reports and timeline)
 - tb replay f.yaml -d D --record --annotate  a video a person can follow (for a PR): captions, touches, no rush
