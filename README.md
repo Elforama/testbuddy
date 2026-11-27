@@ -486,6 +486,8 @@ tb look                                       # what is on screen
 tb do 'tapOn: @7' 'inputText: "user@example.com"' 'tapOn: "Next"'
 tb wait "Welcome"                             # waits on device events, not a loop
 tb locate '{id: next}' --json                 # find matches and the runner's pick without tapping
+tb read "Total" --equals "€24.99"             # the value shown for a label, without a look
+tb collect --rows 50                          # scroll the list and print each row once
 tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save --preview -d alice --json              # inspect the export and its warnings
@@ -544,7 +546,7 @@ for the recording and replay lifecycle, host components, and platform agents.
 
 For any shell-capable coding agent, `tb agent-guide` prints a portable quick reference.
 See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
-For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `go`, `app_log`, `close`).
+For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `read`, `collect`, `run`, `wait`, `save_flow`, `go`, `app_log`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
 Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.

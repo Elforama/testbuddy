@@ -52,6 +52,7 @@ type item struct {
 	hint            string
 	top             int
 	disabled        bool
+	checked         bool
 }
 
 func button(text string, top int) item {
@@ -149,7 +150,8 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 		}
 		n := &ui.Node{Text: it.text, ID: it.id, Hint: it.hint, Class: cls, Depth: 1, Enabled: !it.disabled, Visible: true,
 			Bounds:    ui.Rect{L: 0, T: it.top, R: f.w, B: it.top + 50},
-			Clickable: strings.HasSuffix(cls, "Button"), Editable: strings.HasSuffix(cls, "EditText")}
+			Clickable: strings.HasSuffix(cls, "Button"), Editable: strings.HasSuffix(cls, "EditText"),
+			Checked: it.checked, Checkable: it.checked}
 		nodes = append(nodes, n)
 	}
 	w := &ui.Window{Type: "app", Package: f.fg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: f.w, B: f.h}}
