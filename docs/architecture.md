@@ -99,6 +99,12 @@ in YAML comments. Its checks cover syntax and top-level risks such as coordinate
 match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
 inspected separately with `tb locate`.
 
+A `tb do` with a failed step (never a passing one) reads the app's own log for the time it took,
+through the optional `driver.AppLogReader`, and prints a `crashed:` line and the last error
+lines; `tb applog` and a failed `tb test` flow's `app.log` hold the same. Android reads
+`logcat --uid` over adb, the iOS simulator `log show` for the app's executable plus
+SpringBoard's exit line; neither uses the on-device agent, and web has no app log.
+
 `tb do --secret NAME[=value]` (MCP `run`: `secrets`) defines `${NAME}` like `-e`, and the
 session keeps the value in memory only, until it closes. Two replacements keep its text out
 of what tb shows and stores (`internal/session/secrets.go`): the steps a `tb do` records get

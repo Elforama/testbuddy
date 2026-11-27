@@ -202,7 +202,7 @@ func (s *Service) Register(srv *daemon.Server) {
 
 func (s *Service) handlers() map[string]daemon.Handler {
 	hs := map[string]daemon.Handler{"devices": s.devices, "open": s.open, "close": s.close, "look": s.look,
-		"locate": s.locate, "do": s.do, "watch": s.watch, "shot": s.shot, "log": s.log, "save": s.save,
+		"locate": s.locate, "do": s.do, "watch": s.watch, "shot": s.shot, "log": s.log, "applog": s.applog, "save": s.save,
 		"clear": s.clear, "yield": s.yield}
 	for cmd, h := range hs {
 		hs[cmd] = s.hiding(h)

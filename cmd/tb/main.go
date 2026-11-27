@@ -48,6 +48,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          what scroll areas hide, * on new elements
   tb do [-d alice] [--json] '<command>' ...  run flow commands and report the outcome
   tb do - < steps.yaml                   commands from stdin
+                                         a failed step adds "crashed: <app>: <exception and frame>"
+                                         if the app crashed, and its last error log lines ("log:")
   tb do --secret PW 'inputText: ${PW}'   type a password or code without tb showing or saving
                                          it (PW from the environment, or --secret PW=value;
                                          6 characters or more)
@@ -63,6 +65,9 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
+  tb applog [-d alice] [--since SECONDS]
+                                         the app's own error log (Android, iOS simulator): a crash
+                                         with its stack, then error lines (default: last 60 s)
   tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
   tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
                                          (other agents' sessions only with --force)
@@ -70,6 +75,14 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb mcp                                 serve the same as MCP tools over stdio
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
+
+Set up:
+  tb doctor [--json]                     check adb and Android devices, Xcode and booted
+                                         simulators, Chrome and the tb daemon: one line per
+                                         check, with the fix (changes no device; tb doctor -h)
+  tb init [--dry-run]                    register tb's MCP server with the coding agents found
+                                         here (Claude Code, Codex, Gemini CLI), then run the
+                                         doctor checks (tb init -h)
 
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
 tb test and tb open need -p android|ios|web unless a device is named (-d, --device, TB_DEVICE)
@@ -140,6 +153,8 @@ func main() {
 		code = cmdReplay(rest)
 	case "log":
 		code = agentCall("log", rest, nil)
+	case "applog":
+		code = agentCall("applog", rest, appLogFlags)
 	case "clear":
 		code = agentCall("clear", rest, nil)
 	case "hierarchy":
@@ -148,6 +163,10 @@ func main() {
 		code = cmdMCP(rest)
 	case "daemon":
 		code = cmdDaemon(rest)
+	case "doctor":
+		code = cmdDoctor(rest)
+	case "init":
+		code = cmdInit(rest)
 	case "agent-guide", "guide":
 		code = cmdGuide(rest)
 	case "version", "--version", "-v":
@@ -338,8 +357,9 @@ func cmdDevices(argv []string) int {
 var (
 	lookFlags = []flagSpec{{[]string{"shot"}, boolFlag}, {[]string{"all"}, boolFlag},
 		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
-	watchFlags = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
-	shotFlags  = []flagSpec{{[]string{"scale"}, fractionFlag}}
+	watchFlags  = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
+	shotFlags   = []flagSpec{{[]string{"scale"}, fractionFlag}}
+	appLogFlags = []flagSpec{{[]string{"since"}, intFlag}}
 )
 
 func platformFlag(a *args) (string, error) {
