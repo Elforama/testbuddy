@@ -338,7 +338,7 @@ func TestMCPTools(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"devices", "open", "look", "run", "wait", "save_flow", "close"} {
+	for _, name := range []string{"devices", "open", "look", "run", "wait", "save_flow", "app_log", "close"} {
 		if !seen[name] {
 			t.Errorf("tool %q missing", name)
 		}

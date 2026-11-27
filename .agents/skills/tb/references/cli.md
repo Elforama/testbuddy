@@ -82,7 +82,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
 | `tb open -p PLATFORM \| -d DEVICE [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
-| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements. |
+| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements, `crash` (when the app crashed) and `log` (the app's last error lines). |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
 | `tb locate [-d alice] [--json] <text, @ref or {selector}>` | Every element a selector matches on the current screen and the one a tap would pick (`chosen`): check a selector is unambiguous before saving it. |
@@ -92,12 +92,13 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
+| `tb applog [-d alice] [--since SECONDS] [--grep REGEX] [--app ID]` | The app's own error log, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`), filtered by `--grep`. The app is the session's (`--app` for another). |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
 | `tb release [-d DEVICE \| all] [-p ios] [--force]` | Free devices for other test tools (other agents' sessions, by `TB_SESSION_OWNER`, only with `--force`): stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb mark [-d DEVICE] <text>...` | Send events to a running `tb test --record --annotate` (see `--events-port`): each shows in the videos' event log at the time tb got it; several texts are one burst. `tb mark -` reads a line an event. `--url` names the endpoint (default `$TB_EVENTS_URL`, else the running run's). |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
-| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
+| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `locate`, `save_flow`, `app_log`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
 
 ### Preview and replay
@@ -193,6 +194,22 @@ The same listing as data:
 Each step prints `ok` or `FAILED` and its time, then the change: `+` new elements, `~`
 changed ones, `-` gone ones, or the whole new screen when most of it changed. A failed step
 prints the screen and a `similar:` line with near matches.
+
+A failed `tb do` or `tb wait` also reads the app's own log for the time the command took
+(Android: logcat; iOS simulator: the unified log), so an app bug can be told from a test bug:
+
+```
+FAILED Assert visible "Saved"  17.0s
+  Element not found: "Saved"
+crashed: com.shop: java.lang.IllegalStateException: cart is empty at com.shop.CartActivity.onCreate(CartActivity.kt:41)
+log: 09:10:01.100 E Net: request failed: timeout
+```
+
+`crashed:` names the exception and the frame that threw it (the root cause's, on Android; on
+iOS the signal the app exited on, with what the app logged in the `log:` lines). `log:` shows
+up to 10 error lines, the latest last. A passing `tb do` reads no log. `tb applog` prints the
+whole stack and every error line; `tb test` writes the same to `app.log` in a failed flow's
+debug directory. Web sessions have no app log.
 
 ## Environment variables
 

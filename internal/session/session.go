@@ -197,6 +197,7 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("watch", s.watch)
 	srv.Handle("shot", s.shot)
 	srv.Handle("log", s.log)
+	srv.Handle("applog", s.applog)
 	srv.Handle("save", s.save)
 	srv.Handle("clear", s.clear)
 	srv.Handle("yield", s.yield)
