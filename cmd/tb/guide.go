@@ -47,6 +47,10 @@ Explore an app:
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
                                   start with a required launchApp and close the session after saving
                                   use the device serial, simulator UDID or unique name, or -d web --headless
+- tb replay flows/name.yaml -d alice --from 4   after a replay failed at "step 3 of 7" and you did that step
+                                  yourself (tb do): runs steps 4 to 7 on the app as it is, no launchApp.
+                                  On a device you hold in an open session they run in that session (it stays
+                                  open); a browser needs it: -d NAME --from 1 runs the whole flow there
 
 Run tests:
 - tb test flows/ -p android       run YAML flows; Maestro flows run unchanged (tb test -h); -p or a device is required
