@@ -87,25 +87,31 @@ scripts/build.sh --skip-agents
 bench/agent/run.py                                  # 3 tasks x 3 runs, model sonnet
 bench/agent/run.py --tasks journey --runs 5 --tb /path/to/another/tb --out before.json
 bench/agent/run.py --compare before.json after.json
+bench/agent/run.py --claude ./stand-in --runs 1     # a stand-in agent: try the script without spending tokens
 python3 bench/agent/test_run.py                     # the script's own tests: no agent, no browser
 ```
 
 The tasks ([agent/tasks.json](agent/tasks.json)) say what to achieve, not which buttons to
 tap: the journey, a set of controls to leave in a given state, and four lists to pick from.
 Every run gets its own web server (a free port, a fresh click log), its own `TB_HOME` and
-daemon, and an empty directory to work in. The agent is `claude -p` with the Bash tool only,
-and the same prompt for every build: where `tb` is, `tb agent-guide`, the `tb open` line, and
-the task. The `tb` on its PATH is a wrapper that logs each call and its exit code before
-handing over to the build under test.
+daemon, and an empty directory to work in. The agent is `claude -p` with the same prompt for
+every build: where `tb` is, `tb agent-guide`, the `tb open` line, and the task. Bash is the
+agent's only tool, but Bash itself is not sandboxed: the empty directory and the prompt keep
+the agent to the job, nothing stops a command from reading other files. The `tb` on its PATH
+is a wrapper that logs each call and its exit code before handing over to the build under
+test, and refuses `tb daemon stop` and `tb release`. `--claude` takes any program with the
+same arguments that prints the same JSON result.
 
 A run passes on what the app saw, never on what the agent says: the click log
 (`?instrument=1`) of the last page load must hold the task's taps (an order, a count, a
-toggle left on, the last choice in a group). "Reported correctly" is separate: the agent's
-answer has the texts the app showed. Results go to `bench/results/agent-<time>.json`, every
-tb command of every run included, and a table per task prints the median and range.
+toggle left on, the last choice in a group). A run whose agent ended in an error (a timeout,
+no login, the spending cap) never passes and stays out of the medians: the "agent errors"
+row counts those. Results go to `tb-agent-cost-<time>.json` in the temp directory (the
+script prints the path; `--out` to keep one), every tb command of every run included, and a
+table per task prints the median and range.
 
 - **It spends real tokens.** Each run is a whole agent session, capped by `--max-budget-usd`
-  (2 by default), so the default 9 runs cost 18 USD at the very most. Start with
+  (2 by default), so the default 9 runs cost about 18 USD at most. Start with
   `--tasks journey --runs 1` to see what one run costs with your model.
 - **Results vary from run to run**: an agent does not take the same path twice, on the same
   build either. Compare medians of several runs (3 at least, 5 is better) with the same

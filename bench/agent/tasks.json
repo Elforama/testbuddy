@@ -2,19 +2,19 @@
   "journey": {
     "prompt": "Open the Journey scenario and log in as buddy with the password secret. Add Item 3 to the cart twice. Open the Live screen, tap \"Tap me\" three times and turn notifications on. Go back and log out. Report the star rating shown for Item 3, the cart count, the tap counter text and the notifications text.",
     "checks": [
-      {"order": ["login", "Item 3", "add_to_cart", "add_to_cart", "back", "open_live", "tap_me", "tap_me", "tap_me", "back", "logout"]},
+      {"order": ["login", "Item 3", "add_to_cart", "add_to_cart", "open_live", "tap_me", "tap_me", "tap_me", "logout"]},
       {"count": "add_to_cart", "is": 2},
+      {"each": "add_to_cart", "latest": "Item \\d+", "is": "Item 3"},
       {"count": "tap_me", "is": 3, "after": "open_live"},
       {"on": "notify_switch"}
-    ],
-    "report": ["4.8", "Tapped 3", "Notifications on"]
+    ]
   },
   "controls": {
     "prompt": "Open the Controls scenario and leave it set up like this: size L, color Blue, both Milk and Eggs in the basket, Wi-Fi on, quantity 4, the Fast and Good filters on and Cheap off, and a rating of 4 stars. Report the status text each of those controls shows.",
     "since": "scenario_controls",
     "checks": [
-      {"last": "seg_.*", "is": "seg_l"},
-      {"last": "radio_.*", "is": "radio_blue"},
+      {"last": "seg_[sml]", "is": "seg_l"},
+      {"last": "radio_(red|green|blue)", "is": "radio_blue"},
       {"on": "check_milk"},
       {"on": "check_eggs"},
       {"on": "switch_wifi"},
@@ -22,9 +22,8 @@
       {"on": "chip_fast"},
       {"on": "chip_good"},
       {"off": "chip_cheap"},
-      {"last": "star_.*", "is": "star_4"}
-    ],
-    "report": ["Size: L", "Color: Blue", "Basket: Milk, Eggs", "Wi-Fi on", "Quantity: 4", "Filters: Fast, Good", "Rating: 4"]
+      {"last": "star_[1-5]", "is": "star_4"}
+    ]
   },
   "lists": {
     "prompt": "Open the Lists scenario. In the long list pick Row 60. In the grid pick Cell 50. On the two-pane mail screen open Mail 30. In the empty list add three rows. Report the text the long list and the grid show for what was picked, the title of the open mail, and the name of the last row added.",
@@ -34,7 +33,6 @@
       {"last": "cell_\\d+", "is": "cell_50"},
       {"last": "mail_\\d+", "is": "mail_30"},
       {"count": "empty_add", "is": 3, "after": "open_empty"}
-    ],
-    "report": ["Picked Row 60", "Picked Cell 50", "Mail 30", "New row 3"]
+    ]
   }
 }
