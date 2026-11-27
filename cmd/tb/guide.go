@@ -64,8 +64,10 @@ the new screen before acting on it. Lookups already wait 17 s: extendedWaitUntil
 no sleeps. Selectors: id > id+text > exact text (a full-match regex) > relative > index.
 
 Tips: refs come from the latest look/do output. Prefer ids (#id) and visible text in saved
-flows. Exit codes: 0 ok, 1 failed, 2 bad input. On failure, read the printed screen and
-"similar:" line before looking again.
+flows. Exit codes: 0 ok, 1 failed, 2 bad input. On a failed do/wait, read the error and the
+"similar:" line before looking again: it lists elements close to the text (or, without text,
+the id) that matched nothing, one typo in a longer word included, each with its @ref. With --json the failed step has a
+"reason": not_found, screen_changed (look again), assertion_failed or other.
 `
 
 func cmdGuide([]string) int {
