@@ -45,5 +45,6 @@ document.querySelectorAll('[data-tabs]').forEach(group => {
 
   const platform = navigator.userAgentData?.platform || navigator.platform || '';
   const match = /win/i.test(platform) ? 'tab-windows' : /linux/i.test(platform) ? 'tab-linux' : null;
-  if (match) select(document.getElementById(match), false);
+  const preferred = match && document.getElementById(match);
+  if (tabs.includes(preferred)) select(preferred, false);
 });

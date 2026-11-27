@@ -20,10 +20,10 @@ benchmark charts, the install tabs and the copy buttons.
 The page states what the main [README](../README.md) states, and nothing newer or older:
 
 - the version label (`v0.7.0`, in the hero);
-- the benchmark chart, table and notes, from the README's Speed section (bench journey of
-  2026-11-26: tb 0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0). Each bar's width is its time as
-  a share of the slowest time in the whole chart, 359.4 s (`--w` on the bar), so all three
-  platforms share one scale;
+- the benchmark chart and notes, from the README's Speed section (run of 2026-11-26: tb
+  0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0). The buttons above the chart switch between
+  the Android, iOS and web builds of the demo app; each bar's width is its time as a share
+  of the slowest tool's on that app (`--w` on the bar);
 - the install commands, from the README's Install section.
 
 When a release or a new bench round changes the README, change the same numbers and
