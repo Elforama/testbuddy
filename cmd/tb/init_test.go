@@ -10,17 +10,19 @@ import (
 )
 
 type fakeInit struct {
-	env  initEnv
-	ran  []string
-	fail map[string]string
+	env    initEnv
+	ran    []string
+	fail   map[string]string
+	stderr bytes.Buffer
 }
 
 func newFakeInit(t *testing.T, installed ...string) *fakeInit {
 	t.Helper()
 	f := &fakeInit{fail: map[string]string{}}
 	f.env = initEnv{
-		home: t.TempDir(),
-		tb:   "/usr/local/bin/tb",
+		home:    t.TempDir(),
+		tb:      "/usr/local/bin/tb",
+		tempDir: "/var/tmp-builds",
 		lookPath: func(name string) (string, error) {
 			for _, i := range installed {
 				if i == name {
@@ -54,7 +56,7 @@ func (f *fakeInit) write(t *testing.T, rel, content string) {
 
 func (f *fakeInit) init(dryRun bool) (string, int) {
 	var b bytes.Buffer
-	code := runInit(f.env, dryRun, &b)
+	code := runInit(f.env, dryRun, &b, &f.stderr)
 	return b.String(), code
 }
 
@@ -204,6 +206,70 @@ func TestInitQuotesAPathWithSpaces(t *testing.T) {
 	f.env.tb = "/Users/a b/tb"
 	out, _ := f.init(true)
 	wantLines(t, out, `would run for Codex: codex mcp add tb -- "/Users/a b/tb" mcp`)
+}
+
+func TestInitRegistersThePathEntryThatIsThisBinary(t *testing.T) {
+	f := newFakeInit(t, "codex")
+	dir := t.TempDir()
+	exe, onPath := filepath.Join(dir, "build", "tb"), filepath.Join(dir, "bin", "tb")
+	for _, d := range []string{"build", "bin"} {
+		if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(exe, []byte("tb"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, onPath); err != nil {
+		t.Skip(err)
+	}
+	f.env.tb, f.env.tempDir = exe, filepath.Join(dir, "build")
+	inner := f.env.lookPath
+	f.env.lookPath = func(name string) (string, error) {
+		if name == "tb" {
+			return onPath, nil
+		}
+		return inner(name)
+	}
+	out, code := f.init(false)
+	wantLines(t, out, "added Codex: codex mcp add tb -- "+onPath+" mcp")
+	if code != 0 {
+		t.Errorf("exit %d, want 0", code)
+	}
+}
+
+func TestInitRefusesATemporaryBuild(t *testing.T) {
+	f := newFakeInit(t, "claude", "codex")
+	f.env.tb = "/var/tmp-builds/go-build123/b001/exe/tb"
+	for _, dryRun := range []bool{false, true} {
+		f.stderr.Reset()
+		out, code := f.init(dryRun)
+		if code != 2 || out != "" || len(f.ran) != 0 {
+			t.Errorf("dry run %v: exit %d, stdout %q, ran %v; want 2 and nothing done", dryRun, code, out, f.ran)
+		}
+		want := "tb init: this tb is a temporary build (/var/tmp-builds/go-build123/b001/exe/tb), which agents could not start later: install tb (README, Install) and run that tb's init\n"
+		if f.stderr.String() != want {
+			t.Errorf("stderr %q, want %q", f.stderr.String(), want)
+		}
+	}
+}
+
+func TestInitRegistersAnotherPathEntrysBinaryByItsOwnPath(t *testing.T) {
+	f := newFakeInit(t, "codex")
+	dir := t.TempDir()
+	other := filepath.Join(dir, "tb")
+	if err := os.WriteFile(other, []byte("another tb"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inner := f.env.lookPath
+	f.env.lookPath = func(name string) (string, error) {
+		if name == "tb" {
+			return other, nil
+		}
+		return inner(name)
+	}
+	out, _ := f.init(false)
+	wantLines(t, out, "added Codex: codex mcp add tb -- /usr/local/bin/tb mcp")
 }
 
 func TestCmdInitRejectsBadInput(t *testing.T) {

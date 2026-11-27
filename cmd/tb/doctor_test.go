@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func fakeDoctorEnv() doctorEnv {
 		},
 		adb:    func() string { return "/sdk/platform-tools/adb" },
 		chrome: func() string { return "/Applications/Chrome" },
-		daemon: func() (bool, bool) { return false, false },
+		daemon: func() string { return daemonStopped },
 		run: func(name string, args ...string) (string, error) {
 			switch name + " " + strings.Join(args, " ") {
 			case "/sdk/platform-tools/adb devices":
@@ -114,7 +115,7 @@ func TestDoctorAndroidDeviceStates(t *testing.T) {
 		"ok android emulator-5554 device",
 		`problem android R58M unauthorized: unlock it and accept its "Allow USB debugging" prompt (replug the cable if none shows)`,
 		"problem android 10.0.0.5:5555 offline: reconnect it (adb reconnect offline), or restart the device",
-		"not ready: fix android R58M, android 10.0.0.5:5555")
+		"ready: android, ios, web; fix: android R58M, android 10.0.0.5:5555")
 	if code != 1 {
 		t.Errorf("exit %d, want 1: a device adb cannot use is broken", code)
 	}
@@ -144,10 +145,25 @@ func TestDoctorXcodeMissing(t *testing.T) {
 	e := withOutput(fakeDoctorEnv(), "xcode-select -p", "", errors.New("exit status 2"))
 	out, code := doctorLines(t, e)
 	wantLines(t, out,
-		"problem xcode command line tools not found: install Xcode, then run sudo xcode-select -s /Applications/Xcode.app",
+		"problem xcode not installed: install Xcode (simulators need it), then run sudo xcode-select -s /Applications/Xcode.app",
 		"ready: android, web")
 	if strings.Contains(out, "ios simulator") {
 		t.Errorf("no Xcode, yet simulators are listed:\n%s", out)
+	}
+	if code != 0 {
+		t.Errorf("exit %d, want 0", code)
+	}
+}
+
+func TestDoctorOnlyCommandLineTools(t *testing.T) {
+	e := withOutput(fakeDoctorEnv(), "xcode-select -p", "/Library/Developer/CommandLineTools\n", nil)
+	e = withOutput(e, "xcrun simctl list devices booted -j", "", errors.New("simctl must not run"))
+	out, code := doctorLines(t, e)
+	wantLines(t, out,
+		"problem xcode not installed (only the command line tools, /Library/Developer/CommandLineTools): install Xcode (simulators need it), then run sudo xcode-select -s /Applications/Xcode.app",
+		"ready: android, web")
+	if strings.Contains(out, "ok xcode") || strings.Contains(out, "ios simulator") {
+		t.Errorf("the command line tools are not Xcode:\n%s", out)
 	}
 	if code != 0 {
 		t.Errorf("exit %d, want 0", code)
@@ -159,7 +175,7 @@ func TestDoctorSimctlFails(t *testing.T) {
 	out, _ := doctorLines(t, e)
 	wantLines(t, out,
 		"ok xcode /Applications/Xcode.app/Contents/Developer",
-		"problem ios simulators xcrun simctl failed (exit status 72): install Xcode (the command line tools alone have no simulators), then run sudo xcode-select -s /Applications/Xcode.app",
+		"problem ios simulators xcrun simctl failed (exit status 72): install Xcode (simulators need it), then run sudo xcode-select -s /Applications/Xcode.app",
 		"ready: android, web")
 }
 
@@ -215,18 +231,45 @@ func TestDoctorChromePathDoesNotExist(t *testing.T) {
 }
 
 func TestDoctorDaemon(t *testing.T) {
-	e := fakeDoctorEnv()
-	e.daemon = func() (bool, bool) { return true, true }
-	out, code := doctorLines(t, e)
-	wantLines(t, out, "ok daemon running, this tb's build")
-	if code != 0 {
-		t.Errorf("exit %d, want 0", code)
+	for state, want := range map[string]string{
+		daemonStopped:    "ok daemon not running (tb starts it when needed)",
+		daemonThisBuild:  "ok daemon running, this tb's build",
+		daemonOtherBuild: "ok daemon running, another tb build (the next tb command replaces it and closes its sessions)",
+		daemonBusy:       "ok daemon running, busy (it did not answer in time to say which build it is)",
+	} {
+		e := fakeDoctorEnv()
+		e.daemon = func() string { return state }
+		out, code := doctorLines(t, e)
+		wantLines(t, out, want, "ready: android, ios, web")
+		if code != 0 {
+			t.Errorf("%s: exit %d, want 0", state, code)
+		}
 	}
-	e.daemon = func() (bool, bool) { return true, false }
-	out, code = doctorLines(t, e)
-	wantLines(t, out,
-		"problem daemon running another tb build: run tb daemon stop (its open sessions close; the next command starts this build's)",
-		"not ready: fix daemon")
+}
+
+func TestDaemonStateFromPing(t *testing.T) {
+	for _, c := range []struct {
+		build string
+		err   error
+		want  string
+	}{
+		{"1-2", nil, daemonThisBuild},
+		{"3-4", nil, daemonOtherBuild},
+		{"", os.ErrDeadlineExceeded, daemonBusy},
+		{"", errors.New("connection reset"), daemonBusy},
+	} {
+		if got := daemonState("1-2", c.build, c.err); got != c.want {
+			t.Errorf("ping %q, %v: %s, want %s", c.build, c.err, got, c.want)
+		}
+	}
+}
+
+func TestDoctorBrokenAndNothingUsable(t *testing.T) {
+	e := withOutput(fakeDoctorEnv(), "/sdk/platform-tools/adb devices", "List of devices attached\nR58M\tunauthorized\n", nil)
+	e.chrome = func() string { return "" }
+	e = withOutput(e, "xcode-select -p", "", errors.New("exit status 2"))
+	out, code := doctorLines(t, e)
+	wantLines(t, out, "not ready: fix android R58M")
 	if code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}

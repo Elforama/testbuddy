@@ -22,18 +22,20 @@ client's own command, for every project of this user:
   Gemini CLI    gemini mcp add --scope user tb <tb> mcp
 
 One line per client: added, skipped (not installed, or it already has tb: an MCP server
-named tb, or Claude Code's test-buddy plugin) or failed. It writes no file itself. It ends
-with the checks of tb doctor. Other clients: see "Use with AI coding agents" in the README.
+named tb, or Claude Code's test-buddy plugin) or failed. It writes no file itself. <tb> is
+the tb on PATH when that is the tb that ran, else the full path of the one that ran; a
+temporary build (go run) is refused. It ends with the checks of tb doctor. Other clients: see "Use with AI coding agents" in the README.
 
   --dry-run   print the commands it would run, and change nothing
 
-Exit status: 0 ok, 1 a client's command failed, 2 bad input. tb doctor's status says
+Exit status: 0 ok, 1 a client's command failed, 2 bad input or a temporary build. tb doctor's status says
 whether the setup itself is ready.
 `
 
 type initEnv struct {
 	home     string
 	tb       string
+	tempDir  string
 	lookPath func(string) (string, error)
 	run      func(name string, args ...string) (string, error)
 	doctor   doctorEnv
@@ -114,7 +116,31 @@ func shellLine(exe string, args []string) string {
 	return strings.Join(words, " ")
 }
 
-func runInit(e initEnv, dryRun bool, w io.Writer) int {
+func sameFile(a, b string) bool {
+	x, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	y, err := os.Stat(b)
+	return err == nil && os.SameFile(x, y)
+}
+
+func (e initEnv) registeredTB() (string, error) {
+	if onPath, err := e.lookPath("tb"); err == nil && sameFile(onPath, e.tb) {
+		return onPath, nil
+	}
+	if rel, err := filepath.Rel(e.tempDir, e.tb); err == nil && filepath.IsLocal(rel) {
+		return "", fmt.Errorf("tb init: this tb is a temporary build (%s), which agents could not start later: install tb (README, Install) and run that tb's init", e.tb)
+	}
+	return e.tb, nil
+}
+
+func runInit(e initEnv, dryRun bool, w, errw io.Writer) int {
+	tb, err := e.registeredTB()
+	if err != nil {
+		fmt.Fprintln(errw, err)
+		return 2
+	}
 	code, found := 0, false
 	for _, c := range agentClients {
 		exe, err := e.lookPath(c.exe)
@@ -127,7 +153,7 @@ func runInit(e initEnv, dryRun bool, w io.Writer) int {
 			fmt.Fprintf(w, "skipped %s: already has tb (%s)\n", c.name, how)
 			continue
 		}
-		args := c.add(e.tb)
+		args := c.add(tb)
 		line := shellLine(c.exe, args)
 		if dryRun {
 			fmt.Fprintf(w, "would run for %s: %s\n", c.name, line)
@@ -174,8 +200,17 @@ func cmdInit(argv []string) int {
 	}
 	tb, err := os.Executable()
 	if err != nil {
-		tb = "tb"
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
-	return runInit(initEnv{home: home, tb: tb, lookPath: exec.LookPath, run: runCommand, doctor: systemDoctorEnv()},
-		a.flag("dry-run"), os.Stdout)
+	e := initEnv{home: home, tb: resolved(tb), tempDir: resolved(os.TempDir()), lookPath: exec.LookPath,
+		run: runCommand, doctor: systemDoctorEnv()}
+	return runInit(e, a.flag("dry-run"), os.Stdout, os.Stderr)
+}
+
+func resolved(path string) string {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		return p
+	}
+	return path
 }

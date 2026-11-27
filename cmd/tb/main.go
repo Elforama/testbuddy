@@ -70,7 +70,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
 Set up:
   tb doctor [--json]                     check adb and Android devices, Xcode and booted
                                          simulators, Chrome and the tb daemon: one line per
-                                         check, with the fix (reads only; tb doctor -h)
+                                         check, with the fix (changes no device; tb doctor -h)
   tb init [--dry-run]                    register tb's MCP server with the coding agents found
                                          here (Claude Code, Codex, Gemini CLI), then run the
                                          doctor checks (tb init -h)

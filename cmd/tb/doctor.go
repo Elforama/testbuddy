@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -23,14 +24,17 @@ const doctorUsage = `tb doctor: check this machine's setup for tb, and say what 
   tb doctor [--json]
 
 One line per check: "ok <what>", or "problem <what>: <the fix>", then "ready: <platforms>"
-or "not ready: <why>". It checks adb and each Android device's state, Xcode and the booted
-iOS simulators (on a Mac), the Chrome tb would drive, and the tb daemon. It only reads:
-it starts, boots, stops and changes nothing.
+(with "; fix: <what is broken>" when something is) or "not ready: <why>". It checks adb and
+each Android device's state, Xcode and the booted iOS simulators (on a Mac), the Chrome tb
+would drive, and the tb daemon (running or not, and whether it is this tb's build; tb
+replaces another build's by itself). It boots, stops and changes no device, browser or
+daemon. It runs adb devices, which starts adb's own server when none is running.
 
   --json   one JSON object: ok, usable (platforms), checks (name, ok, detail, fix, broken)
 
 Exit status: 0 at least one platform is usable and nothing is broken (a platform that is
-not set up is a problem line, but not broken), 1 otherwise, 2 bad input.
+not set up is a problem line, but not broken; a device adb cannot use, or a failing
+adb devices, is broken), 1 otherwise, 2 bad input.
 `
 
 type doctorEnv struct {
@@ -39,7 +43,24 @@ type doctorEnv struct {
 	run      func(name string, args ...string) (string, error)
 	adb      func() string
 	chrome   func() string
-	daemon   func() (running, sameBuild bool)
+	daemon   func() string
+}
+
+const (
+	daemonStopped    = "stopped"
+	daemonThisBuild  = "this build"
+	daemonOtherBuild = "another build"
+	daemonBusy       = "busy"
+)
+
+func daemonState(mine, pinged string, err error) string {
+	switch {
+	case err != nil:
+		return daemonBusy
+	case pinged == mine:
+		return daemonThisBuild
+	}
+	return daemonOtherBuild
 }
 
 type doctorCheck struct {
@@ -79,9 +100,11 @@ func (r *doctorReport) brokenNames() []string {
 }
 
 func runCommand(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
 	var failed *exec.ExitError
 	if len(out) == 0 && errors.As(err, &failed) {
 		out = failed.Stderr
@@ -96,18 +119,22 @@ func systemDoctorEnv() doctorEnv {
 		run:      runCommand,
 		adb:      device.ADB,
 		chrome:   web.ChromePath,
-		daemon: func() (bool, bool) {
-			if !daemon.Running() {
-				return false, false
-			}
-			c := daemon.Dial()
-			if c == nil {
-				return true, false
-			}
-			c.Close()
-			return true, true
-		},
+		daemon:   pingDaemon,
 	}
+}
+
+func pingDaemon() string {
+	c, err := net.DialTimeout("unix", daemon.SocketPath(), 300*time.Millisecond)
+	if err != nil {
+		return daemonStopped
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(2 * time.Second))
+	var resp daemon.Response
+	if _, err = c.Write([]byte(`{"cmd":"ping"}` + "\n")); err == nil {
+		err = json.NewDecoder(c).Decode(&resp)
+	}
+	return daemonState(daemon.BuildID(), resp.Text, err)
 }
 
 func runDoctor(e doctorEnv) doctorReport {
@@ -170,13 +197,18 @@ func checkIOS(e doctorEnv, r *doctorReport) bool {
 		r.ok("ios", fmt.Sprintf("needs a Mac (this is %s)", e.goos))
 		return false
 	}
-	const selectXcode = "run sudo xcode-select -s /Applications/Xcode.app"
+	const installXcode = "install Xcode (simulators need it), then run sudo xcode-select -s /Applications/Xcode.app"
 	dir, err := e.run("xcode-select", "-p")
+	dir = strings.TrimSpace(dir)
 	if err != nil {
-		r.missing("xcode", "command line tools not found", "install Xcode, then "+selectXcode)
+		r.missing("xcode", "not installed", installXcode)
 		return false
 	}
-	r.ok("xcode", strings.TrimSpace(dir))
+	if strings.Contains(dir, "CommandLineTools") {
+		r.missing("xcode", fmt.Sprintf("not installed (only the command line tools, %s)", dir), installXcode)
+		return false
+	}
+	r.ok("xcode", dir)
 	out, err := e.run("xcrun", "simctl", "list", "devices", "booted", "-j")
 	var listed struct {
 		Devices map[string][]struct {
@@ -190,7 +222,7 @@ func checkIOS(e doctorEnv, r *doctorReport) bool {
 	}
 	if err != nil {
 		r.missing("ios simulators", fmt.Sprintf("xcrun simctl failed (%v)", err),
-			"install Xcode (the command line tools alone have no simulators), then "+selectXcode)
+			installXcode)
 		return false
 	}
 	runtimes := make([]string, 0, len(listed.Devices))
@@ -230,15 +262,15 @@ func checkChrome(e doctorEnv, r *doctorReport) bool {
 }
 
 func checkDaemon(e doctorEnv, r *doctorReport) {
-	running, sameBuild := e.daemon()
-	switch {
-	case !running:
+	switch e.daemon() {
+	case daemonStopped:
 		r.ok("daemon", "not running (tb starts it when needed)")
-	case sameBuild:
+	case daemonThisBuild:
 		r.ok("daemon", "running, this tb's build")
+	case daemonOtherBuild:
+		r.ok("daemon", "running, another tb build (the next tb command replaces it and closes its sessions)")
 	default:
-		r.broken("daemon", "running another tb build",
-			"run tb daemon stop (its open sessions close; the next command starts this build's)")
+		r.ok("daemon", "running, busy (it did not answer in time to say which build it is)")
 	}
 }
 
@@ -250,9 +282,11 @@ func (r doctorReport) print(w io.Writer) {
 			fmt.Fprintf(w, "problem %s %s: %s\n", c.Name, c.Detail, c.Fix)
 		}
 	}
-	switch broken := r.brokenNames(); {
-	case len(broken) > 0:
-		fmt.Fprintf(w, "not ready: fix %s\n", strings.Join(broken, ", "))
+	switch broken := strings.Join(r.brokenNames(), ", "); {
+	case broken != "" && len(r.Usable) > 0:
+		fmt.Fprintf(w, "ready: %s; fix: %s\n", strings.Join(r.Usable, ", "), broken)
+	case broken != "":
+		fmt.Fprintf(w, "not ready: fix %s\n", broken)
 	case len(r.Usable) == 0:
 		fmt.Fprintln(w, "not ready: no Android device, booted iOS simulator or Chrome to drive")
 	default:

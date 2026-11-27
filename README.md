@@ -83,8 +83,9 @@ tb doctor            # what is ready, and the fix for what is not
 tb init              # offer tb to the coding agents installed here, then run the doctor checks
 ```
 
-`tb doctor` only reads: it starts, boots and changes nothing. It prints one line per check,
-`ok <what>` or `problem <what>: <the fix>`, then the platforms that are ready:
+`tb doctor` boots, stops and changes no device, browser or daemon. It does run
+`adb devices`, which starts adb's own server when none is running. It prints one line per
+check, `ok <what>` or `problem <what>: <the fix>`, then the platforms that are ready:
 
 ```
 ok adb /Users/me/Library/Android/sdk/platform-tools/adb
@@ -93,14 +94,16 @@ ok xcode /Applications/Xcode.app/Contents/Developer
 problem ios simulators none booted: boot one (xcrun simctl boot "<name>"; xcrun simctl list devices names them), or let tb test -p ios boot one
 ok chrome /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 ok daemon not running (tb starts it when needed)
-not ready: fix android R58M
+ready: web; fix: android R58M
 ```
 
 It exits 0 when at least one platform is usable and nothing is broken. A platform that is
 not set up (no adb, no booted simulator, no Chrome) is a problem line with its fix, but only
-something broken fails the check: a device adb lists as `unauthorized` or `offline`, an
-`adb devices` that fails, or a daemon left running by another tb build. Off a Mac, iOS is
-an `ok ios needs a Mac` line. `--json` gives the same as one object (`ok`, `usable`,
+something broken fails the check: a device adb lists as `unauthorized` or `offline`, or an
+`adb devices` that fails. A daemon left running by another tb build is an `ok` line: the
+next tb command replaces it (and closes its sessions). A Mac with only the command line
+tools has no simulators: `problem xcode not installed`. Off a Mac, iOS is an
+`ok ios needs a Mac` line. `--json` gives the same as one object (`ok`, `usable`,
 `checks`).
 
 `tb init` registers tb's MCP server (`tb mcp`) with each coding agent it finds on PATH,
@@ -112,7 +115,9 @@ through that client's own command, and writes no file itself:
 | Codex | `codex mcp add tb -- <tb> mcp` | `~/.codex/config.toml` has `[mcp_servers.tb]` |
 | Gemini CLI | `gemini mcp add --scope user tb <tb> mcp` | `~/.gemini/settings.json` has an MCP server `tb` |
 
-`<tb>` is the full path of the `tb` that ran. It prints one line per client (`added`,
+`<tb>` is the `tb` on PATH when that is the one that ran, else the full path of the one
+that ran; a temporary build (`go run ./cmd/tb init`) is refused, since agents could not
+start it later. It prints one line per client (`added`,
 `skipped` with the reason, or `failed` with what the client said). `tb init --dry-run`
 prints the commands instead of running them. For Cursor, GitHub Copilot and other clients,
 set tb up by hand: see [Use with AI coding agents](#use-with-ai-coding-agents).

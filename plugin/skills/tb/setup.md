@@ -28,7 +28,7 @@ tb help
 | Web | Google Chrome (or Chromium: `TB_CHROME=/path/to/chrome`) | `tb devices` lists `chrome` |
 
 `tb doctor` checks all three and prints the fix for each thing that is missing or broken
-(it only reads; `--json` for an object). `tb devices` lists everything it can drive. Each flow goes to a device that has its app
+(it changes nothing on devices; `adb devices` may start adb's server; `--json` for an object). `tb devices` lists everything it can drive. Each flow goes to a device that has its app
 installed (`appId`); a `url:` flow goes to Chrome.
 
 - Starting an emulator or booting a simulator is the user's call when none is running; ask

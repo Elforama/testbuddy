@@ -9,7 +9,7 @@ Interactive sessions stay connected between calls through a background daemon.
 
 Set up:
 - tb doctor [--json]              what is ready and what to fix: "ok ..." or "problem ...: <fix>" per
-                                  check (adb, devices, Xcode, simulators, Chrome, the daemon); reads only
+                                  check (adb, devices, Xcode, simulators, Chrome, the daemon); changes no device
 - tb init [--dry-run]             registers tb's MCP server with Claude Code, Codex and Gemini CLI
                                   where installed; --dry-run prints the commands and changes nothing
 
