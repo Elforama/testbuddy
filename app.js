@@ -1,37 +1,49 @@
-const base = 'https://github.com/Elforama/testbuddy/releases/latest/download/';
-const select = document.querySelector('#install-platform');
-const output = document.querySelector('#install-command');
-const copyButton = document.querySelector('#copy-install');
-const status = document.querySelector('#copy-status');
+const copyStatus = document.querySelector('#copy-status');
 
-// Default to the visitor's OS when we can tell.
-const ua = navigator.userAgent;
-if (/Windows/.test(ua)) select.value = 'windows_amd64';
-else if (/Linux/.test(ua) && !/Android/.test(ua)) select.value = 'linux_amd64';
-
-function installCommand() {
-  const platform = select.value;
-  if (platform.startsWith('windows')) {
-    return `Invoke-WebRequest ${base}tb_${platform}.zip -OutFile tb.zip\nExpand-Archive tb.zip -DestinationPath .\n.\\tb_${platform}\\tb.exe version`;
+async function copyText(button, text) {
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = 'Copied';
+    copyStatus.textContent = 'Copied to clipboard.';
+  } catch {
+    button.textContent = 'Select to copy';
+    copyStatus.textContent = 'Clipboard unavailable. Select the command and copy it.';
   }
-  return `curl -fsSL ${base}tb_${platform}.tar.gz | tar -xz\n./tb_${platform}/tb version`;
+  setTimeout(() => { button.textContent = original; }, 1800);
 }
 
-function render() { output.textContent = installCommand(); }
-select.addEventListener('change', render);
-render();
+document.querySelectorAll('.copy').forEach(button => {
+  button.addEventListener('click', () => {
+    const source = button.dataset.copyFrom && document.getElementById(button.dataset.copyFrom);
+    copyText(button, source ? source.textContent : button.dataset.copy);
+  });
+});
 
-copyButton.addEventListener('click', async () => {
-  const label = copyButton.querySelector('span');
-  const icon = copyButton.querySelector('use');
-  try {
-    await navigator.clipboard.writeText(installCommand());
-    label.textContent = 'Copied';
-    icon.setAttribute('href', '#i-check');
-    status.textContent = 'Copied to clipboard.';
-  } catch {
-    label.textContent = 'Select to copy';
-    status.textContent = 'Clipboard unavailable. Select the command to copy it.';
+document.querySelectorAll('[data-tabs]').forEach(group => {
+  const tabs = [...group.querySelectorAll('[role="tab"]')];
+
+  function select(tab, focus) {
+    tabs.forEach(item => {
+      const active = item === tab;
+      item.setAttribute('aria-selected', String(active));
+      item.tabIndex = active ? 0 : -1;
+      document.getElementById(item.getAttribute('aria-controls')).hidden = !active;
+    });
+    if (focus) tab.focus();
   }
-  setTimeout(() => { label.textContent = 'Copy'; icon.setAttribute('href', '#i-copy'); }, 1800);
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => select(tab, false));
+    tab.addEventListener('keydown', event => {
+      const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      select(tabs[(index + step + tabs.length) % tabs.length], true);
+    });
+  });
+
+  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const match = /win/i.test(platform) ? 'tab-windows' : /linux/i.test(platform) ? 'tab-linux' : null;
+  if (match) select(document.getElementById(match), false);
 });

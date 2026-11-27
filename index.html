@@ -3,208 +3,357 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0f1512" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Test Buddy runs simple YAML UI tests on Android, iOS and the web. Works with your Maestro flows and with AI agents.">
-  <title>Test Buddy — Simple UI testing</title>
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b1410" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8faf5" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Test Buddy (tb) runs Maestro-compatible YAML UI test flows on Android, iOS simulators and Chrome. It waits on events from the device, can drive several devices in one test, and has shell commands for AI agents.">
+  <meta property="og:title" content="Test Buddy: UI tests for Android, iOS and the web">
+  <meta property="og:description" content="Runs Maestro-compatible YAML flows on Android, iOS simulators and Chrome. One binary, several devices in one test, shell commands for AI agents.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://elforama.github.io/testbuddy/">
+  <title>Test Buddy: UI tests for Android, iOS and the web</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="./styles.css">
   <script src="./app.js" defer></script>
 </head>
 <body>
-  <!-- Icon set (Lucide-style line icons) -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <defs>
-      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
-      <symbol id="i-file-code" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></symbol>
-      <symbol id="i-devices" viewBox="0 0 24 24"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></symbol>
-      <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
-      <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
-      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
-      <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
-      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
-      <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3 20 12 6 21z"/></symbol>
-      <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></symbol>
-    </defs>
-  </svg>
-
   <a class="skip" href="#main">Skip to content</a>
 
   <header class="site-header">
-    <div class="wrap header-row">
-      <a class="brand" href="#"><img src="./favicon.svg" alt="" width="26" height="26"><span>Test Buddy</span></a>
+    <div class="wrap bar">
+      <a class="brand" href="#top" aria-label="Test Buddy home">
+        <img src="./favicon.svg" alt="" width="28" height="28">
+        <span>Test Buddy</span>
+      </a>
       <nav aria-label="Main">
-        <a href="https://github.com/Elforama/testbuddy#quick-start">Docs</a>
-        <a href="https://github.com/Elforama/testbuddy/releases/latest">Releases</a>
-        <a class="icon-link" href="https://github.com/Elforama/testbuddy" aria-label="Test Buddy on GitHub"><svg class="icon"><use href="#i-github"/></svg></a>
+        <a href="#features">Features</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href="#start">Install</a>
+        <a href="#agents">AI agents</a>
+        <a class="nav-github" href="https://github.com/Elforama/testbuddy">GitHub</a>
       </nav>
     </div>
   </header>
 
   <main id="main">
-    <!-- Hero -->
-    <section class="hero wrap">
-      <a class="pill" href="https://github.com/Elforama/testbuddy/releases/tag/v0.5.2"><span class="dot"></span>v0.5.2 is out<svg class="icon sm"><use href="#i-arrow"/></svg></a>
-      <h1>UI tests that just work.</h1>
-      <p class="lead">Write a few lines of YAML. Test Buddy taps, types and checks your app on Android, iOS and the web.</p>
-      <div class="actions">
-        <a class="btn primary" href="#start"><svg class="icon"><use href="#i-download"/></svg>Get started</a>
-        <a class="btn" href="https://github.com/Elforama/testbuddy"><svg class="icon"><use href="#i-github"/></svg>View on GitHub</a>
+    <section class="hero" id="top">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <a class="pill" href="https://github.com/Elforama/testbuddy/releases/latest"><span class="dot"></span>v0.7.0 · macOS, Windows, Linux</a>
+          <h1>UI test runner for Android, iOS and the web</h1>
+          <p class="lede">Test Buddy (<code>tb</code>) runs Maestro-compatible YAML flows on Android, iOS simulators and Chrome. It waits on events from the device instead of polling the screen. One flow can drive several devices, and the same commands work from a shell for AI agents.</p>
+          <div class="cta">
+            <a class="button primary" href="#start">Install</a>
+            <a class="button" href="https://github.com/Elforama/testbuddy">GitHub</a>
+          </div>
+          <div class="command" data-copy-block>
+            <code>go install github.com/elforama/testbuddy/cmd/tb@latest</code>
+            <button type="button" class="copy" data-copy="go install github.com/elforama/testbuddy/cmd/tb@latest">Copy</button>
+          </div>
+          <p class="fine">The release archives hold one binary with both device agents inside. <a href="#start">Install options</a></p>
+        </div>
+
+        <div class="hero-visual" aria-label="Example flow and how tb shows a screen">
+          <figure class="window">
+            <figcaption><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>settings.yaml</figcaption>
+<pre><code><span class="k">appId:</span> com.android.settings
+<span class="m">---</span>
+- <span class="k">launchApp</span>
+- <span class="k">tapOn:</span> <span class="s">"Network &amp; internet"</span>
+- <span class="k">assertVisible:</span> <span class="s">"Internet"</span></code></pre>
+          </figure>
+          <figure class="window offset">
+            <figcaption><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>tb look</figcaption>
+<pre><code><span class="m">android 1080x2400 com.android.settings, 11 elements</span>
+<span class="r">@1</span> Button <span class="s">"Search Settings"</span> <span class="k">#search_action_bar</span>
+<span class="r">@3</span> Button <span class="s">"Network &amp; internet, Mobile, Wi‑Fi, hotspot"</span>
+<span class="r">@16</span> Switch <span class="k">#switchWidget</span> unchecked
+<span class="m">...</span></code></pre>
+          </figure>
+        </div>
       </div>
 
-      <figure class="window hero-window">
-        <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">login.yaml</span></div>
+      <div class="wrap">
+        <dl class="stats">
+          <div><dt>12.3 s</dt><dd>Bench journey on an Android emulator, mean of 5 runs.</dd></div>
+          <div><dt>18.1 s</dt><dd>The same journey on an iOS simulator.</dd></div>
+          <div><dt>1 binary</dt><dd>About 15 MB to download. The Android and iOS agents are inside it.</dd></div>
+          <div><dt>3 platforms</dt><dd>Android, iOS simulators and Chrome. One test can mix them.</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Features</p>
+        <h2>What it does</h2>
+        <div class="cards">
+          <article class="card">
+            <h3>Maestro-compatible</h3>
+            <p>Every command, selector and condition, <code>runFlow</code>, <code>repeat</code>, <code>retry</code>, JavaScript, env rules, <code>config.yaml</code>, tags and JUnit/HTML reports, with the same command-line options. Point <code>tb test</code> at your <code>.maestro</code> folder.</p>
+          </article>
+          <article class="card">
+            <h3>Event-driven waits</h3>
+            <p>The on-device agents push "the UI changed" and "the UI settled" events, and <code>tb</code> waits on those. A screen is read again only after the device says it changed. Spinners and tickers that never stop are marked restless and stop holding the screen up.</p>
+          </article>
+          <article class="card">
+            <h3>Multi-device flows</h3>
+            <p>Write one flow that drives an iPhone and an Android phone together, synced with <code>signal</code> and <code>waitForSignal</code>. Or spread a suite over devices with a work queue: <code>--shard-split</code>, <code>--shard-all</code>.</p>
+          </article>
+          <article class="card">
+            <h3>Shell commands for AI agents</h3>
+            <p><code>tb look</code> prints a screen in a few hundred tokens, <code>tb do</code> answers with what changed, and <code>tb save</code> turns the commands that worked into a flow. <code>tb mcp</code> serves the same commands as MCP tools.</p>
+          </article>
+          <article class="card">
+            <h3>Timeline and video reports</h3>
+            <p><code>--timeline</code> writes one HTML page per flow with every step, the screen before and after, and each tap drawn where it went. <code>--record --annotate</code> makes a captioned video to attach to a pull request.</p>
+          </article>
+          <article class="card">
+            <h3>Failure output</h3>
+            <p>A failed step prints the screen as it was, with elements similar to what it looked for, and saves a screenshot, the hierarchy and a step-by-step log with times.</p>
+          </article>
+          <article class="card">
+            <h3>Static check of app code</h3>
+            <p><code>tb a11y</code> reads app source, with no device, and lists elements a test could not find or tap, in Android layouts, Compose, SwiftUI, UIKit, React Native, Flutter and web code. <code>--fix</code> adds the missing ids.</p>
+          </article>
+          <article class="card">
+            <h3>Web</h3>
+            <p>CSS selectors, same- and cross-origin iframes, new tabs, <code>mockNetwork</code> to answer requests without a server, and <code>answerDialogs</code> and <code>assertDialog</code> for JavaScript dialogs.</p>
+          </article>
+          <article class="card">
+            <h3>Flow lint</h3>
+            <p><code>tb check --lint</code> lists steps that run but break easily: coordinate taps, match indexes, text that reads as a wider regex, flows that assert nothing. Flows saved by <code>tb save</code> are written without them.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="how" class="section alt">
+      <div class="wrap split">
+        <div>
+          <p class="eyebrow">How it works</p>
+          <h2>How it waits</h2>
+          <p>A runner can decide a screen is ready by reading it repeatedly, or by comparing screenshots until two match. Each step then costs several reads, and a screen that keeps moving never matches.</p>
+          <p>Test Buddy puts a small agent on the device (an in-page script on the web). It reports changes as they happen, so each step starts as soon as the app settles, and each tap waits for a still screen.</p>
+          <p><a href="https://github.com/Elforama/testbuddy/blob/main/docs/architecture.md">Read the architecture guide</a></p>
+        </div>
+        <div class="lanes" role="img" aria-label="A runner that polls reads the screen many times per step. tb reads it once, after the device reports that it settled.">
+          <div class="lane">
+            <span class="lane-name">Polling</span>
+            <div class="track"><i class="read"></i><i class="read"></i><i class="read"></i><i class="read"></i><i class="read"></i><i class="read"></i><i class="read"></i><i class="act">tap</i></div>
+            <span class="lane-note">Read, compare, read again, then act</span>
+          </div>
+          <div class="lane">
+            <span class="lane-name">tb</span>
+            <div class="track"><i class="event">settled</i><i class="act">tap</i></div>
+            <span class="lane-note">The agent reports "settled", tb acts</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="benchmarks" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Benchmarks</p>
+        <h2>Bench journey, whole run in seconds</h2>
+        <p class="section-lede">Sign in through a spinner, open and edit an item, scroll a list that loads more, and act on screens that never stop moving. One app built for Android, iOS and the web. Seconds for the whole command, start-up included. Lower is better.</p>
+
+        <figure class="chart compare">
+          <figcaption><strong>tb, WebdriverIO and Maestro on the same flow</strong><span>Seconds, lower is better. One scale for all three platforms.</span></figcaption>
+          <div class="group">
+            <p class="group-name"><strong>Android</strong><span>Emulator, Android 16</span></p>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:3.4%"></i></span><span class="value">12.3 s</span></div>
+            <div class="row"><span class="tool">WebdriverIO</span><span class="track"><i style="--w:6.8%"></i></span><span class="value">24.6 s</span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:100.0%"></i></span><span class="value">359.4 s</span></div>
+          </div>
+          <div class="group">
+            <p class="group-name"><strong>iOS</strong><span>iPhone 17 simulator</span></p>
+            <div class="row best"><span class="tool">tb</span><span class="track"><i style="--w:5.0%"></i></span><span class="value">18.1 s</span></div>
+            <div class="row"><span class="tool">WebdriverIO</span><span class="track"><i style="--w:12.0%"></i></span><span class="value">43.3 s</span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:82.2%"></i></span><span class="value">295.4 s</span></div>
+          </div>
+          <div class="group">
+            <p class="group-name"><strong>Web</strong><span>Headless Chrome</span></p>
+            <div class="row mine"><span class="tool">tb</span><span class="track"><i style="--w:2.1%"></i></span><span class="value">7.4 s</span></div>
+            <div class="row"><span class="tool">WebdriverIO</span><span class="track"><i style="--w:1.2%"></i></span><span class="value">4.4 s</span></div>
+            <div class="row"><span class="tool">Maestro</span><span class="track"><i style="--w:65.7%"></i></span><span class="value">236.3 s</span></div>
+          </div>
+        </figure>
+
+        <div class="table-scroll">
+          <table>
+            <caption class="sr-only">Bench journey, whole run in seconds: mean with min and max of 5 timed runs</caption>
+            <thead><tr><th scope="col">Platform</th><th scope="col">tb</th><th scope="col">WebdriverIO</th><th scope="col">Maestro</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Android</th><td><strong>12.3 s</strong> <small>11.9–12.5</small></td><td>24.6 s <small>24.2–25.0</small></td><td>359.4 s <small>347.3–369.8</small></td></tr>
+              <tr><th scope="row">iOS</th><td><strong>18.1 s</strong> <small>17.8–18.5</small></td><td>43.3 s <small>43.1–43.5</small></td><td>295.4 s <small>293.4–297.2</small></td></tr>
+              <tr><th scope="row">Web</th><td>7.4 s <small>7.3–7.5</small></td><td><strong>4.4 s</strong> <small>4.2–4.5</small></td><td>236.3 s <small>231.6–239.8</small></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="notes">
+          <div>
+            <h3>How it was measured</h3>
+            <p>Each number is the mean (min–max) of 5 timed runs after a warm-up, one run at a time on one Mac on 2026-11-26, with each tool's defaults and the same 17 s element timeout. Versions: tb 0.7.0, Maestro 2.12.1, WebdriverIO 10.2.0 (through Appium 4.0.1 on Android and iOS). Other emulators and simulators were running on the Mac, so every tool's times are a little higher than on a quiet machine.</p>
+          </div>
+          <div>
+            <h3>Why the web result differs</h3>
+            <p>WebdriverIO clicks the moment an element is displayed, even while a screen is still sliding in. With a click instrument on the bench page, 7 of its 120 runs clicked the wrong element, and 5 of those still reported a pass. tb waits for a still screen before each tap and never tapped during a slide-in. The same instrument caught a scrolling race in tb, fixed since: 0 wrong taps in the 15 runs after the fix.</p>
+          </div>
+          <div>
+            <h3>Reproducing it</h3>
+            <p>The bench app, its flows and the timing scripts are in the repository, and every CI run times the whole suite. <a href="https://github.com/Elforama/testbuddy/blob/main/bench/README.md">Buddy Bench</a> · <a href="https://github.com/Elforama/testbuddy#speed">Full notes</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="start" class="section alt">
+      <div class="wrap">
+        <p class="eyebrow">Get started</p>
+        <h2>Install and run</h2>
+
+        <ol class="steps">
+          <li>
+            <div class="step-head"><span class="num">1</span><h3>Install tb</h3></div>
+            <div class="tabs" data-tabs>
+              <div class="tablist" role="tablist" aria-label="Install method">
+                <button type="button" role="tab" id="tab-mac" aria-controls="panel-mac" aria-selected="true">macOS</button>
+                <button type="button" role="tab" id="tab-linux" aria-controls="panel-linux" aria-selected="false" tabindex="-1">Linux</button>
+                <button type="button" role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false" tabindex="-1">Windows</button>
+                <button type="button" role="tab" id="tab-go" aria-controls="panel-go" aria-selected="false" tabindex="-1">Go</button>
+                <button type="button" role="tab" id="tab-claude" aria-controls="panel-claude" aria-selected="false" tabindex="-1">Claude Code</button>
+              </div>
+              <div role="tabpanel" id="panel-mac" aria-labelledby="tab-mac" class="code-panel">
+                <button type="button" class="copy" data-copy-from="code-mac">Copy</button>
+<pre><code id="code-mac">curl -fsSL https://github.com/Elforama/testbuddy/releases/latest/download/tb_darwin_arm64.tar.gz | tar -xz
+sudo mkdir -p /usr/local/bin &amp;&amp; sudo mv tb_darwin_arm64/tb /usr/local/bin/
+tb version</code></pre>
+                <p class="fine">Apple silicon. On an Intel Mac use <code>tb_darwin_amd64</code>.</p>
+              </div>
+              <div role="tabpanel" id="panel-linux" aria-labelledby="tab-linux" class="code-panel" hidden>
+                <button type="button" class="copy" data-copy-from="code-linux">Copy</button>
+<pre><code id="code-linux">curl -fsSL https://github.com/Elforama/testbuddy/releases/latest/download/tb_linux_amd64.tar.gz | tar -xz
+sudo mkdir -p /usr/local/bin &amp;&amp; sudo mv tb_linux_amd64/tb /usr/local/bin/
+tb version</code></pre>
+                <p class="fine">On Arm use <code>tb_linux_arm64</code>.</p>
+              </div>
+              <div role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" class="code-panel" hidden>
+                <button type="button" class="copy" data-copy-from="code-windows">Copy</button>
+<pre><code id="code-windows">Invoke-WebRequest https://github.com/Elforama/testbuddy/releases/latest/download/tb_windows_amd64.zip -OutFile tb.zip
+Expand-Archive tb.zip -DestinationPath "$env:LOCALAPPDATA\Programs" -Force
+$dir = "$env:LOCALAPPDATA\Programs\tb_windows_amd64"
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$dir", "User")</code></pre>
+                <p class="fine">PowerShell, Windows 10 or later. Open a new terminal, then <code>tb version</code>. On an Arm PC use <code>tb_windows_arm64</code>. Windows runs Android and web flows; iOS needs macOS and Xcode.</p>
+              </div>
+              <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" class="code-panel" hidden>
+                <button type="button" class="copy" data-copy-from="code-go">Copy</button>
+<pre><code id="code-go">go install github.com/elforama/testbuddy/cmd/tb@latest
+tb version</code></pre>
+                <p class="fine">Go 1.27 or later. Keep the module path lowercase, and put <code>$(go env GOPATH)/bin</code> on your PATH.</p>
+              </div>
+              <div role="tabpanel" id="panel-claude" aria-labelledby="tab-claude" class="code-panel" hidden>
+                <button type="button" class="copy" data-copy-from="code-claude">Copy</button>
+<pre><code id="code-claude">claude plugin marketplace add Elforama/testbuddy
+claude plugin install test-buddy@test-buddy</code></pre>
+                <p class="fine">The <code>tb</code> CLI plus a <code>tb</code> skill for Claude. The bundled binary runs on Apple silicon Macs; elsewhere, install the CLI as well.</p>
+              </div>
+            </div>
+            <p class="fine">Archives for every system, with SHA-256 sums, are on the <a href="https://github.com/Elforama/testbuddy/releases/latest">latest release</a>.</p>
+          </li>
+
+          <li>
+            <div class="step-head"><span class="num">2</span><h3>Have a device ready</h3></div>
+            <div class="needs">
+              <div><strong>Android</strong><span>An emulator, or a phone with USB debugging. Needs <code>adb</code>.</span></div>
+              <div><strong>iOS</strong><span>A booted simulator on a Mac with Xcode.</span></div>
+              <div><strong>Web</strong><span>Google Chrome installed.</span></div>
+            </div>
+            <div class="code-panel">
+<pre><code>tb devices    <span class="m"># what tb can drive, and which are free</span></code></pre>
+            </div>
+            <p class="fine">With no phone running, <code>tb test -p android</code> or <code>-p ios</code> starts an emulator or simulator for you.</p>
+          </li>
+
+          <li>
+            <div class="step-head"><span class="num">3</span><h3>Write a flow and run it</h3></div>
+            <div class="pair">
+              <div class="code-panel">
+                <span class="file">login.yaml</span>
 <pre><code><span class="k">appId:</span> com.example.app
-<span class="c">---</span>
+<span class="m">---</span>
 - <span class="k">launchApp</span>
 - <span class="k">tapOn:</span> <span class="s">"Email"</span>
 - <span class="k">inputText:</span> <span class="s">"hello@example.com"</span>
 - <span class="k">tapOn:</span> <span class="s">"Continue"</span>
 - <span class="k">assertVisible:</span> <span class="s">"Welcome"</span></code></pre>
-        <div class="window-foot"><span class="prompt">$</span> tb test login.yaml</div>
-      </figure>
-    </section>
-
-    <!-- Features -->
-    <section class="wrap section" aria-labelledby="features-title">
-      <p class="eyebrow">Why Test Buddy</p>
-      <h2 id="features-title">Everything you need. Nothing you don't.</h2>
-      <ul class="rows">
-        <li class="row">
-          <span class="row-icon"><svg class="icon"><use href="#i-zap"/></svg></span>
-          <div><h3>Fast by default</h3><p>Each step runs the moment your app is ready. No fixed waits, no guessing.</p></div>
-        </li>
-        <li class="row">
-          <span class="row-icon"><svg class="icon"><use href="#i-file-code"/></svg></span>
-          <div><h3>Bring your Maestro flows</h3><p>Already have Maestro YAML? Run it as is with <code>tb test</code>.</p></div>
-        </li>
-        <li class="row">
-          <span class="row-icon"><svg class="icon"><use href="#i-devices"/></svg></span>
-          <div><h3>Android, iOS and web</h3><p>One tool for emulators, iOS simulators and Chrome. Native apps and Flutter both work.</p></div>
-        </li>
-        <li class="row">
-          <span class="row-icon"><svg class="icon"><use href="#i-bot"/></svg></span>
-          <div><h3>Made for AI agents</h3><p>Agents can look at the screen, tap around and save what they did as a test.</p></div>
-        </li>
-        <li class="row">
-          <span class="row-icon"><svg class="icon"><use href="#i-users"/></svg></span>
-          <div><h3>Many devices, one test</h3><p>Test a chat between an iPhone and an Android phone in a single flow.</p></div>
-        </li>
-      </ul>
-    </section>
-
-    <!-- Getting started -->
-    <section id="start" class="wrap section" aria-labelledby="start-title">
-      <p class="eyebrow">Get started</p>
-      <h2 id="start-title">Up and running in a minute.</h2>
-
-      <ol class="steps">
-        <li class="step">
-          <div class="step-head"><span class="num">1</span><h3>Install</h3></div>
-          <div class="window">
-            <div class="window-bar">
-              <span class="lights"><i></i><i></i><i></i></span>
-              <label class="sr-only" for="install-platform">Your system</label>
-              <select id="install-platform">
-                <option value="darwin_arm64">macOS · Apple silicon</option>
-                <option value="darwin_amd64">macOS · Intel</option>
-                <option value="linux_amd64">Linux · x86-64</option>
-                <option value="linux_arm64">Linux · ARM64</option>
-                <option value="windows_amd64">Windows · x86-64</option>
-                <option value="windows_arm64">Windows · ARM64</option>
-              </select>
-              <button id="copy-install" class="copy" type="button" aria-label="Copy install command"><svg class="icon sm"><use href="#i-copy"/></svg><span>Copy</span></button>
+              </div>
+              <div class="code-panel">
+                <span class="file">shell</span>
+<pre><code>tb test login.yaml -p android
+tb test flows/ -p ios
+tb test flows/ -p web --headless
+tb check --lint flows/    <span class="m"># no device needed</span></code></pre>
+              </div>
             </div>
-            <pre><code id="install-command">Pick your system above.</code></pre>
-          </div>
-          <p class="hint">Then put <code>tb</code> on your PATH. You'll need adb for Android, Xcode for iOS, or Chrome for web.</p>
-        </li>
-
-        <li class="step">
-          <div class="step-head"><span class="num">2</span><h3>Find a device</h3></div>
-          <div class="window">
-            <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">Terminal</span></div>
-            <pre><code><span class="prompt">$</span> tb devices</code></pre>
-          </div>
-        </li>
-
-        <li class="step">
-          <div class="step-head"><span class="num">3</span><h3>Run your test</h3></div>
-          <div class="window">
-            <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">Terminal</span></div>
-            <pre><code><span class="prompt">$</span> tb test login.yaml</code></pre>
-          </div>
-        </li>
-      </ol>
-
-      <a class="text-link" href="https://github.com/Elforama/testbuddy/blob/main/.agents/skills/tb/references/flows.md"><svg class="icon sm"><use href="#i-book"/></svg>See every YAML command<svg class="icon sm"><use href="#i-arrow"/></svg></a>
+            <p class="fine">Existing Maestro flows run unchanged. <a href="https://github.com/Elforama/testbuddy#run-tests">All test options</a> · <a href="https://github.com/Elforama/testbuddy/blob/main/.agents/skills/tb/references/flows.md">Flow reference</a></p>
+          </li>
+        </ol>
+      </div>
     </section>
 
-    <!-- AI agents -->
-    <section class="wrap section" aria-labelledby="agents-title">
-      <p class="eyebrow">AI agents</p>
-      <h2 id="agents-title">Let your agent write the tests.</h2>
-      <p class="lead small">Your coding agent explores the app, then saves the steps as a test you can run again.</p>
-      <div class="window">
-        <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">Terminal</span></div>
-<pre><code><span class="prompt">$</span> tb look              <span class="c"># what's on screen?</span>
-<span class="prompt">$</span> tb do 'tapOn: @3'    <span class="c"># tap something</span>
-<span class="prompt">$</span> tb save flow.yaml    <span class="c"># keep it as a test</span></code></pre>
-      </div>
-      <div class="window">
-        <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">Add to Claude Code</span></div>
-<pre><code><span class="prompt">$</span> claude plugin marketplace add Elforama/testbuddy
-<span class="prompt">$</span> claude plugin install test-buddy@test-buddy</code></pre>
-      </div>
-      <a class="text-link" href="https://github.com/Elforama/testbuddy#use-with-ai-coding-agents"><svg class="icon sm"><use href="#i-bot"/></svg>Agent guide<svg class="icon sm"><use href="#i-arrow"/></svg></a>
-    </section>
-
-    <!-- Multi-device -->
-    <section class="wrap section" aria-labelledby="multi-title">
-      <p class="eyebrow">Multi-device</p>
-      <h2 id="multi-title">Two phones. One test.</h2>
-      <p class="lead small">Give each device a name, then tell it what to do.</p>
-      <div class="window">
-        <div class="window-bar"><span class="lights"><i></i><i></i><i></i></span><span class="window-title">chat.yaml</span></div>
+    <section id="agents" class="section">
+      <div class="wrap duo">
+        <div>
+          <p class="eyebrow">AI agents</p>
+          <h2>Driving a device from a shell</h2>
+          <p>An agent opens a device, reads the screen as text with <code>@refs</code>, acts, and sees what changed. A background daemon keeps devices connected between calls. The commands that passed save as a flow you can replay in CI.</p>
+          <div class="code-panel">
+<pre><code>tb open -p android --app com.example.app
+tb look                       <span class="m"># the screen, one line per element</span>
+tb do <span class="s">'tapOn: @7'</span> <span class="s">'inputText: "hi"'</span>
+tb wait <span class="s">"Welcome"</span>             <span class="m"># waits on device events</span>
+tb save flows/sign-in.yaml    <span class="m"># what worked, as a flow</span></code></pre>
+          </div>
+          <p class="fine">Works with Claude Code (plugin), Codex, Gemini CLI, Cursor and GitHub Copilot through a portable skill. <code>tb agent-guide</code> prints a quick reference, and <code>tb mcp</code> serves MCP clients. <a href="https://github.com/Elforama/testbuddy#use-with-ai-coding-agents">Agent setup</a></p>
+        </div>
+        <div>
+          <p class="eyebrow">Multi-device</p>
+          <h2>Several devices in one flow</h2>
+          <p>Give each device a role, run steps side by side, and hand off with signals. iOS, Android and web roles can mix in one file.</p>
+          <div class="code-panel">
 <pre><code><span class="k">devices:</span>
-  <span class="k">alice:</span> { platform: ios, appId: com.example.chat }
-  <span class="k">bob:</span> { platform: android, appId: com.example.chat }
-<span class="c">---</span>
+  alice: { platform: ios, appId: com.example.chat }
+  bob: { platform: android, appId: com.example.chat }
+<span class="m">---</span>
 - <span class="k">parallel:</span>
-    alice: [launchApp]
-    bob: [launchApp]
+    alice: [launchApp, { runFlow: login.yaml }]
+    bob: [launchApp, { runFlow: login.yaml }]
 - <span class="k">alice:</span>
+    - tapOn: <span class="s">"New message"</span>
+    - inputText: <span class="s">"Hi Bob"</span>
     - tapOn: <span class="s">"Send"</span>
     - signal: sent
 - <span class="k">bob:</span>
     - waitForSignal: sent
-    - assertVisible: <span class="s">"Message received"</span></code></pre>
+    - assertVisible: <span class="s">"Hi Bob"</span></code></pre>
+          </div>
+          <p class="fine"><a href="https://github.com/Elforama/testbuddy/blob/main/docs/multi-device.md">Multi-device syntax</a></p>
+        </div>
       </div>
-      <a class="text-link" href="https://github.com/Elforama/testbuddy/blob/main/docs/multi-device.md"><svg class="icon sm"><use href="#i-users"/></svg>Multi-device guide<svg class="icon sm"><use href="#i-arrow"/></svg></a>
     </section>
 
-    <!-- Closing CTA -->
-    <section class="wrap cta">
-      <h2>Ready to try it?</h2>
-      <div class="actions">
-        <a class="btn primary" href="#start"><svg class="icon"><use href="#i-play"/></svg>Get started</a>
-        <a class="btn" href="https://github.com/Elforama/testbuddy"><svg class="icon"><use href="#i-github"/></svg>Star on GitHub</a>
-      </div>
-    </section>
   </main>
 
   <footer class="site-footer">
-    <div class="wrap footer-row">
-      <span>Test Buddy · Apache 2.0</span>
+    <div class="wrap bar">
+      <span>Test Buddy · Apache 2.0 · © 2026 Jonathan Muller</span>
       <nav aria-label="Footer">
-        <a href="https://github.com/Elforama/testbuddy#quick-start">Docs</a>
+        <a href="https://github.com/Elforama/testbuddy/blob/main/docs/architecture.md">Architecture</a>
+        <a href="https://github.com/Elforama/testbuddy/blob/main/docs/roadmap.md">Roadmap</a>
         <a href="https://github.com/Elforama/testbuddy/issues">Issues</a>
-        <a href="https://github.com/Elforama/testbuddy">GitHub</a>
+        <a href="https://github.com/Elforama/testbuddy">Source</a>
       </nav>
     </div>
   </footer>
