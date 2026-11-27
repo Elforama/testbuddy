@@ -53,6 +53,12 @@ var mcpTools = []mcpTool{
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
 	{"locate", "Inspect all matches and the runner's pick for a selector on the current screen, without acting.", schema(map[string]any{
 		"device": devProp, "selector": map[string]any{"type": "string", "description": "text, @ref, or a YAML selector such as {id: login}"}}, "selector")},
+	{"read", "The value the screen shows for a label, without touching anything: on/off for a switch or checkbox, a field's text, the rest of a label (Total: 5 gives 5), or the text right of or under it. Fails when the label is not on screen (with similar elements) or the value differs from equals.", schema(map[string]any{
+		"device": devProp, "label": map[string]any{"type": "string"},
+		"equals": map[string]any{"type": "string", "description": "fail unless the value is this"}}, "label")},
+	{"collect", "Scroll the screen's main list a page at a time and return every row once, in list order, then the screen as it is now. Stops at rows (100), the end of the list or max_scrolls (30); the first line says which. Leaves the list scrolled.", schema(map[string]any{
+		"device": devProp, "direction": map[string]any{"type": "string", "enum": []string{"down", "up"}},
+		"rows": map[string]any{"type": "integer"}, "max_scrolls": map[string]any{"type": "integer"}})},
 	{"save_flow", "Save the commands that passed as a flow file.", schema(map[string]any{
 		"device": devProp, "path": map[string]any{"type": "string"}}, "path")},
 	{"close", "Disconnect a device.", schema(map[string]any{"device": devProp})},
@@ -303,6 +309,21 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 			structured = resp.JSON
 			resp.Text = string(structured)
 		}
+	case "read":
+		params := map[string]any{"device": str("device"), "label": str("label"), "json": true}
+		if v, ok := args["equals"].(string); ok {
+			params["equals"] = v
+		}
+		resp = call("read", params)
+		structured = resp.JSON
+	case "collect":
+		params := map[string]any{"device": str("device"), "direction": str("direction")}
+		for _, k := range []string{"rows", "max_scrolls"} {
+			if n, ok := args[k].(float64); ok {
+				params[k] = int(n)
+			}
+		}
+		resp = call("collect", params)
 	case "close":
 		resp = call("close", map[string]any{"device": str("device")})
 	default:

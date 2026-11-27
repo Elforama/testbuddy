@@ -65,7 +65,10 @@ For role selection and synchronization, see [multi-device flows](multi-device.md
 `tb do` expands refs into flow selectors against the latest listed screen, then uses the
 same runner as a file-based test. It reports each command and the resulting screen diff.
 `tb locate` exposes the current matches and the runner's preferred candidate without
-acting. `tb watch` streams screen changes; it waits between reads the way a lookup does
+acting. `tb read` answers one question from a fresh listing, the value shown for a label
+(`look.Listing.Read`), and `tb collect` pages through the main scroll area with the driver's
+drag and its settle, joining the pages' rows by their text (`look.Listing.Rows`,
+`look.JoinRows`); neither is recorded. `tb watch` streams screen changes; it waits between reads the way a lookup does
 (`internal/changes`, with the silence safety net below).
 
 The session keeps replayable YAML snippets for recorded steps, with refs already resolved.

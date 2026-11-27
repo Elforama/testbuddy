@@ -51,6 +51,15 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          wait (event-driven) until text appears or goes
   tb locate [-d alice] [--json] <selector>
                                          inspect matches and the runner's pick on screen
+  tb read [-d alice] <label> [--equals VALUE] [--json]
+                                         the value shown for a label, touching nothing: a
+                                         switch's on/off, a field's text, the rest of the label,
+                                         or the text right of or under it; exit 1 if it is not
+                                         there, or differs from --equals
+  tb collect [-d alice] [--direction down|up] [--rows N] [--max-scrolls N] [--json]
+                                         scroll the main list a page at a time and print each
+                                         row once, in order, then the screen as it is now
+                                         (stops at 100 rows, the list's end or 30 scrolls)
   tb watch [-d alice] [--until text] [--timeout ms]
                                          stream screen changes as they happen
   tb shot [-d alice] [path] [--scale 0.5]
@@ -126,6 +135,10 @@ func main() {
 		code = cmdWait(rest)
 	case "locate":
 		code = agentCall("locate", rest, []flagSpec{{[]string{"json"}, boolFlag}})
+	case "read":
+		code = agentCall("read", rest, readFlags)
+	case "collect":
+		code = agentCall("collect", rest, collectFlags)
 	case "watch":
 		code = agentCall("watch", rest, watchFlags)
 	case "shot", "screenshot":
@@ -336,6 +349,10 @@ var (
 		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
 	watchFlags = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
 	shotFlags  = []flagSpec{{[]string{"scale"}, fractionFlag}}
+	readFlags  = []flagSpec{{[]string{"equals"}, textFlag}, {[]string{"json"}, boolFlag}}
+
+	collectFlags = []flagSpec{{[]string{"direction"}, textFlag}, {[]string{"rows"}, intFlag},
+		{[]string{"max-scrolls"}, intFlag}, {[]string{"json"}, boolFlag}}
 )
 
 func platformFlag(a *args) (string, error) {
@@ -362,7 +379,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 			if len(a.pos) > 1 {
 				err = fmt.Errorf("unexpected argument %q: tb shot takes one path", a.pos[1])
 			}
-		case "open", "locate":
+		case "open", "locate", "read":
 		default:
 			err = a.noPos()
 		}
@@ -402,6 +419,30 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 			return 2
 		}
 		args["selector"] = strings.Join(a.pos, " ")
+	case "read":
+		if len(a.pos) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: tb read <label> [--equals VALUE] [--json]")
+			return 2
+		}
+		args["label"] = strings.Join(a.pos, " ")
+		if v, ok := a.vals["equals"]; ok {
+			args["equals"] = v[len(v)-1]
+		}
+	case "collect":
+		if d := strings.ToLower(a.str("direction")); d != "" && d != "down" && d != "up" {
+			fmt.Fprintf(os.Stderr, "--direction: want down or up, not %q\n", a.str("direction"))
+			return 2
+		}
+		for _, name := range []string{"rows", "max-scrolls"} {
+			if n, given := args[name]; given && n == 0 {
+				fmt.Fprintf(os.Stderr, "--%s: want 1 or more\n", name)
+				return 2
+			}
+		}
+		if n, given := args["max-scrolls"]; given {
+			args["max_scrolls"] = n
+			delete(args, "max-scrolls")
+		}
 	case "shot":
 		if len(a.pos) > 0 {
 			args["path"] = a.pos[0]

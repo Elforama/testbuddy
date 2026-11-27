@@ -193,6 +193,8 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("close", s.close)
 	srv.Handle("look", s.look)
 	srv.Handle("locate", s.locate)
+	srv.Handle("read", s.read)
+	srv.Handle("collect", s.collect)
 	srv.Handle("do", s.do)
 	srv.Handle("watch", s.watch)
 	srv.Handle("shot", s.shot)

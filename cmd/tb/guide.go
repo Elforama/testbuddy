@@ -24,6 +24,20 @@ Explore an app:
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
+- tb read [-d alice] "Total" [--equals "€24.99"]   one value instead of a look: prints ok "Total" = "€24.99"
+                                  and touches nothing. The value is a switch's or checkbox's on/off, a
+                                  field's text (by its label or hint), a slider's reading, the rest of
+                                  the label ("Total: €24.99"), or the text right of the label on its row
+                                  or directly under it; '#id' reads the element with that id. Exit 1:
+                                  not on screen (with a "similar:" line), no value with the label, or
+                                  not --equals ("Total" shows "€24.99", not "€20.00"). Not recorded.
+- tb collect [-d alice] [--direction up] [--rows 50] [--max-scrolls 10]
+                                  a whole list in one call: scrolls the screen's main scroll area a
+                                  page at a time and prints each row once, in list order, without
+                                  @refs, then the screen as it is now (with @refs). The first line
+                                  says why it stopped: "collected 22 rows in 3 scrolls: the list
+                                  ended" (or reached --rows, default 100; or --max-scrolls, default
+                                  30). The list stays scrolled where it stopped; not recorded.
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing

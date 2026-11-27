@@ -53,7 +53,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	srv.Handle("ping", func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response {
 		return daemon.Response{OK: true, Text: daemon.BuildID()}
 	})
-	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop", "yield"} {
+	for _, cmd := range []string{"open", "close", "look", "locate", "read", "collect", "watch", "shot", "log", "clear", "do", "save", "devices", "stop", "yield"} {
 		cmd := cmd
 		srv.Handle(cmd, func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 			f.mu.Lock()
@@ -115,6 +115,15 @@ func TestAgentCallArgs(t *testing.T) {
 			map[string]any{"device": "", "platform": "", "until": "Done", "timeout": float64(3000)}},
 		{"shot path", "shot", []string{"out.png", "--scale", "0.25"}, shotFlags,
 			map[string]any{"device": "", "platform": "", "path": "out.png", "scale": 0.25}},
+		{"read a label", "read", []string{"-d", "alice", "Dark theme", "--equals", "off", "--json"}, readFlags,
+			map[string]any{"device": "alice", "platform": "", "label": "Dark theme", "equals": "off", "json": true}},
+		{"read without equals", "read", []string{"Total"}, readFlags, map[string]any{"device": "", "platform": "", "label": "Total"}},
+		{"read unquoted words", "read", []string{"Dark", "theme"}, readFlags, map[string]any{"device": "", "platform": "", "label": "Dark theme"}},
+		{"read with an empty equals", "read", []string{"Email", "--equals", ""}, readFlags,
+			map[string]any{"device": "", "platform": "", "label": "Email", "equals": ""}},
+		{"collect with flags", "collect", []string{"--direction", "up", "--rows", "20", "--max-scrolls", "5"}, collectFlags,
+			map[string]any{"device": "", "platform": "", "direction": "up", "rows": float64(20), "max_scrolls": float64(5)}},
+		{"collect bare", "collect", nil, collectFlags, map[string]any{"device": "", "platform": ""}},
 		{"close all", "close", []string{"all"}, nil, map[string]any{"device": "all", "platform": ""}},
 		{"close one", "close", []string{"-d", "bob"}, nil, map[string]any{"device": "bob", "platform": ""}},
 		{"open positional device", "open", []string{"Pixel 9", "--name", "alice", "--app", "com.app"},
@@ -601,4 +610,54 @@ func (m *mcpPipe) finish() ([]string, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.ids, m.out.String()
+}
+
+func TestReadAndCollectBadArgs(t *testing.T) {
+	f := startFakeDaemon(t)
+	for _, c := range []struct {
+		cmd   string
+		argv  []string
+		extra []flagSpec
+		want  string
+	}{
+		{"read", nil, readFlags, "usage: tb read"},
+		{"collect", []string{"Orders"}, collectFlags, "unexpected argument"},
+		{"collect", []string{"--rows", "0"}, collectFlags, "--rows: want 1 or more"},
+		{"collect", []string{"--max-scrolls", "0"}, collectFlags, "--max-scrolls: want 1 or more"},
+		{"collect", []string{"--direction", "left"}, collectFlags, "--direction: want down or up"},
+	} {
+		var code int
+		_, errOut := capture(t, func() { code = agentCall(c.cmd, c.argv, c.extra) })
+		if code != 2 || !strings.Contains(errOut, c.want) {
+			t.Errorf("tb %s %v: code %d, stderr %q; want 2 and %q", c.cmd, c.argv, code, errOut, c.want)
+		}
+	}
+	if len(f.reqs) != 0 {
+		t.Errorf("bad arguments reached the daemon: %d requests", len(f.reqs))
+	}
+}
+
+func TestMCPReadAndCollect(t *testing.T) {
+	f := startFakeDaemon(t)
+	report := json.RawMessage(`{"exit":1,"query":"Total","value":"€24.99"}`)
+	f.answer("read", daemon.Response{Exit: 1, Text: "differs\n", JSON: report})
+	result := mcpCall(context.Background(), "read", map[string]any{"device": "alice", "label": "Total", "equals": "€20.00"})
+	if structured, _ := result["structuredContent"].(json.RawMessage); string(structured) != string(report) || result["isError"] != true {
+		t.Fatalf("read result: %v", result)
+	}
+	if cmd, args, _ := f.last(t); cmd != "read" || args["label"] != "Total" || args["equals"] != "€20.00" || args["device"] != "alice" || args["json"] != true {
+		t.Errorf("read args: %s %v", cmd, args)
+	}
+	mcpCall(context.Background(), "read", map[string]any{"label": "Total"})
+	if _, args, _ := f.last(t); args["equals"] != nil {
+		t.Errorf("no equals was given, yet the daemon got one: %v", args)
+	}
+	f.answer("collect", daemon.Response{OK: true, Text: "collected 2 rows in 1 scroll: the list ended\n"})
+	result = mcpCall(context.Background(), "collect", map[string]any{"direction": "up", "rows": float64(20), "max_scrolls": float64(5)})
+	if text := result["content"].([]map[string]any)[0]["text"]; text != "collected 2 rows in 1 scroll: the list ended\n" || result["isError"] != false {
+		t.Fatalf("collect result: %v", result)
+	}
+	if cmd, args, _ := f.last(t); cmd != "collect" || args["direction"] != "up" || args["rows"] != float64(20) || args["max_scrolls"] != float64(5) {
+		t.Errorf("collect args: %s %v", cmd, args)
+	}
 }
