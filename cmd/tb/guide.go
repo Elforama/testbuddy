@@ -31,6 +31,10 @@ Explore an app:
                                   a FAILED step also says if the app crashed, "crashed: <app>:
                                   <exception and the frame that threw it>", and prints the app's
                                   last error log lines ("log: ..."): an app bug, not a test bug
+- tb do --secret PW 'inputText: ${PW}'   types a password or code that tb never shows or saves:
+                                  PW comes from the environment (or --secret PW=value) and is 6
+                                  characters or more; output and listings show ••• in its place,
+                                  tb save writes ${PW} and says to replay with -e PW=...
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb applog [-d alice] [--since 60]   the app's error log on demand (Android, iOS simulator):
                                   the crash with its stack, then the error lines
@@ -62,6 +66,12 @@ Explore an app:
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
+- tb save --path checkout [-d alice]   on a screen you will need again: writes them as paths/<app>/checkout.yaml,
+                                  ending with an assertVisible of the screen's heading (edit it if another text is better)
+- tb go checkout [-d alice]       in any later session: runs that path and shows the screen ("arrived at ...");
+                                  it restarts the app (the path begins with launchApp) and runs in the session's app.
+                                  tb go alone lists the app's paths, and tb open names them. If it fails, go on by
+                                  hand and edit the failing step in the file: do not save over it from that session
 - TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
   (not with -p; with several devices connected and none named, tb asks which)
@@ -70,6 +80,10 @@ Explore an app:
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
                                   start with a required launchApp and close the session after saving
                                   use the device serial, simulator UDID or unique name, or -d web --headless
+- tb replay flows/name.yaml -d alice --from 4   after a replay failed at "step 3 of 7" and you did that step
+                                  yourself (tb do): runs steps 4 to 7 on the app as it is, no launchApp.
+                                  On a device you hold in an open session they run in that session (it stays
+                                  open); a browser needs it: -d NAME --from 1 runs the whole flow there
 
 Run tests:
 - tb test flows/ -p android       run YAML flows; Maestro flows run unchanged (tb test -h); -p or a device is required

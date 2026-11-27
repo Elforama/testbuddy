@@ -84,6 +84,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
 | `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`, and on the failed step a `reason`), and on failure the `screen`, the `query` that matched nothing (the selector's text, or its id when it has no text) the `similar` elements, `crash` (when the app crashed) and `log` (the app's last error lines). |
 | `tb do - < steps.yaml` | Steps from stdin. |
+| `tb do --secret NAME[=value] 'inputText: ${NAME}'` | Type a password or one-time code without tb showing or keeping it (repeatable). `--secret NAME` reads the value from the environment, which keeps it out of shell history; `--secret NAME=value` gives it inline. NAME is a plain variable name; the value needs at least 6 characters (a shorter one is refused: hiding it would blank unrelated text). Use it as `${NAME}`, like an `-e` variable; it stays defined, and hidden, until the session closes. Every value given in the session prints as `•••` wherever that session would show it (also where a listing cut it short: `•••…`): step errors and hints, `--json`, the screen diff, `tb look`, `tb locate`, `tb watch`. `tb log` and `tb save` write `${NAME}`, and `tb save` (and `--preview`, as the `secret_variables` warning) names the variables to pass on replay: `tb replay f.yaml -d DEVICE -e NAME=...`. Screenshots and `tb hierarchy` (which reads the device outside the session) are not masked. In `tb test` and `tb replay` a secret is an ordinary `-e` variable. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
 | `tb locate [-d alice] [--json] <text, @ref or {selector}>` | Every element a selector matches on the current screen and the one a tap would pick (`chosen`): check a selector is unambiguous before saving it. |
 | `tb read [-d alice] <label> [--equals VALUE] [--json]` | The value the screen shows for a label, touching nothing: `ok "Dark theme" = "off"`. It answers only when it is sure. In this order, for an element whose label is the query: on/off for a switch or checkbox; the text in a field with that label or hint; a slider's or progress bar's reading; a control inside the label; on the label's row, the control right of it, or the one other text when the row holds just the two (inside the row's container when the screen has one); a field, slider or unlabelled switch directly under it. Then, for a text that starts with the query and a separator (`:`, `=`, `-`, `,`), the rest of it (`Total: €24.99` gives `€24.99`). A value taken from beside the label says so: `ok "Total" = "€24.99" (text to its right)`. Never a value: plain text under the label, a button, link, heading or another label's switch, a column header's neighbour, the rest of a sentence that merely contains the query. `'#id'` reads the element with that id (a web field that has text no longer shows its placeholder). With no value at first, it waits for the screen to settle and reads once more. Exit 1 when the label is not on screen (with the `similar:` elements a failed `tb do` lists), when it is there `but tb cannot tell its value: use tb look`, or when the value differs from `--equals` (`"Total" shows "€24.99", not "€20.00"`). When several elements match the query the line says how many. `--json`: `exit`, `query`, `label`, `value`, `from` (`switch`, `field`, `value`, `inside`, `right`, `below`, `label`, `id`), `of` (the kind of the element beside the label), `matches`, `error`, `similar`. Not recorded for `tb save`. |
@@ -92,7 +93,11 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. `--scale` (also on `tb look`) is from 0 to 1; 0 and 1 mean full size. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
-| `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
+| `tb save --path <name> [-d alice]` | Write the steps that passed as a path to the screen the session is on: the flow `paths/<app>/<name>.yaml` under the directory tb runs in (`<app>`: the app id; for the web, the URL's host and port), plus a last `assertVisible` of the screen's first heading, else its first text, with its id when it has one. Prints that landmark (edit the line if another text is better), the preview's warnings, `depends on: other` when the recording got here through `tb go other` (the path runs `other.yaml` first), and the `-e NAME=...` to pass when it holds a `--secret` (a landmark that shows a secret is written as `${NAME}`, or left out). Over an existing path it is refused (exit 2, file untouched) unless the recording starts with `launchApp` or another path, and always when the path would run itself. Delete the file to remove a path. |
+| `tb go <name> [-d alice] [-e K=V] [--json]` | Run that path in the open session, as `tb do 'runFlow: paths/<app>/<name>.yaml'` does: `arrived at "<landmark>"` (only when the last step is a required `assertVisible`), the step, then the screen. A path that begins with `launchApp` restarts the app, and it runs in the session's app whatever the file's header says. Recorded as one `runFlow` step, which a flow saved later points at the path file. On failure the steps before it ran: go on from the screen shown, and edit the failing step in the file. |
+| `tb go [-d alice]` | List the paths saved for the session's app, each with its landmark. `tb open` ends with their names when there are any. |
+| `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. A failure names the step ("step 3 of 7"). |
+| `tb replay <file.yaml> -d DEVICE --from N` | Run the flow from its Nth step on the app as it is now: the steps that are left after you did a failed one yourself. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
 | `tb applog [-d alice] [--since SECONDS]` | The error log of the session's app, Android and iOS simulator: a `crashed:` line and the stack if it crashed, then its error lines from the last 60 s (or `--since`). |
 | `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
@@ -100,7 +105,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb mark [-d DEVICE] <text>...` | Send events to a running `tb test --record --annotate` (see `--events-port`): each shows in the videos' event log at the time tb got it; several texts are one burst. `tb mark -` reads a line an event. `--url` names the endpoint (default `$TB_EVENTS_URL`, else the running run's). |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
-| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `locate`, `read`, `collect`, `save_flow`, `app_log`, `close`). The CLI is enough; use MCP only if a client needs it. |
+| `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `locate`, `read`, `collect`, `save_flow`, `go`, `app_log`, `close`; `run` takes `secrets: ["NAME=value"]` like `--secret`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
 
 ### Set up
@@ -142,6 +147,26 @@ Replay accepts `-e KEY=VALUE` for variables, `--headless` for Chrome, `--debug-o
 for traces and failure artifacts, and `--json` for the test summary. On a failing replay,
 read the error and open the artifacts in `flows[].debugDir` before deciding whether to
 change the flow or the starting state. Replay uses zero retries.
+
+A failed replay ends with the step that failed, counted over the flow's top-level steps
+("Replay failed at step 3 of 7: ..."), and how to finish; with `--json` the flow has
+`failedStep` and `steps` (how many steps the flow has). To finish, do that step yourself in
+a session (`tb do -d DEVICE '...'`), then `tb replay <file.yaml> -d DEVICE --from 4` runs
+steps 4 to 7 on the app as it is: the steps before N do not run (no `launchApp`, no
+`clearState`), and the flow's `appId`, `url` and `env` still apply. `--from` takes a step
+from 1 to the flow's last.
+
+- On a device you hold in an open session (`-d` its serial, name or session name), the steps
+  run in that session: it stays open and nothing is closed or restarted. The flow's text is
+  taken as written (no `@ref`), its `env` and `-e` apply to this run only, as in a replay, and
+  the steps are not added to the session's recorded commands. `--record`, `--annotate`,
+  `--events-port`, `--timeline`, `--debug-output` and `--headless` are refused there (exit 2),
+  and `onFlowStart` / `onFlowComplete` do not run.
+- On a phone with no session of yours, the test runner runs them, with the usual artifacts.
+- A browser replay opens its own browser, which is gone when it ends, so `--from` on the web
+  needs your session: `tb open -p web --name NAME`, `tb replay <file.yaml> -d NAME --from 1`
+  (the whole flow, in the session, which stays where a step failed), `tb do -d NAME '...'`,
+  then `--from` with the next step.
 
 ### Reading `tb look`
 

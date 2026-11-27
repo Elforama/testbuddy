@@ -301,7 +301,7 @@ func addDev(s *Service, f *fakeDriver, name string) *Dev {
 	return d
 }
 
-type handler func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response
+type handler = daemon.Handler
 
 func call(t *testing.T, h handler, args any, cwd string) (daemon.Response, []daemon.Response) {
 	t.Helper()

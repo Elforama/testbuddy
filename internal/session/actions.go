@@ -21,7 +21,15 @@ type doArgs struct {
 	Commands string            `json:"commands"`
 	App      string            `json:"app"`
 	Env      map[string]string `json:"env"`
+	Secrets  map[string]string `json:"secrets"`
 	JSON     bool              `json:"json"`
+	Replay   *ReplayArgs       `json:"replay,omitempty"`
+}
+
+type ReplayArgs struct {
+	App     string    `json:"app"`
+	Env     []flow.KV `json:"env"`
+	FlowEnv []flow.KV `json:"flow_env"`
 }
 
 type actionStep struct {
@@ -74,12 +82,14 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		return resp
 	}
 	defer d.mu.Unlock()
-	if a.App != "" {
-		d.AppID = a.App
+	if err := d.keepSecrets(a.Secrets); err != nil {
+		return badInput(err)
 	}
 	var lastScreen = d.last
 	text := a.Commands
-	if lastScreen != nil {
+	if a.Replay != nil {
+		a.App = ""
+	} else if lastScreen != nil {
 		text, err = look.ResolveRefs(text, lastScreen, lastScreen.Screen)
 	} else {
 		text, err = look.ResolveRefs(text, nil, nil)
@@ -91,9 +101,33 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if err != nil {
 		return badInput(err)
 	}
-	items, _ := splitItems(text)
-	fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
-	record := stableItems(lastScreen, fresh, cmds, items)
+	runner := d.runner
+	var record []string
+	if a.Replay != nil {
+		leave, err := runner.ScopeEnv(a.Replay.Env, a.Replay.FlowEnv)
+		if err != nil {
+			return badInput(err)
+		}
+		defer leave()
+		if a.App, err = runner.Eval(a.Replay.App); err != nil {
+			return badInput(err)
+		}
+		if strings.Contains(a.Replay.App, "${") && strings.Contains(a.App, "undefined") {
+			return badInput(fmt.Errorf("the flow's app %q does not resolve with this env: it gives %q", a.Replay.App, a.App))
+		}
+	} else {
+		items, _ := splitItems(text)
+		fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
+		record = stableItems(lastScreen, fresh, cmds, items)
+		if named := replacer(d.secretNames()); named != nil {
+			for i := range record {
+				record[i] = named.Replace(record[i])
+			}
+		}
+	}
+	if a.App != "" {
+		d.AppID = a.App
+	}
 	appID := d.AppID
 	if appID == "" {
 		if fg, err := d.Drv.Foreground(ctx); err == nil {
@@ -102,10 +136,12 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	}
 	var out strings.Builder
 	exit := 0
-	runner := d.runner
 	idx := 0
 	var env []flow.KV
 	for k, v := range a.Env {
+		env = append(env, flow.KV{Key: k, Value: v})
+	}
+	for k, v := range a.Secrets {
 		env = append(env, flow.KV{Key: k, Value: v})
 	}
 	runner.SetEnv(env)

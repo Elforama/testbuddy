@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -49,6 +50,9 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb do - < steps.yaml                   commands from stdin
                                          a failed step adds "crashed: <app>: <exception and frame>"
                                          if the app crashed, and its last error log lines ("log:")
+  tb do --secret PW 'inputText: ${PW}'   type a password or code without tb showing or saving
+                                         it (PW from the environment, or --secret PW=value;
+                                         6 characters or more)
   tb wait [-d alice] <text> [--gone] [--timeout ms]
                                          wait (event-driven) until text appears or goes
   tb locate [-d alice] [--json] <selector>
@@ -70,7 +74,16 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          save a screenshot
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
-  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
+  tb save --path <name> [-d alice]       save them as a path to this screen: paths/<app>/<name>.yaml,
+                                         ending with an assertVisible of the screen's heading
+  tb go <name> [-d alice]                run that path in any later session, and show the screen
+  tb go [-d alice]                       list the paths saved for the session's app
+  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step; a failure
+                                         names the step ("step 3 of 7") and how to finish
+  tb replay <file.yaml> -d DEVICE --from 4
+                                         run the steps that are left, on the app as it is: in
+                                         your open session on DEVICE (or -d alice) when you
+                                         hold one, which stays open (tb replay -h)
   tb log | tb clear [-d alice]           show or reset the recorded commands
   tb applog [-d alice] [--since SECONDS]
                                          the app's own error log (Android, iOS simulator): a crash
@@ -160,6 +173,8 @@ func main() {
 		code = agentCall("shot", rest, shotFlags)
 	case "save":
 		code = cmdSave(rest)
+	case "go":
+		code = cmdGo(rest)
 	case "replay":
 		code = cmdReplay(rest)
 	case "log":
@@ -528,7 +543,12 @@ func callDaemon(cmd string, args map[string]any) int {
 func cmdDo(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag},
-		noWaitFlag)
+		flagSpec{[]string{"secret"}, textFlag}, noWaitFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	secrets, err := secretsFrom(a.vals["secret"])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -558,11 +578,36 @@ func cmdDo(argv []string) int {
 	}
 	req := map[string]any{"device": a.str("device"), "platform": a.str("platform"),
 		"commands": yaml, "app": a.str("app"), "env": env}
+	if len(secrets) > 0 {
+		req["secrets"] = secrets
+	}
 	if a.flag("json") {
 		req["json"] = true
 	}
 	noWait(a, req)
 	return callDaemon("do", req)
+}
+
+var secretName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func secretsFrom(specs []string) (map[string]string, error) {
+	secrets := map[string]string{}
+	for _, spec := range specs {
+		name, value, given := strings.Cut(spec, "=")
+		if !secretName.MatchString(name) {
+			return nil, errors.New("--secret takes NAME=value or NAME (the value is then read from the environment); NAME is letters, digits and _, not starting with a digit")
+		}
+		if !given {
+			if value, given = os.LookupEnv(name); !given {
+				return nil, fmt.Errorf("--secret %s: %s is not set in the environment", name, name)
+			}
+		}
+		if value == "" {
+			return nil, fmt.Errorf("--secret %s has no value", name)
+		}
+		secrets[name] = value
+	}
+	return secrets, nil
 }
 
 func toCommandList(parts []string) string {
@@ -610,9 +655,9 @@ func cmdWait(argv []string) int {
 }
 
 func cmdSave(argv []string) int {
-	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
+	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]\n       tb save --path <name> [-d device] [--app id]   a path for tb go: paths/<app>/<name>.yaml"
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"app", "a"}, textFlag},
-		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
+		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"path"}, textFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, saveUsage)
@@ -623,6 +668,15 @@ func cmdSave(argv []string) int {
 		return 0
 	}
 	preview := a.flag("preview")
+	if name := a.str("path"); name != "" {
+		if len(a.pos) > 0 || preview || a.flag("json") {
+			fmt.Fprintln(os.Stderr, saveUsage)
+			return 2
+		}
+		req := map[string]any{"device": a.str("device"), "app": a.str("app"), "name": name}
+		noWait(a, req)
+		return callDaemon("save", req)
+	}
 	if len(a.pos) > 1 || (!preview && (len(a.pos) != 1 || a.flag("json"))) {
 		fmt.Fprintln(os.Stderr, saveUsage)
 		return 2

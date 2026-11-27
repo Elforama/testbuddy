@@ -105,7 +105,9 @@ tb replay flows/save-item.yaml -d emulator-5554 --json
    `clearState: true` only when the test needs a fresh install state.
 2. `tb look`, then `tb do` each action with the assertion that proves it. Read the diff
    `tb do` prints (`+` new, `~` changed, `-` gone) instead of looking again. `@refs` come
-   from the latest output; they are saved as stable selectors.
+   from the latest output; they are saved as stable selectors. Type a password or code with
+   `tb do --secret PW 'inputText: ${PW}'` (PW from the environment, 6+ characters): tb shows `•••` for it
+   and saves `${PW}`, to replay with `-e PW=...`.
 3. `tb save --preview ... --json`: fix its `warnings` (selectors that depend on order,
    accidental regex, a missing assertion), then save. Preview writes nothing.
 4. Close the session, then replay once on the device serial, UDID or name from `tb devices`
@@ -114,6 +116,27 @@ tb replay flows/save-item.yaml -d emulator-5554 --json
 For a short flow, writing the YAML by hand after exploring with `tb do` is just as good: then
 `tb check --lint` and `tb test`. How to read a listing: [cli.md](cli.md#reading-tb-look).
 `tb close all` disconnects everything; `tb close` waits for a command still running (Ctrl-C it).
+
+### Paths: get back to a screen in one call
+
+When you reach a screen you will need again (checkout, settings, the third step of a form),
+save the way there: `tb save --path checkout -d rec`. It writes the recorded steps as
+an ordinary flow, `paths/<app>/checkout.yaml` under the directory tb runs in (`<app>` is the
+app id, or the URL's host for the web), ending with an `assertVisible` of the screen's
+heading: edit that line if another text tells the screen apart better. In any later session
+`tb go checkout` runs it and prints `arrived at "..."` and the screen; `tb go` alone lists
+the app's paths, and `tb open` names them.
+
+- Start the recording with `launchApp`, so the path works from anywhere. `tb go` then
+  restarts the app: anything unsaved on the screen you were on is gone.
+- `tb go` runs the path in the session's app, whatever the file's `appId:` or `url:` says.
+- A path saved after `tb go other` runs `other` first: the save reply says `depends on: other`,
+  and deleting or breaking `other.yaml` breaks it too.
+- When the app changed and `tb go` fails, go on by hand from the screen shown, then edit the
+  failing step in the path's file. Do not save over it from that session: the recording holds
+  only your last steps, and tb refuses (exit 2) a recording that does not start with
+  `launchApp` or another path.
+- Typed with `--secret`? The file holds `${NAME}`: run it with `tb go checkout -e NAME=...`.
 
 ```yaml
 appId: ${APP_ID || 'com.example.app'}   # web: url: https://example.com
