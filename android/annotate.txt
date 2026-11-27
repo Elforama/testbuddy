@@ -1,0 +1,2 @@
+recording.mp4 is in sync (its frame times say so, within -64 ms)
+drew 37 captions, 24 touches and 0 events on recording.mp4 in 29948 ms
