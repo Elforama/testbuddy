@@ -71,6 +71,14 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
+Set up:
+  tb doctor [--json]                     check adb and Android devices, Xcode and booted
+                                         simulators, Chrome and the tb daemon: one line per
+                                         check, with the fix (changes no device; tb doctor -h)
+  tb init [--dry-run]                    register tb's MCP server with the coding agents found
+                                         here (Claude Code, Codex, Gemini CLI), then run the
+                                         doctor checks (tb init -h)
+
 -d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
 tb test and tb open need -p android|ios|web unless a device is named (-d, --device, TB_DEVICE)
 or the flows name it (url:, devices: roles; an --app URL for tb open).
@@ -150,6 +158,10 @@ func main() {
 		code = cmdMCP(rest)
 	case "daemon":
 		code = cmdDaemon(rest)
+	case "doctor":
+		code = cmdDoctor(rest)
+	case "init":
+		code = cmdInit(rest)
 	case "agent-guide", "guide":
 		code = cmdGuide(rest)
 	case "version", "--version", "-v":

@@ -7,6 +7,12 @@ const agentGuide = `## UI testing with tb (Test Buddy)
 tb drives Android emulators and devices, iOS simulators, and Chrome from the shell.
 Interactive sessions stay connected between calls through a background daemon.
 
+Set up:
+- tb doctor [--json]              what is ready and what to fix: "ok ..." or "problem ...: <fix>" per
+                                  check (adb, devices, Xcode, simulators, Chrome, the daemon); changes no device
+- tb init [--dry-run]             registers tb's MCP server with Claude Code, Codex and Gemini CLI
+                                  where installed; --dry-run prints the commands and changes nothing
+
 Explore an app:
 - tb devices                      list devices: free, in use (by whom), or your session
 - tb open -p android|ios|web [--name alice] [--app APP_ID]   or -d DEVICE instead of -p; --name for multi-device work
