@@ -94,6 +94,11 @@ tb replay flows/example.yaml -d DEVICE --json
    Ctrl-C it), then replay once on the serial, UDID or unique name from `tb devices`
    (`-d web --headless` for Chrome). Replay runs once with zero retries. Report the device,
    starting state, and whether the replay passed.
+   A failed replay names the step ("Replay failed at step 3 of 7") and how to finish: do
+   that step yourself (`tb do -d DEVICE '...'`), then `tb replay flows/example.yaml -d DEVICE
+   --from 4` runs the steps that are left on the app as it is, in your open session when you
+   hold the device in one (it stays open). On the web, replay in a session to be able to
+   finish: `tb replay flows/example.yaml -d explorer --from 1`.
 
 For a short flow, writing the YAML by hand after exploring with `tb do` is just as good:
 then `tb check --lint` and `tb test`.

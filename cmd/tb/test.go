@@ -534,10 +534,19 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 
+	replaySteps := 0
+	if replay {
+		replaySteps = len(plan.Flows[0].Commands)
+	}
 	if jsonOut {
-		fmt.Println(string(testJSON(flows, replay)))
+		fmt.Println(string(testJSON(flows, replaySteps)))
 	} else {
 		con.summary(results)
+		for _, f := range flows {
+			if n, desc := failedStep(f); replay && n > 0 {
+				fmt.Print(replayFailure(a.pos[0], a.str("device"), n, replaySteps, desc, plan.Flows[0].Config.Web()))
+			}
+		}
 	}
 	if ctx.Err() != nil {
 		return 130
@@ -573,17 +582,20 @@ func flowReport(r orchestrate.Result, dir, page string, videos []string) report.
 	return fr
 }
 
-func testJSON(flows []report.Flow, replay bool) []byte {
+func testJSON(flows []report.Flow, replaySteps int) []byte {
+	replay := replaySteps > 0
 	type jflow struct {
-		Name     string   `json:"name"`
-		File     string   `json:"file"`
-		Device   string   `json:"device"`
-		Status   string   `json:"status"`
-		Seconds  float64  `json:"seconds"`
-		Error    string   `json:"error,omitempty"`
-		DebugDir string   `json:"debugDir,omitempty"`
-		Timeline string   `json:"timeline,omitempty"`
-		Videos   []string `json:"videos,omitempty"`
+		Name       string   `json:"name"`
+		File       string   `json:"file"`
+		Device     string   `json:"device"`
+		Status     string   `json:"status"`
+		Seconds    float64  `json:"seconds"`
+		Error      string   `json:"error,omitempty"`
+		FailedStep int      `json:"failedStep,omitempty"`
+		Steps      int      `json:"steps,omitempty"`
+		DebugDir   string   `json:"debugDir,omitempty"`
+		Timeline   string   `json:"timeline,omitempty"`
+		Videos     []string `json:"videos,omitempty"`
 	}
 	var out struct {
 		Passed  int     `json:"passed"`
@@ -600,7 +612,12 @@ func testJSON(flows []report.Flow, replay bool) []byte {
 		default:
 			out.Passed++
 		}
-		out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline, f.Videos})
+		jf := jflow{Name: f.Name, File: f.File, Device: f.Device, Status: f.Status, Seconds: f.Duration.Seconds(), Error: f.Error,
+			DebugDir: f.DebugDir, Timeline: f.Timeline, Videos: f.Videos}
+		if n, _ := failedStep(f); replay && n > 0 {
+			jf.FailedStep, jf.Steps = n, replaySteps
+		}
+		out.Flows = append(out.Flows, jf)
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return b
