@@ -53,10 +53,10 @@ var mcpTools = []mcpTool{
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
 	{"locate", "Inspect all matches and the runner's pick for a selector on the current screen, without acting.", schema(map[string]any{
 		"device": devProp, "selector": map[string]any{"type": "string", "description": "text, @ref, or a YAML selector such as {id: login}"}}, "selector")},
-	{"read", "The value the screen shows for a label, without touching anything: on/off for a switch or checkbox, a field's text, the rest of a label (Total: 5 gives 5), or the text right of or under it. Fails when the label is not on screen (with similar elements) or the value differs from equals.", schema(map[string]any{
+	{"read", "The value the screen shows for a label, without touching anything: on/off for a switch or checkbox, a field's text, the rest of a text that starts with the label and a separator (Total: 5 gives 5), or the one value beside the label on its row (the answer then says where it came from). Fails when the label is not on screen (with similar elements), when tb cannot tell its value (look instead), or when the value differs from equals.", schema(map[string]any{
 		"device": devProp, "label": map[string]any{"type": "string"},
 		"equals": map[string]any{"type": "string", "description": "fail unless the value is this"}}, "label")},
-	{"collect", "Scroll the screen's main list a page at a time and return every row once, in list order, then the screen as it is now. Stops at rows (100), the end of the list or max_scrolls (30); the first line says which. Leaves the list scrolled.", schema(map[string]any{
+	{"collect", "Scroll the screen's main scroll area a page at a time and return every row once, in list order, then the screen as it is now. Stops at rows (100), at max_scrolls (30, at most 200), or when two drags in a row change nothing; the first line names the area and says which. Drags nothing on a screen without a scroll area. Leaves the list scrolled; direction up at the top of a list can pull to refresh.", schema(map[string]any{
 		"device": devProp, "direction": map[string]any{"type": "string", "enum": []string{"down", "up"}},
 		"rows": map[string]any{"type": "integer"}, "max_scrolls": map[string]any{"type": "integer"}})},
 	{"save_flow", "Save the commands that passed as a flow file.", schema(map[string]any{

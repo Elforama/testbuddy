@@ -624,6 +624,7 @@ func TestReadAndCollectBadArgs(t *testing.T) {
 		{"collect", []string{"Orders"}, collectFlags, "unexpected argument"},
 		{"collect", []string{"--rows", "0"}, collectFlags, "--rows: want 1 or more"},
 		{"collect", []string{"--max-scrolls", "0"}, collectFlags, "--max-scrolls: want 1 or more"},
+		{"collect", []string{"--max-scrolls", "201"}, collectFlags, "--max-scrolls: at most 200"},
 		{"collect", []string{"--direction", "left"}, collectFlags, "--direction: want down or up"},
 	} {
 		var code int

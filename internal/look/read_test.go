@@ -54,12 +54,10 @@ func TestReadRestOfLabel(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", row(0), text("Subtotal: €20.00")),
 		nd(1, "android.widget.TextView", row(1), text("Total: €24.99")),
-		nd(1, "android.widget.TextView", row(2), text("3 items in Basket")),
 		nd(1, "android.widget.TextView", row(3), text("Status - shipped")),
 	)
 	expectReading(t, s, "Total", "€24.99", "label", 1)
 	expectReading(t, s, "Total:", "€24.99", "label", 1)
-	expectReading(t, s, "Basket", "3 items in", "label", 1)
 	expectReading(t, s, "status", "shipped", "label", 1)
 }
 
@@ -80,13 +78,9 @@ func TestReadRightOnTheRow(t *testing.T) {
 
 func TestReadDirectlyUnder(t *testing.T) {
 	s := android(
-		nd(1, "android.widget.TextView", rect(40, 300, 500, 360), text("Delivery address")),
-		nd(1, "android.widget.TextView", rect(40, 370, 900, 430), text("12 Harbour Road")),
-		nd(1, "android.widget.TextView", rect(40, 1500, 900, 1560), text("Far away")),
 		nd(1, "android.widget.TextView", rect(40, 600, 300, 660), text("Email")),
 		nd(1, "android.widget.EditText", rect(40, 670, 1040, 770), text("bob@x.io")),
 	)
-	expectReading(t, s, "Delivery address", "12 Harbour Road", "below", 1)
 	expectReading(t, s, "Email", "bob@x.io", "below", 1)
 }
 
@@ -97,13 +91,13 @@ func TestReadRuleOrder(t *testing.T) {
 		nd(1, "android.widget.EditText", rect(40, 400, 1040, 500), hint("Sync"), text("typed")),
 		nd(1, "android.widget.Switch", rect(40, 600, 1040, 700), text("Sync"), click, checked),
 	)
-	expectReading(t, switchFirst, "Sync", "on", "switch", 1)
+	expectReading(t, switchFirst, "Sync", "on", "switch", 3)
 
 	fieldBeforeLabel := android(
 		nd(1, "android.widget.TextView", rect(40, 200, 1040, 260), text("Email: old@x.io")),
 		nd(1, "android.widget.EditText", rect(40, 400, 1040, 500), hint("Email"), text("new@x.io")),
 	)
-	expectReading(t, fieldBeforeLabel, "Email", "new@x.io", "field", 1)
+	expectReading(t, fieldBeforeLabel, "Email", "new@x.io", "field", 2)
 
 	labelBeforeRight := android(
 		nd(1, "android.widget.TextView", rect(40, 200, 500, 260), text("Total: €24.99")),
@@ -162,9 +156,9 @@ func TestReadKeepsLongValuesWhole(t *testing.T) {
 	long := "A value that is much longer than the eighty characters a listing line keeps of a label, to its very end"
 	s := android(
 		nd(1, "android.widget.TextView", rect(40, 300, 500, 360), text("Notes")),
-		nd(1, "android.widget.TextView", rect(40, 370, 1040, 430), text(long)),
+		nd(1, "android.widget.TextView", rect(520, 300, 1040, 360), text(long)),
 	)
-	expectReading(t, s, "Notes", long, "below", 1)
+	expectReading(t, s, "Notes", long, "right", 1)
 }
 
 func TestReadOwnValue(t *testing.T) {

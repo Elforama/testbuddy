@@ -68,7 +68,11 @@ same runner as a file-based test. It reports each command and the resulting scre
 acting. `tb read` answers one question from a fresh listing, the value shown for a label
 (`look.Listing.Read`), and `tb collect` pages through the main scroll area with the driver's
 drag and its settle, joining the pages' rows by their text (`look.Listing.Rows`,
-`look.JoinRows`); neither is recorded. `tb watch` streams screen changes; it waits between reads the way a lookup does
+`look.JoinRows`); neither is recorded. `read` answers only when the listing leaves one
+candidate: a wrong value is worse than none, since an agent acts on it. `JoinRows` first
+wants the end of the rows so far to be the start of the new page, then allows up to three
+leading rows of the new page that stayed put (a pinned header and the rows it covers) and up
+to two last rows of the page before that are gone (a loading row). `tb watch` streams screen changes; it waits between reads the way a lookup does
 (`internal/changes`, with the silence safety net below).
 
 The session keeps replayable YAML snippets for recorded steps, with refs already resolved.

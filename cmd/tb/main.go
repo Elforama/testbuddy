@@ -53,13 +53,15 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          inspect matches and the runner's pick on screen
   tb read [-d alice] <label> [--equals VALUE] [--json]
                                          the value shown for a label, touching nothing: a
-                                         switch's on/off, a field's text, the rest of the label,
-                                         or the text right of or under it; exit 1 if it is not
-                                         there, or differs from --equals
+                                         switch's on/off, a field's text, the rest of a
+                                         "Label: value" text, or the one value beside it on its
+                                         row; exit 1 if it is not there, tb cannot tell its
+                                         value, or it differs from --equals
   tb collect [-d alice] [--direction down|up] [--rows N] [--max-scrolls N] [--json]
-                                         scroll the main list a page at a time and print each
-                                         row once, in order, then the screen as it is now
-                                         (stops at 100 rows, the list's end or 30 scrolls)
+                                         scroll the main scroll area a page at a time and print
+                                         each row once, in order, then the screen as it is now
+                                         (stops at 100 rows, 30 scrolls, or when two drags in a
+                                         row change nothing; --max-scrolls is at most 200)
   tb watch [-d alice] [--until text] [--timeout ms]
                                          stream screen changes as they happen
   tb shot [-d alice] [path] [--scale 0.5]
@@ -452,6 +454,10 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 			}
 		}
 		if n, given := args["max-scrolls"]; given {
+			if n.(int) > 200 {
+				fmt.Fprintln(os.Stderr, "--max-scrolls: at most 200")
+				return 2
+			}
 			args["max_scrolls"] = n
 			delete(args, "max-scrolls")
 		}

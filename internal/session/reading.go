@@ -62,6 +62,13 @@ func (s *Service) read(ctx context.Context, req daemon.Request, send func(daemon
 	result := readResult{Query: query, Equals: a.Equals}
 	var text string
 	reading, onScreen := l.Read(query)
+	if reading == nil {
+		d.Drv.WaitSettled(ctx, 3*time.Second)
+		if l, err = s.listNow(ctx, d); err != nil {
+			return fail(1, "%v", err)
+		}
+		reading, onScreen = l.Read(query)
+	}
 	switch {
 	case reading == nil && !onScreen:
 		result.Error = fmt.Sprintf("%q is not on screen", query)
@@ -74,7 +81,7 @@ func (s *Service) read(ctx context.Context, req daemon.Request, send func(daemon
 			text += "  similar: " + strings.Join(parts, "; ") + "\n"
 		}
 	case reading == nil:
-		result.Error = fmt.Sprintf("%q is on screen, but no value shows with it: nothing in its own text, inside it, to its right on the row or directly under it", query)
+		result.Error = fmt.Sprintf("%q is on screen but tb cannot tell its value: use tb look", query)
 		text = result.Error + "\n"
 	case a.Equals != nil && strings.TrimSpace(*a.Equals) != strings.TrimSpace(reading.Value):
 		result.Reading = reading
@@ -83,8 +90,15 @@ func (s *Service) read(ctx context.Context, req daemon.Request, send func(daemon
 	default:
 		result.Reading = reading
 		text = fmt.Sprintf("ok %q = %q", query, reading.Value)
+		var notes []string
+		if where := map[string]string{"inside": "inside it", "right": "to its right", "below": "under it"}[reading.From]; where != "" {
+			notes = append(notes, strings.ToLower(reading.Of)+" "+where)
+		}
 		if reading.Matches > 1 {
-			text += fmt.Sprintf(" (%d elements match %q: this is the first)", reading.Matches, query)
+			notes = append(notes, fmt.Sprintf("%d elements match %q", reading.Matches, query))
+		}
+		if len(notes) > 0 {
+			text += " (" + strings.Join(notes, "; ") + ")"
 		}
 		text += "\n"
 	}
@@ -110,6 +124,7 @@ type collectResult struct {
 	Rows    []string      `json:"rows"`
 	Scrolls int           `json:"scrolls"`
 	Stopped string        `json:"stopped"`
+	Area    string        `json:"area,omitempty"`
 	Gaps    int           `json:"gaps,omitempty"`
 	Screen  *look.Listing `json:"screen"`
 }
@@ -117,6 +132,7 @@ type collectResult struct {
 const (
 	collectRows    = 100
 	collectScrolls = 30
+	mostScrolls    = 200
 	pageDrag       = 600 * time.Millisecond
 )
 
@@ -167,6 +183,9 @@ func (s *Service) collect(ctx context.Context, req daemon.Request, send func(dae
 	if a.Rows < 0 || a.MaxScrolls < 0 {
 		return fail(2, "--rows and --max-scrolls take a number above 0")
 	}
+	if a.MaxScrolls > mostScrolls {
+		return fail(2, "--max-scrolls: at most %d", mostScrolls)
+	}
 	up := direction == "up"
 	maxRows, maxScrolls := a.Rows, a.MaxScrolls
 	if maxRows == 0 {
@@ -187,11 +206,15 @@ func (s *Service) collect(ctx context.Context, req daemon.Request, send func(dae
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	page, view := l.Rows()
+	page, view, area := l.Rows()
 	all := page
-	result := collectResult{}
+	result := collectResult{Area: area}
+	still := 0
 	for result.Stopped == "" {
 		switch {
+		case area == "":
+			result.Stopped = "no-scroll-area"
+			continue
 		case len(wholeRows(all, up)) >= maxRows:
 			result.Stopped = "rows"
 			continue
@@ -214,11 +237,14 @@ func (s *Service) collect(ctx context.Context, req daemon.Request, send func(dae
 			return fail(1, "%v", err)
 		}
 		before := page
-		page, view = l.Rows()
+		page, view, _ = l.Rows()
 		if sameRows(page, before) {
-			result.Stopped = "end"
+			if still++; still > 1 {
+				result.Stopped = "end"
+			}
 			continue
 		}
+		still = 0
 		joined := true
 		if up {
 			all, joined = look.JoinRows(page, all)
@@ -229,7 +255,7 @@ func (s *Service) collect(ctx context.Context, req daemon.Request, send func(dae
 			result.Gaps++
 		}
 	}
-	if result.Stopped != "end" {
+	if result.Stopped != "end" && result.Stopped != "no-scroll-area" {
 		all = wholeRows(all, up)
 	}
 	if len(all) > maxRows {
@@ -240,13 +266,17 @@ func (s *Service) collect(ctx context.Context, req daemon.Request, send func(dae
 			all = all[:maxRows]
 		}
 	}
-	why := map[string]string{"end": "the list ended", "rows": fmt.Sprintf("reached --rows %d", maxRows),
+	why := map[string]string{"end": "the page stopped changing", "no-scroll-area": "no scroll area on this screen", "rows": fmt.Sprintf("reached --rows %d", maxRows),
 		"max-scrolls": fmt.Sprintf("stopped at --max-scrolls %d", maxScrolls)}[result.Stopped]
 	if result.Gaps > 0 {
-		why += fmt.Sprintf(" (%s showed no row of the page before it: rows may be missing)", plural(result.Gaps, "scroll"))
+		why += fmt.Sprintf(" (%s showed no row of the page before it: rows may be missing or repeated)", plural(result.Gaps, "scroll"))
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "collected %s in %s: %s\n", plural(len(all), "row"), plural(result.Scrolls, "scroll"), why)
+	rows := plural(len(all), "row")
+	if area != "" {
+		rows += " of " + area
+	}
+	fmt.Fprintf(&out, "collected %s in %s: %s\n", rows, plural(result.Scrolls, "scroll"), why)
 	result.Rows = make([]string, len(all))
 	for i, r := range all {
 		result.Rows[i] = r.Text

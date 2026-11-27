@@ -83,7 +83,7 @@ func TestReadNotFoundSuggestsSimilar(t *testing.T) {
 func TestReadLabelWithoutValue(t *testing.T) {
 	s, _, _ := readSession(t)
 	resp, _ := call(t, s.read, map[string]any{"label": "Summary"}, "")
-	if resp.OK || resp.Exit != 1 || !strings.HasPrefix(resp.Text, "\"Summary\" is on screen, but no value shows with it") {
+	if resp.OK || resp.Exit != 1 || resp.Text != "\"Summary\" is on screen but tb cannot tell its value: use tb look\n" {
 		t.Errorf("exit %d, text %q", resp.Exit, resp.Text)
 	}
 }
@@ -91,7 +91,7 @@ func TestReadLabelWithoutValue(t *testing.T) {
 func TestReadAmbiguousSaysHowMany(t *testing.T) {
 	s, _, _ := readSession(t)
 	resp, _ := call(t, s.read, map[string]any{"label": "Price"}, "")
-	want := "ok \"Price\" = \"$1\" (2 elements match \"Price\": this is the first)\n"
+	want := "ok \"Price\" = \"$1\" (2 elements match \"Price\")\n"
 	if !resp.OK || resp.Text != want {
 		t.Errorf("exit %d, text %q; want %q", resp.Exit, resp.Text, want)
 	}
@@ -143,6 +143,7 @@ type listFake struct {
 	swipes      [][4]int
 	drags       int
 	samePrice   map[string]bool
+	deaf        map[int]bool
 }
 
 func (f *listFake) price(i int) string {
@@ -205,6 +206,9 @@ func (f *listFake) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.swipes = append(f.swipes, [4]int{x1, y1, x2, y2})
+	if f.deaf[len(f.swipes)] {
+		return driver.ActionResult{}, nil
+	}
 	if o.Drag && !o.NoSettle {
 		f.drags++
 	}
@@ -261,7 +265,7 @@ func TestCollectThreePagesToTheEnd(t *testing.T) {
 		t.Fatalf("exit %d: %s", resp.Exit, resp.Text)
 	}
 	first, rows, screen := collected(t, resp.Text)
-	if first != "collected 12 rows in 3 scrolls: the list ended" {
+	if first != "collected 12 rows of the scrollable column in 4 scrolls: the page stopped changing" {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, itemRows(1, 12))
@@ -274,8 +278,8 @@ func TestCollectThreePagesToTheEnd(t *testing.T) {
 	if d.last == nil || len(d.steps) != 0 {
 		t.Errorf("collect should leave its last listing for the refs and record nothing: last %v, steps %v", d.last != nil, d.steps)
 	}
-	if f.drags != len(f.swipes) || len(f.swipes) != 3 {
-		t.Errorf("%d swipes, %d of them settled drags; want 3 drags", len(f.swipes), f.drags)
+	if f.drags != len(f.swipes) || len(f.swipes) != 4 {
+		t.Errorf("%d swipes, %d of them settled drags; want 4 drags: 2 that moved the list, and 2 that did not", len(f.swipes), f.drags)
 	}
 	for _, sw := range f.swipes {
 		if sw[0] != 200 || sw[1] <= sw[3] || sw[1] > f.bottom || sw[3] < f.top {
@@ -290,7 +294,7 @@ func TestCollectTakesARowCutAtThePageEdgeOnceAndWhole(t *testing.T) {
 	f.bottom = 720
 	resp, _ := call(t, s.collect, map[string]any{}, "")
 	first, rows, _ := collected(t, resp.Text)
-	if !strings.HasPrefix(first, "collected 22 rows in ") || !strings.HasSuffix(first, ": the list ended") {
+	if !strings.HasPrefix(first, "collected 22 rows of the scrollable column in ") || !strings.HasSuffix(first, ": the page stopped changing") {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, itemRows(1, 22))
@@ -300,7 +304,7 @@ func TestCollectStopsAtRows(t *testing.T) {
 	s, f, _ := collectSession(t, numberedRows(40))
 	resp, _ := call(t, s.collect, map[string]any{"rows": 8}, "")
 	first, rows, _ := collected(t, resp.Text)
-	if first != "collected 8 rows in 1 scroll: reached --rows 8" {
+	if first != "collected 8 rows of the scrollable column in 1 scroll: reached --rows 8" {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, itemRows(1, 8))
@@ -313,7 +317,7 @@ func TestCollectStopsAtMaxScrolls(t *testing.T) {
 	s, f, _ := collectSession(t, numberedRows(40))
 	resp, _ := call(t, s.collect, map[string]any{"max_scrolls": 2}, "")
 	first, rows, _ := collected(t, resp.Text)
-	if first != "collected 13 rows in 2 scrolls: stopped at --max-scrolls 2" {
+	if first != "collected 13 rows of the scrollable column in 2 scrolls: stopped at --max-scrolls 2" {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, itemRows(1, 13))
@@ -326,7 +330,7 @@ func TestCollectDefaultsAre100RowsAnd30Scrolls(t *testing.T) {
 	s, f, _ := collectSession(t, numberedRows(400))
 	resp, _ := call(t, s.collect, map[string]any{}, "")
 	first, rows, _ := collected(t, resp.Text)
-	if !strings.HasPrefix(first, "collected 100 rows in ") || !strings.HasSuffix(first, ": reached --rows 100") || len(rows) != 100 {
+	if !strings.HasPrefix(first, "collected 100 rows of the scrollable column in ") || !strings.HasSuffix(first, ": reached --rows 100") || len(rows) != 100 {
 		t.Errorf("first line %q, %d rows", first, len(rows))
 	}
 	f.offset, f.swipes, f.stride = 0, nil, 100
@@ -349,7 +353,7 @@ func TestCollectKeepsRowsWithTheSameText(t *testing.T) {
 		want = append(want, fmt.Sprintf("Text %q  Text %q", n, f.price(i)))
 	}
 	expectRows(t, rows, want)
-	if first != "collected 12 rows in 3 scrolls: the list ended" {
+	if first != "collected 12 rows of the scrollable column in 4 scrolls: the page stopped changing" {
 		t.Errorf("first line %q", first)
 	}
 }
@@ -359,7 +363,7 @@ func TestCollectUpGivesListOrder(t *testing.T) {
 	f.offset = f.maxOffset()
 	resp, _ := call(t, s.collect, map[string]any{"direction": "up"}, "")
 	first, rows, screen := collected(t, resp.Text)
-	if first != "collected 12 rows in 3 scrolls: the list ended" {
+	if first != "collected 12 rows of the scrollable column in 4 scrolls: the page stopped changing" {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, itemRows(1, 12))
@@ -378,7 +382,7 @@ func TestCollectSaysWhenAPageSharesNoRowWithTheOneBefore(t *testing.T) {
 	f.stride = 900
 	resp, _ := call(t, s.collect, map[string]any{"max_scrolls": 1}, "")
 	first, rows, _ := collected(t, resp.Text)
-	want := "collected 11 rows in 1 scroll: stopped at --max-scrolls 1 (1 scroll showed no row of the page before it: rows may be missing)"
+	want := "collected 11 rows of the scrollable column in 1 scroll: stopped at --max-scrolls 1 (1 scroll showed no row of the page before it: rows may be missing or repeated)"
 	if first != want {
 		t.Errorf("first line %q, want %q", first, want)
 	}
@@ -392,6 +396,7 @@ func TestCollectJSONAndBadInput(t *testing.T) {
 		Rows    []string `json:"rows"`
 		Scrolls int      `json:"scrolls"`
 		Stopped string   `json:"stopped"`
+		Area    string   `json:"area"`
 		Screen  struct {
 			Elements []map[string]any `json:"elements"`
 		} `json:"screen"`
@@ -399,25 +404,80 @@ func TestCollectJSONAndBadInput(t *testing.T) {
 	if err := json.Unmarshal(resp.JSON, &got); err != nil {
 		t.Fatalf("json %s: %v", resp.JSON, err)
 	}
-	if len(got.Rows) != 12 || got.Rows[11] != "Text \"Item 12\"  Text \"$12\"" || got.Scrolls != 3 || got.Stopped != "end" || len(got.Screen.Elements) == 0 {
+	if len(got.Rows) != 12 || got.Rows[11] != "Text \"Item 12\"  Text \"$12\"" || got.Scrolls != 4 || got.Stopped != "end" || got.Area != "the scrollable column" || len(got.Screen.Elements) == 0 {
 		t.Errorf("json %s", resp.JSON)
 	}
-	for _, bad := range []map[string]any{{"direction": "left"}, {"rows": -1}, {"max_scrolls": -3}} {
+	for _, bad := range []map[string]any{{"direction": "left"}, {"rows": -1}, {"max_scrolls": -3}, {"max_scrolls": 201}} {
 		if resp, _ := call(t, s.collect, bad, ""); resp.Exit != 2 {
 			t.Errorf("%v: exit %d, text %q; want 2", bad, resp.Exit, resp.Text)
 		}
 	}
 }
 
-func TestCollectWithoutAListGivesTheScreen(t *testing.T) {
+func TestCollectWithoutAScrollAreaDragsNothing(t *testing.T) {
 	s := New()
-	f := newFake("emulator-5554", "Pixel 7", device.Android)
-	f.show(label("One", 100), label("Two", 200))
-	addDev(s, f, "")
+	f := newListFake(nil)
+	f.fakeDriver.show(label("One", 100), label("Two", 200))
+	d := addDev(s, f.fakeDriver, "")
+	plain := &swipeCounter{fakeDriver: f.fakeDriver}
+	d.Drv = plain
 	resp, _ := call(t, s.collect, map[string]any{}, "")
 	first, rows, _ := collected(t, resp.Text)
-	if first != "collected 2 rows in 1 scroll: the list ended" {
+	if first != "collected 2 rows in 0 scrolls: no scroll area on this screen" {
 		t.Errorf("first line %q", first)
 	}
 	expectRows(t, rows, []string{"Text \"One\"", "Text \"Two\""})
+	if plain.swipes != 0 {
+		t.Errorf("%d swipes on a screen with nothing to scroll: a drag there can pull to refresh or move a pager", plain.swipes)
+	}
+}
+
+type swipeCounter struct {
+	*fakeDriver
+	swipes int
+}
+
+func (f *swipeCounter) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	f.swipes++
+	return driver.ActionResult{}, nil
+}
+
+func TestCollectTriesADragThatMovedNothingOnceMore(t *testing.T) {
+	s, f, _ := collectSession(t, numberedRows(12))
+	f.deaf = map[int]bool{2: true}
+	resp, _ := call(t, s.collect, map[string]any{}, "")
+	first, rows, _ := collected(t, resp.Text)
+	if first != "collected 12 rows of the scrollable column in 5 scrolls: the page stopped changing" {
+		t.Errorf("first line %q", first)
+	}
+	expectRows(t, rows, itemRows(1, 12))
+}
+
+type settlingFake struct {
+	*fakeDriver
+	then []item
+}
+
+func (f *settlingFake) WaitSettled(ctx context.Context, t time.Duration) error {
+	f.fakeDriver.show(f.then...)
+	return f.fakeDriver.WaitSettled(ctx, t)
+}
+
+func TestReadLooksAgainOnceTheScreenSettled(t *testing.T) {
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	f.show(label("Scenarios", 0), button("Controls", 100))
+	d := addDev(s, f, "")
+	d.Drv = &settlingFake{fakeDriver: f, then: settingsScreen()}
+	resp, _ := call(t, s.read, map[string]any{"label": "Notifications"}, "")
+	if !resp.OK || resp.Text != "ok \"Notifications\" = \"on\"\n" {
+		t.Errorf("exit %d, text %q; want the value from the screen the app was still drawing", resp.Exit, resp.Text)
+	}
+	if f.waits != 1 {
+		t.Errorf("%d waits, want 1", f.waits)
+	}
+	resp, _ = call(t, s.read, map[string]any{"label": "Total"}, "")
+	if !resp.OK || f.waits != 1 {
+		t.Errorf("exit %d, %d waits; a label found at once needs no wait", resp.Exit, f.waits)
+	}
 }
