@@ -126,14 +126,14 @@ func wordByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.IndexByte("_.-@", b) >= 0
 }
 
-var hashIDPattern = regexp.MustCompile(`^(\s*(?:- )?(\w+):\s+)#([\w.:/-]+)(\s*)$`)
+var hashIDPattern = regexp.MustCompile(`^(\s*(?:- )?(?:tapOn|doubleTapOn|longPressOn|assertVisible|assertNotVisible|copyTextFrom|visible|notVisible|element):\s+)#([\w.:/-]+)(\s*)$`)
 
 func hashID(line string) string {
 	m := hashIDPattern.FindStringSubmatch(line)
-	if m == nil || m[2] == "inputText" {
+	if m == nil {
 		return line
 	}
-	return m[1] + fmt.Sprintf("{id: %s}", strconv.Quote(regexp.QuoteMeta(m[3]))) + m[4]
+	return m[1] + fmt.Sprintf("{id: %s}", strconv.Quote(regexp.QuoteMeta(m[2]))) + m[3]
 }
 
 func ResolveRefs(text string, l *Listing, s *ui.Screen) (string, error) {

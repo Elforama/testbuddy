@@ -325,6 +325,12 @@ func TestResolveRefsTurnsAHashIDIntoAnIDSelector(t *testing.T) {
 		{"a comment line stays", "#logout\n- back", "#logout\n- back"},
 		{"typed text stays", "- inputText: #logout", "- inputText: #logout"},
 		{"quoted stays", `- tapOn: "#logout"`, `- tapOn: "#logout"`},
+		{"scroll target", "- scrollUntilVisible:\n    element: #row", "- scrollUntilVisible:\n    element: {id: \"row\"}"},
+		{"typed block text stays", "- inputText: |\n    Topic: #general", "- inputText: |\n    Topic: #general"},
+		{"clipboard block text stays", "- setClipboard: |\n    channel: #general", "- setClipboard: |\n    channel: #general"},
+		{"script body stays", "- evalScript: |\n    output.x = {\n      color: #fff\n    }", "- evalScript: |\n    output.x = {\n      color: #fff\n    }"},
+		{"a timeout comment stays", "- extendedWaitUntil:\n    visible: Next\n    timeout: #500", "- extendedWaitUntil:\n    visible: Next\n    timeout: #500"},
+		{"a key that takes text stays", "- pressKey: #Enter", "- pressKey: #Enter"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

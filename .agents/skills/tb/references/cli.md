@@ -118,8 +118,10 @@ several matches gets the same treatment: a bare `"Edit"` that finds it only by c
 is kept only when nothing stable tells it apart.
 
 In `tb do`, an id can be written the way `tb look` prints it: `tapOn: #login` is
-`tapOn: {id: login}` (only as a command's whole value, and not for `inputText`; elsewhere a
-`#` still starts a YAML comment). It is saved as the id selector.
+`tapOn: {id: login}`. It works as the whole value of a command or key that takes an
+element (`tapOn`, `doubleTapOn`, `longPressOn`, `assertVisible`, `assertNotVisible`,
+`copyTextFrom`, `visible`, `notVisible`, `element`); anywhere else a `#` still starts a YAML
+comment. It is saved as the id selector.
 
 Replay requires a single-device flow whose first executed command is a required
 `launchApp` with app restart enabled. `launchApp: {clearState: true}` resets app data at
