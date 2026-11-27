@@ -74,6 +74,45 @@ with every run. To look at them:
 git fetch origin bench-log && git log --stat FETCH_HEAD
 ```
 
+## What a job costs an agent
+
+`bench/agent/run.py` gives a fresh agent a job in the web app and measures what the job took:
+how many tb commands it ran, how many of those were `look`, how many failed, and the agent's
+turns, tokens, cost and time. It is the way to judge a change to what tb prints for agents
+(`tb agent-guide`, `look`, `do`, error messages): run it on the build before and the build
+after.
+
+```sh
+scripts/build.sh --skip-agents
+bench/agent/run.py                                  # 3 tasks x 3 runs, model sonnet
+bench/agent/run.py --tasks journey --runs 5 --tb /path/to/another/tb --out before.json
+bench/agent/run.py --compare before.json after.json
+python3 bench/agent/test_run.py                     # the script's own tests: no agent, no browser
+```
+
+The tasks ([agent/tasks.json](agent/tasks.json)) say what to achieve, not which buttons to
+tap: the journey, a set of controls to leave in a given state, and four lists to pick from.
+Every run gets its own web server (a free port, a fresh click log), its own `TB_HOME` and
+daemon, and an empty directory to work in. The agent is `claude -p` with the Bash tool only,
+and the same prompt for every build: where `tb` is, `tb agent-guide`, the `tb open` line, and
+the task. The `tb` on its PATH is a wrapper that logs each call and its exit code before
+handing over to the build under test.
+
+A run passes on what the app saw, never on what the agent says: the click log
+(`?instrument=1`) of the last page load must hold the task's taps (an order, a count, a
+toggle left on, the last choice in a group). "Reported correctly" is separate: the agent's
+answer has the texts the app showed. Results go to `bench/results/agent-<time>.json`, every
+tb command of every run included, and a table per task prints the median and range.
+
+- **It spends real tokens.** Each run is a whole agent session, capped by `--max-budget-usd`
+  (2 by default), so the default 9 runs cost 18 USD at the very most. Start with
+  `--tasks journey --runs 1` to see what one run costs with your model.
+- **Results vary from run to run**: an agent does not take the same path twice, on the same
+  build either. Compare medians of several runs (3 at least, 5 is better) with the same
+  model, and read the ranges before believing a difference.
+- `tb open --app URL` only sets the session's app; finding out that `launchApp` opens it is
+  part of the job.
+
 ## Run it
 
 ```sh
