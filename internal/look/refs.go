@@ -126,12 +126,23 @@ func wordByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.IndexByte("_.-@", b) >= 0
 }
 
+var hashIDPattern = regexp.MustCompile(`^(\s*(?:- )?(\w+):\s+)#([\w.:/-]+)(\s*)$`)
+
+func hashID(line string) string {
+	m := hashIDPattern.FindStringSubmatch(line)
+	if m == nil || m[2] == "inputText" {
+		return line
+	}
+	return m[1] + fmt.Sprintf("{id: %s}", strconv.Quote(regexp.QuoteMeta(m[3]))) + m[4]
+}
+
 func ResolveRefs(text string, l *Listing, s *ui.Screen) (string, error) {
-	if !strings.Contains(text, "@") {
+	if !strings.ContainsAny(text, "@#") {
 		return text, nil
 	}
 	var out strings.Builder
 	for _, line := range strings.SplitAfter(text, "\n") {
+		line = hashID(line)
 		check := strings.Contains(line, "assert") || strings.Contains(line, "isible")
 		var b strings.Builder
 		inQuote := byte(0)

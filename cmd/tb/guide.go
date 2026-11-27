@@ -20,7 +20,7 @@ Explore an app:
                                   label. --json: the same as JSON, plus covered, offscreen,
                                   scroll (vertical/horizontal) and tappable per element
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
-                                  runs flow commands (refs allowed); prints ok/FAILED per command,
+                                  runs flow commands (@ref, or 'tapOn: #id' as look prints it); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks

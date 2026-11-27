@@ -310,3 +310,31 @@ func TestResolveRefsInsideWord(t *testing.T) {
 		t.Errorf("got %q, %v", got, err)
 	}
 }
+
+func TestResolveRefsTurnsAHashIDIntoAnIDSelector(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"tap", "tapOn: #logout", `tapOn: {id: "logout"}`},
+		{"list item", "- tapOn: #open_live\n- back\n", "- tapOn: {id: \"open_live\"}\n- back\n"},
+		{"assertion", "- assertVisible: #title", `- assertVisible: {id: "title"}`},
+		{"condition line", "- extendedWaitUntil:\n    visible: #title\n    timeout: 500", "- extendedWaitUntil:\n    visible: {id: \"title\"}\n    timeout: 500"},
+		{"dots and dashes", "tapOn: #row-3.name", `tapOn: {id: "row-3\\.name"}`},
+		{"a comment after a value stays", "- tapOn: Next #logout", "- tapOn: Next #logout"},
+		{"a comment with a space stays", "- tapOn: # logout", "- tapOn: # logout"},
+		{"a comment line stays", "#logout\n- back", "#logout\n- back"},
+		{"typed text stays", "- inputText: #logout", "- inputText: #logout"},
+		{"quoted stays", `- tapOn: "#logout"`, `- tapOn: "#logout"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ResolveRefs(c.in, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("ResolveRefs(%q) =\n%q\nwant\n%q", c.in, got, c.want)
+			}
+		})
+	}
+}
