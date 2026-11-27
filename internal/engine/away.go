@@ -188,6 +188,7 @@ func assertionFalse(err error, c *flow.Condition) error {
 	var nf *NotFound
 	if errors.As(err, &nf) {
 		nf.Msg = "Assertion is false: " + describeCondition(c)
+		nf.assertion = true
 	}
 	return err
 }

@@ -73,6 +73,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		var nf *NotFound
 		if errors.As(err, &nf) {
 			nf.Msg = "Assertion is false: " + sel.Describe() + " is visible"
+			nf.assertion = true
 		}
 		return "", err
 
@@ -87,7 +88,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		if !ok {
-			return "", failf("Assertion is false: %s is not visible", sel.Describe())
+			return "", assertionFalsef("%s is not visible", sel.Describe())
 		}
 		return "", nil
 
@@ -97,7 +98,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", assertionFalse(err, c.Cond)
 		}
 		if !ok {
-			return "", failf("Assertion is false: %s", describeCondition(c.Cond))
+			return "", assertionFalsef("%s", describeCondition(c.Cond))
 		}
 		return "", nil
 
@@ -115,7 +116,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", assertionFalse(err, c.Cond)
 		}
 		if !ok {
-			return "", failf("Assertion is false: %s", describeCondition(c.Cond))
+			return "", assertionFalsef("%s", describeCondition(c.Cond))
 		}
 		return "", nil
 
@@ -500,7 +501,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 				return "", err
 			}
 			if on != (c.Name == "assertDarkMode") {
-				return "", failf("Assertion is false: dark mode is %s", onOff(on))
+				return "", assertionFalsef("dark mode is %s", onOff(on))
 			}
 			return "", nil
 		}

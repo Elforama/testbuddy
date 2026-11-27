@@ -144,11 +144,16 @@ func New(drv driver.Driver, opts Options) *Runner {
 type FlowError struct {
 	Msg          string
 	stallChecked bool
+	assertion    bool
 }
 
 func (e *FlowError) Error() string { return e.Msg }
 
 func failf(format string, args ...any) error { return &FlowError{Msg: fmt.Sprintf(format, args...)} }
+
+func assertionFalsef(format string, args ...any) error {
+	return &FlowError{Msg: "Assertion is false: " + fmt.Sprintf(format, args...), assertion: true}
+}
 
 type NotFound struct {
 	FlowError
@@ -158,6 +163,7 @@ type NotFound struct {
 	left   bool
 	away   string
 	moved  bool
+	blind  bool
 }
 
 const (
@@ -170,23 +176,19 @@ const (
 func Reason(err error) string {
 	var nf *NotFound
 	var fe *FlowError
-	msg := ""
 	switch {
 	case errors.As(err, &nf):
-		if nf.moved || nf.left || nf.away != "" {
+		switch {
+		case nf.moved || nf.left:
 			return ReasonScreenChanged
+		case nf.assertion:
+			return ReasonAssertionFailed
+		case nf.blind:
+			return ReasonOther
 		}
-		msg = nf.Msg
-	case errors.As(err, &fe):
-		msg = fe.Msg
-	default:
-		return ReasonOther
-	}
-	if strings.HasPrefix(msg, "Assertion is false") {
-		return ReasonAssertionFailed
-	}
-	if nf != nil {
 		return ReasonNotFound
+	case errors.As(err, &fe) && fe.assertion:
+		return ReasonAssertionFailed
 	}
 	return ReasonOther
 }

@@ -25,7 +25,7 @@ func failDo(t *testing.T, commands string) (string, failedDo) {
 	t.Helper()
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
-	f.show(button("Log in", 100), item{id: "login", class: "android.widget.ImageButton", top: 200}, label("Welcome", 300))
+	f.show(button("Submit order", 100), item{id: "submit", class: "android.widget.ImageButton", top: 200}, label("Welcome", 300), button("Exit", 400))
 	addDev(s, f, "")
 	resp, _ := call(t, s.do, map[string]any{"commands": commands, "json": true}, t.TempDir())
 	if resp.OK || resp.Exit != 1 {
@@ -39,35 +39,64 @@ func failDo(t *testing.T, commands string) (string, failedDo) {
 }
 
 func TestDoFailureSuggestsDespiteTypoInText(t *testing.T) {
-	text, result := failDo(t, `- tapOn: "Logn in"`)
-	if !strings.Contains(text, `  similar: @1 Button "Log in"`) {
+	text, result := failDo(t, `- tapOn: "Sumbit order"`)
+	if !strings.Contains(text, `  similar: @1 Button "Submit order"`) {
 		t.Errorf("no suggestion for a typo:\n%s", text)
 	}
-	if result.Query != "Logn in" || len(result.Similar) == 0 || result.Similar[0].Label != "Log in" || result.Similar[0].Ref != 1 {
+	if result.Query != "Sumbit order" || len(result.Similar) == 0 || result.Similar[0].Label != "Submit order" || result.Similar[0].Ref != 1 {
 		t.Errorf("structured result: %+v", result)
 	}
 }
 
+func TestDoFailureDoesNotSuggestAnotherShortWord(t *testing.T) {
+	text, result := failDo(t, `- tapOn: Edit`)
+	if strings.Contains(text, "similar:") || len(result.Similar) != 0 || result.Query != "Edit" {
+		t.Errorf("Edit suggested something:\n%s\n%+v", text, result)
+	}
+}
+
+func TestDoFailureQueryIsTheTextOrElseTheID(t *testing.T) {
+	_, result := failDo(t, `- tapOn: {text: "Sumbit order", id: sumbit}`)
+	if result.Query != "Sumbit order" {
+		t.Errorf("query %q, want the text alone", result.Query)
+	}
+	_, result = failDo(t, `- tapOn: {id: sumbit}`)
+	if result.Query != "sumbit" {
+		t.Errorf("query %q, want the id", result.Query)
+	}
+}
+
+func TestDoFailureOfANestedOrMixedCondition(t *testing.T) {
+	text, result := failDo(t, "- runFlow:\n    commands:\n      - extendedWaitUntil: {visible: \"Sumbit order\", timeout: 100}")
+	if !strings.Contains(text, `  similar: @1 Button "Submit order"`) || result.Query != "Sumbit order" {
+		t.Errorf("no suggestion for a wait nested in runFlow:\n%s\n%+v", text, result)
+	}
+	text, result = failDo(t, `- extendedWaitUntil: {visible: "Submit order", notVisible: Welcome, timeout: 100}`)
+	if strings.Contains(text, "similar:") || result.Query != "" || len(result.Similar) != 0 {
+		t.Errorf("the visible half was found, yet it is the query:\n%s\n%+v", text, result)
+	}
+}
+
 func TestDoFailureSuggestsForIDSelector(t *testing.T) {
-	text, result := failDo(t, `- tapOn: {id: logn}`)
-	if !strings.Contains(text, "  similar: ") || !strings.Contains(text, "#login") {
+	text, result := failDo(t, `- tapOn: {id: sumbit}`)
+	if !strings.Contains(text, "  similar: ") || !strings.Contains(text, "#submit") {
 		t.Errorf("no suggestion for an id:\n%s", text)
 	}
 	found := false
 	for _, e := range result.Similar {
-		found = found || e.ID == "login"
+		found = found || e.ID == "submit"
 	}
-	if result.Query != "logn" || !found {
+	if result.Query != "sumbit" || !found {
 		t.Errorf("structured result: %+v", result)
 	}
 }
 
 func TestDoFailureSuggestsForFailedVisibleAssertion(t *testing.T) {
 	for _, commands := range []string{
-		`- extendedWaitUntil: {visible: "Logn in", timeout: 100}`,
-		`- extendedWaitUntil: {visible: {id: logn}, timeout: 100}`,
-		`- assertVisible: "Logn in"`,
-		`- assertVisible: {id: logn}`,
+		`- extendedWaitUntil: {visible: "Sumbit order", timeout: 100}`,
+		`- extendedWaitUntil: {visible: {id: sumbit}, timeout: 100}`,
+		`- assertVisible: "Sumbit order"`,
+		`- assertVisible: {id: sumbit}`,
 	} {
 		t.Run(commands, func(t *testing.T) {
 			text, result := failDo(t, commands)
@@ -83,8 +112,8 @@ func TestDoFailureSuggestsForFailedVisibleAssertion(t *testing.T) {
 
 func TestDoFailureReason(t *testing.T) {
 	cases := []struct{ commands, reason string }{
-		{"- inputText: a\n- tapOn: \"Logn in\"", "not_found"},
-		{"- inputText: a\n- tapOn: {id: logn}", "not_found"},
+		{"- inputText: a\n- tapOn: \"Sumbit order\"", "not_found"},
+		{"- inputText: a\n- tapOn: {id: sumbit}", "not_found"},
 		{"- inputText: a\n- assertVisible: Nope", "assertion_failed"},
 		{"- inputText: a\n- extendedWaitUntil: {visible: Nope, timeout: 100}", "assertion_failed"},
 		{"- inputText: a\n- assertNotVisible: Welcome", "assertion_failed"},

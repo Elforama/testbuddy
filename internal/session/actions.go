@@ -155,7 +155,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	scr, serr := readNow(ctx, d)
 	if serr == nil {
 		now := look.Build(scr, d.refs)
-		if query := missedQuery(runErr, cmds, idx-1); query != "" {
+		if query := missedQuery(runErr); query != "" {
 			sim := now.Similar(query)
 			result.Query, result.Similar = query, sim
 			if len(sim) > 0 {
@@ -184,18 +184,15 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	return resp
 }
 
-func missedQuery(runErr error, cmds []*flow.Command, failed int) string {
+func missedQuery(runErr error) string {
 	var nf *engine.NotFound
-	if errors.As(runErr, &nf) {
-		return strings.TrimSpace(nf.Query + " " + nf.ID)
-	}
-	if engine.Reason(runErr) != engine.ReasonAssertionFailed || failed < 0 || failed >= len(cmds) {
+	if !errors.As(runErr, &nf) {
 		return ""
 	}
-	if c := cmds[failed].Cond; c != nil && c.Visible != nil {
-		return strings.TrimSpace(c.Visible.Text + " " + c.Visible.ID)
+	if nf.Query != "" {
+		return nf.Query
 	}
-	return ""
+	return nf.ID
 }
 
 func splitItems(text string) ([]string, error) {

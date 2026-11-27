@@ -505,7 +505,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	away := r.awayWatch()
 	cannotCheck := func(s *ui.Screen) error {
 		return &NotFound{FlowError: FlowError{Msg: "Could not check that " + sel.Describe() + " is not visible"},
-			Screen: s, Query: sel.Text, ID: sel.ID, away: away.message()}
+			Screen: s, Query: sel.Text, ID: sel.ID, away: away.message(), blind: true}
 	}
 	for {
 		s, err := r.readUntil(ctx, deadline)
@@ -656,7 +656,10 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 		_, _, _, err = r.findWithChangeRead(ctx, sel, timeout, true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
-			return false, awayErr(nf, strict)
+			if strict {
+				return false, nf
+			}
+			return false, nil
 		}
 		if err != nil {
 			return false, err
